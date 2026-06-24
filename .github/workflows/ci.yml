@@ -14,24 +14,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Actions are pinned to tags here for readability. Per the portfolio
-      # SECURITY-AND-SUPPLY-CHAIN standard these are pinned to commit SHAs
-      # before the first tagged release; tracked in docs/RESPONSIBLE-TECH-AUDITS.md.
+      # supply-chain standard these are pinned to commit SHAs before the first
+      # tagged release; tracked in docs/RESPONSIBLE-TECH-AUDITS.md.
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-        with:
-          python-version: "3.11"
+      # Drive CI through the Makefile so it runs byte for byte the same path as
+      # `make verify` does locally.
       - name: Install
-        run: uv pip install --system -e ".[dev]"
-      - name: Lint
-        run: ruff check src tests
-      - name: Type-check
-        run: mypy
-      - name: Test
-        run: pytest
+        run: make install
+      - name: Verify (ruff, mypy --strict, pytest)
+        run: make verify
       - name: Eval report is current
         run: |
-          reconcile eval \
-            --config examples/intake-demo/recipe.toml \
-            --truth examples/intake-demo/ground_truth.json \
-            --out eval/report.md
+          make eval
           git diff --exit-code eval/report.md
