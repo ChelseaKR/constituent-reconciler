@@ -33,14 +33,18 @@ fixtures, and the mitigations.
 The strongest claims live here and are enforced as tests.
 
 * Deterministic offline default; the cloud seam is optional and policy-gated.
-* Under `--policy-pack dv`, PII never leaves the machine. Enforced by
-  `test_no_egress.py`.
-* Consent is a first-class field; the write step refuses, fail-closed, to emit
-  any field whose consent is absent, expired, or revoked. Enforced by
-  `test_consent_blocks_export.py`.
-* Exports under the DV pack are aggregate and suppression-aware.
-* Every write is recorded in an append-only provenance log with BLAKE2b content
-  hashing and an RFC 3161 timestamp.
+* Consent is a first-class field; under a consent-required policy the export
+  withholds any record without granted consent and records it by id and reason
+  only, never with field values. Enforced by `tests/test_consent.py` and the
+  DV-pack pipeline test in `tests/test_pipeline.py`.
+* Every write is recorded in an append-only, tamper-evident provenance log: a
+  BLAKE2b hash chain that `reconcile verify` checks. Timestamps come from a
+  pluggable authority (the local clock by default; RFC 3161 trusted timestamping
+  is the seam for production). Chain integrity and tamper detection are covered
+  by `tests/test_provenance.py`.
+* Under the DV pack there is no cloud egress path in v0.2, because the optional
+  extraction seam is not built yet; a non-egress test guards it when the seam
+  lands, alongside aggregate, suppression-aware exports.
 
 TODO: complete the data-flow map and the retention and destruction model per
 policy pack.

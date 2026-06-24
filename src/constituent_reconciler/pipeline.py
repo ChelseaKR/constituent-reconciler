@@ -10,13 +10,19 @@ without touching disk.
 from __future__ import annotations
 
 import csv
-from collections.abc import Iterable
+import os
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from constituent_reconciler import consent, decisions, matching
 from constituent_reconciler.config import Recipe
+from constituent_reconciler.connectors.base import Connector, WriteResult
+from constituent_reconciler.connectors.civicrm import CivicrmConfig, CivicrmConnector, Transport
+from constituent_reconciler.connectors.csv_out import CsvConnector
 from constituent_reconciler.models import GoldenRecord, Pair, Record, RunResult
 from constituent_reconciler.normalize import normalize_record
+from constituent_reconciler.provenance import ProvenanceLog, TimestampAuthority
 
 
 def read_records(
@@ -132,37 +138,9 @@ def run(
     )
 
 
-def write_outputs(result: RunResult, recipe: Recipe, out_dir: Path) -> dict[str, Path]:
-    """Write resolved records, the review queue, and any withheld records.
-
-    The consent gate runs here: when the policy requires consent, records without
-    it are written to ``withheld.csv`` with no field values, only ids and a
-    reason, so the withheld file itself leaks nothing.
-    """
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-    exportable, withheld = consent.partition_by_consent(
-        result.golden, require_consent=recipe.require_consent
-    )
-    paths: dict[str, Path] = {}
-
-    resolved_path = out_dir / "resolved.csv"
-    with resolved_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(["cluster_id", "primary", "members", "consent", *recipe.fields])
-        for record in _sorted_golden(exportable):
-            writer.writerow(
-                [
-                    record.cluster_id,
-                    record.primary,
-                    "|".join(record.members),
-                    "granted" if record.consent else "none",
-                    *(record.fields.get(f, "") for f in recipe.fields),
-                ]
-            )
-    paths["resolved"] = resolved_path
-
+def _write_review_queue(result: RunResult, recipe: Recipe, out_dir: Path) -> Path:
     review_path = out_dir / "review_queue.csv"
+    out_dir.mkdir(parents=True, exist_ok=True)
     with review_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         header = ["left", "right", "probability", "left_source", "right_source"]
@@ -174,31 +152,118 @@ def write_outputs(result: RunResult, recipe: Recipe, out_dir: Path) -> dict[str,
         ):
             left = result.records[pair.left]
             right = result.records[pair.right]
-            row = [
-                pair.left,
-                pair.right,
-                f"{pair.probability:.4f}",
-                left.source,
-                right.source,
-            ]
+            row = [pair.left, pair.right, f"{pair.probability:.4f}", left.source, right.source]
             for f in recipe.fields:
                 row += [left.raw.get(f, ""), right.raw.get(f, "")]
             writer.writerow(row)
-    paths["review_queue"] = review_path
-
-    if withheld:
-        withheld_path = out_dir / "withheld.csv"
-        with withheld_path.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.writer(handle)
-            writer.writerow(["cluster_id", "members", "reason"])
-            for record in _sorted_golden(withheld):
-                writer.writerow(
-                    [record.cluster_id, "|".join(record.members), "no-consent"]
-                )
-        paths["withheld"] = withheld_path
-
-    return paths
+    return review_path
 
 
-def _sorted_golden(golden: Iterable[GoldenRecord]) -> list[GoldenRecord]:
-    return sorted(golden, key=lambda record: record.cluster_id)
+def _write_withheld(withheld: Sequence[GoldenRecord], out_dir: Path) -> Path:
+    withheld_path = out_dir / "withheld.csv"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with withheld_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["cluster_id", "members", "reason"])
+        for record in sorted(withheld, key=lambda r: r.cluster_id):
+            writer.writerow([record.cluster_id, "|".join(record.members), "no-consent"])
+    return withheld_path
+
+
+def build_connector(
+    recipe: Recipe, out_dir: Path, *, transport: Transport | None = None
+) -> Connector:
+    """Construct the connector named by the recipe. Secrets come from the env."""
+
+    output = recipe.output
+    if output.connector == "csv":
+        return CsvConnector(out_dir / "resolved.csv")
+    if output.connector == "civicrm":
+        config = CivicrmConfig(
+            endpoint=output.endpoint,
+            api_key=os.environ.get(output.auth_env, ""),
+            auth_header=output.auth_header,
+            auth_scheme=output.auth_scheme,
+            external_id_field=output.external_id_field,
+        )
+        return CivicrmConnector(config, transport=transport)
+    raise ValueError(f"unknown output connector: {output.connector!r}")
+
+
+@dataclass(frozen=True)
+class ExportSummary:
+    write_results: tuple[WriteResult, ...]
+    withheld: tuple[GoldenRecord, ...]
+    review_path: Path
+    withheld_path: Path | None
+    provenance_path: Path | None
+    logged: int
+
+    def counts(self) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for result in self.write_results:
+            out[result.action] = out.get(result.action, 0) + 1
+        return out
+
+    def describe(self) -> str:
+        counts = self.counts()
+        if not counts:
+            return "no records to write"
+        return ", ".join(f"{action}: {n}" for action, n in sorted(counts.items()))
+
+
+def export(
+    result: RunResult,
+    recipe: Recipe,
+    *,
+    out_dir: Path,
+    dry_run: bool = False,
+    authority: TimestampAuthority | None = None,
+    transport: Transport | None = None,
+) -> ExportSummary:
+    """Write resolved records through the configured connector.
+
+    Consent is enforced before the connector is touched: records without granted
+    consent (under a consent-required policy) are withheld and never handed to a
+    connector. Each real write is recorded in the append-only provenance log. A
+    dry run performs no writes and logs nothing.
+    """
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    exportable, withheld = consent.partition_by_consent(
+        result.golden, require_consent=recipe.require_consent
+    )
+    by_id = {record.cluster_id: record for record in exportable}
+
+    connector = build_connector(recipe, out_dir, transport=transport)
+    write_results = connector.write_all(exportable, recipe.fields, dry_run=dry_run)
+
+    provenance_path = out_dir / "provenance.jsonl"
+    logged = 0
+    if not dry_run:
+        log = ProvenanceLog(provenance_path, authority)
+        for write_result in write_results:
+            if not write_result.is_write:
+                continue
+            record = by_id[write_result.record_id]
+            log.append(
+                action=write_result.action,
+                record_id=write_result.record_id,
+                members=record.members,
+                consent=record.consent,
+                payload=write_result.payload or {},
+                external_id=write_result.external_id,
+            )
+            logged += 1
+
+    review_path = _write_review_queue(result, recipe, out_dir)
+    withheld_path = _write_withheld(withheld, out_dir) if withheld else None
+
+    return ExportSummary(
+        write_results=tuple(write_results),
+        withheld=tuple(withheld),
+        review_path=review_path,
+        withheld_path=withheld_path,
+        provenance_path=provenance_path if (not dry_run and logged) else None,
+        logged=logged,
+    )

@@ -15,9 +15,12 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from constituent_reconciler import __version__, pipeline
-from constituent_reconciler.config import load_recipe
+from constituent_reconciler.config import Recipe, load_recipe
+from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.consent import partition_by_consent
 from constituent_reconciler.evaluate import evaluate
+from constituent_reconciler.pipeline import ExportSummary
+from constituent_reconciler.provenance import verify_log
 from constituent_reconciler.report import render_eval_markdown, render_run_summary
 
 
@@ -32,19 +35,29 @@ def _load_pairs(path: Path, keys: Sequence[str]) -> list[frozenset[str]]:
     return pairs
 
 
+def _print_export(recipe: Recipe, summary: ExportSummary, *, dry_run: bool) -> None:
+    mode = "dry run, nothing written" if dry_run else "wrote"
+    print(f"\nconnector '{recipe.output.connector}' ({mode}): {summary.describe()}")
+    print(f"  review queue: {summary.review_path}")
+    if summary.withheld_path:
+        print(f"  withheld:     {summary.withheld_path}")
+    if summary.provenance_path:
+        print(f"  provenance:   {summary.provenance_path} ({summary.logged} entries)")
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     recipe = load_recipe(args.config)
     result = pipeline.run(recipe)
     _, withheld = partition_by_consent(result.golden, require_consent=recipe.require_consent)
     print(render_run_summary(result, withheld=len(withheld)))
-    if args.dry_run:
-        print("\ndry run: no files written")
-        return 0
-    out_dir = Path(args.out)
-    paths = pipeline.write_outputs(result, recipe, out_dir)
-    print("\nwrote:")
-    for label, path in paths.items():
-        print(f"  {label}: {path}")
+    try:
+        summary = pipeline.export(
+            result, recipe, out_dir=Path(args.out), dry_run=args.dry_run
+        )
+    except ConnectorError as error:
+        print(f"\nconnector error: {error}", file=sys.stderr)
+        return 2
+    _print_export(recipe, summary, dry_run=args.dry_run)
     return 0
 
 
@@ -73,11 +86,19 @@ def _cmd_apply(args: argparse.Namespace) -> int:
     result = pipeline.run(recipe, force_auto=force_auto, force_drop=force_drop)
     _, withheld = partition_by_consent(result.golden, require_consent=recipe.require_consent)
     print(render_run_summary(result, withheld=len(withheld)))
-    paths = pipeline.write_outputs(result, recipe, Path(args.out))
-    print("\nwrote:")
-    for label, path in paths.items():
-        print(f"  {label}: {path}")
+    try:
+        summary = pipeline.export(result, recipe, out_dir=Path(args.out), dry_run=False)
+    except ConnectorError as error:
+        print(f"\nconnector error: {error}", file=sys.stderr)
+        return 2
+    _print_export(recipe, summary, dry_run=False)
     return 0
+
+
+def _cmd_verify(args: argparse.Namespace) -> int:
+    ok, message = verify_log(Path(args.provenance))
+    print(message)
+    return 0 if ok else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -108,6 +129,10 @@ def build_parser() -> argparse.ArgumentParser:
     apply_parser.add_argument("--decisions", required=True, help="decisions JSON")
     apply_parser.add_argument("--out", default="out", help="output directory")
     apply_parser.set_defaults(func=_cmd_apply)
+
+    verify_parser = sub.add_parser("verify", help="check a provenance log's hash chain")
+    verify_parser.add_argument("--provenance", required=True, help="path to provenance.jsonl")
+    verify_parser.set_defaults(func=_cmd_verify)
 
     return parser
 
