@@ -1,0 +1,17 @@
+constituent-reconciler
+Copyright 2026 Chelsea Kelly-Reif
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This is an independent open-source project. It is not affiliated with, endorsed
+by, or sponsored by any nonprofit, vendor, funder, or government agency named in
+its documentation. References to case-management systems, data standards, and
+other tools are descriptive only.
+
+The matching step is built on Splink (https://github.com/moj-analytical-services/splink),
+which is distributed under its own license. This project configures and wraps
+Splink; it does not vendor or modify it.
+
+Nothing here is legal advice. An organization deploying this tool, and the DV
+policy pack in particular, is responsible for its own review against its own
+legal and contractual obligations.

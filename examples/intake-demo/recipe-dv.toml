@@ -1,0 +1,30 @@
+# The same demo data under the DV (VAWA/FVPSA) policy pack. The pack turns on
+# consent enforcement: a resolved record whose survivor does not carry granted
+# consent is withheld from the export and recorded, without field values, in
+# withheld.csv. Record N009 (consent: revoked) is withheld under this recipe and
+# exported under recipe.toml, which is the difference the pack makes.
+#
+#   reconcile run --config recipe-dv.toml --out out-dv
+
+[input]
+existing = "existing.csv"
+incoming = "incoming.csv"
+id_column = "id"
+
+[mapping]
+first_name = "First Name"
+last_name = "Last Name"
+dob = "DOB"
+email = "Email"
+phone = "Phone"
+
+[consent]
+column = "Consent"
+
+[thresholds]
+prior = 0.01
+auto = 0.97
+review = 0.80
+
+[policy]
+pack = "dv"
