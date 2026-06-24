@@ -1,0 +1,41 @@
+# Write resolved records back into a CiviCRM instance via API v4.
+#
+# The API key is read from the environment, never stored in this file. Set it
+# first, then run:
+#
+#   CIVICRM_API_KEY=your-key reconcile run --config recipe-civicrm.toml --out out
+#
+# The write is an upsert keyed on external_identifier (the cluster id): a second
+# run updates the same contacts instead of creating duplicates. Use --dry-run to
+# see what would be written without contacting the server.
+
+[input]
+existing = "existing.csv"
+incoming = "incoming.csv"
+id_column = "id"
+
+[mapping]
+first_name = "First Name"
+last_name = "Last Name"
+dob = "DOB"
+email = "Email"
+phone = "Phone"
+
+[consent]
+column = "Consent"
+
+[thresholds]
+prior = 0.01
+auto = 0.97
+review = 0.80
+
+[policy]
+pack = "default"
+
+[output]
+connector = "civicrm"
+endpoint = "https://your-civicrm.example.org/civicrm/ajax/api4"
+auth_env = "CIVICRM_API_KEY"
+auth_header = "Authorization"
+auth_scheme = "Bearer"
+external_id_field = "external_identifier"

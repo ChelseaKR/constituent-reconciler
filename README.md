@@ -6,12 +6,12 @@ system a nonprofit already runs. A non-technical reviewer approves, corrects,
 or rejects every uncertain match before anything is written. Nothing merges
 silently.
 
-> **Status: v0.1, early but working.** The resolve-and-review core runs and is
-> tested: CSV in, deduplicated records and a review queue out, with a committed
-> eval ([eval/report.md](eval/report.md)). Document extraction, address
-> normalization, and CRM write-back are not built yet. Track progress in
-> [docs/ROADMAP.md](docs/ROADMAP.md); the build is specified in
-> [CLAUDE.md](CLAUDE.md).
+> **Status: v0.2, early but working.** The pipeline runs and is tested:
+> CSV in, deduplicated records out, with a human review queue, a committed eval
+> ([eval/report.md](eval/report.md)), CiviCRM write-back, and a tamper-evident
+> provenance log. Document extraction and address normalization are not built
+> yet. Track progress in [docs/ROADMAP.md](docs/ROADMAP.md); the build is
+> specified in [CLAUDE.md](CLAUDE.md).
 
 ## The problem
 
@@ -136,6 +136,30 @@ human at the auto or review level. The gated metric is the false-merge rate
 because a wrong merge is the expensive, sometimes irreversible error; a missed
 match only leaves a duplicate.
 
+### Writing back to a case system
+
+By default the resolved records are written to `out/resolved.csv`. To write them
+into a running CiviCRM instance instead, select the connector in the recipe's
+`[output]` section and pass the API key through the environment:
+
+```sh
+CIVICRM_API_KEY=your-key reconcile run \
+  --config examples/intake-demo/recipe-civicrm.toml --out out
+```
+
+The write is an upsert keyed on an external identifier, so a second run updates
+the same contacts rather than creating duplicates. Use `--dry-run` to see what
+would be written without contacting the server.
+
+Every write is recorded in an append-only, tamper-evident provenance log
+(`out/provenance.jsonl`): each entry carries a BLAKE2b hash of the written fields
+and the hash of the previous entry, so altering any past entry breaks the chain.
+Check it at any time:
+
+```sh
+reconcile verify --provenance out/provenance.jsonl
+```
+
 ## What it does not do
 
 * It is **not a CRM or a system of record.** It writes into the systems an
@@ -177,9 +201,10 @@ conventions, and the build plan, and it states the hard guardrails (fail-closed
 gates, the privacy invariants that are merge-blocking tests, the rule against
 reimplementing the matcher). Then read [docs/ROADMAP.md](docs/ROADMAP.md) and
 build phase by phase. A phase is done when its acceptance criteria and its
-merge-blocking metrics pass, not before. v0.1 (resolve and review, with a
-committed eval on seeded fixtures) is implemented and green. The next target is
-v0.2: a CiviCRM write-back connector and the append-only provenance log.
+merge-blocking metrics pass, not before. v0.1 (resolve and review) and v0.2
+(CiviCRM write-back and the append-only provenance log) are implemented and
+green. The next target is v0.3: the offline document-extraction seam with
+source-span pointers surfaced in the review queue.
 
 ## License
 

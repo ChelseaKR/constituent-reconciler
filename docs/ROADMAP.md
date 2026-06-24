@@ -45,16 +45,24 @@ The smallest version that ships the differentiator.
   the eval report shows false-merge and missed-match rates with Wilson
   confidence intervals, and the false-merge metric is a merge-blocking gate.
 
-## v0.2.0 — One real connector and provenance
+## v0.2.0 — CiviCRM write-back and provenance (shipped)
 
-* CiviCRM write-back first, because it is fully open, self-hostable, and has no
-  vendor gatekeeping for a clean demo.
-* Append-only provenance log with BLAKE2b content hashing and RFC 3161
-  timestamps.
-* Consent as a first-class field; the write step refuses, fail-closed, to emit
-  a field whose consent is absent, expired, or revoked.
-* Definition of done: a 90-second screencast of messy input becoming records
-  that appear in a running CiviCRM instance, with a provenance trail.
+* CiviCRM write-back via API v4, as an upsert keyed on an external identifier so
+  a re-run updates contacts rather than duplicating them. Built on an injected
+  transport, so request construction and upsert logic are tested without a live
+  server. Chosen first because CiviCRM is fully open and self-hostable.
+* A connector interface (`connectors/`) with the CSV writer refactored onto it,
+  so destinations stay isolated and a new one is a single module.
+* Append-only, tamper-evident provenance log: each write records a BLAKE2b hash
+  of the written fields and the previous entry's hash, forming a chain that
+  `reconcile verify` checks. Time comes from a pluggable timestamp authority; the
+  default is the local clock, and an RFC 3161 trusted-timestamp authority is the
+  seam a production deployment plugs in.
+* The consent gate runs before any connector is touched, so non-consented
+  records are withheld and never handed to a destination.
+* Still open: a recorded demo of messy input landing in a running CiviCRM
+  instance, and email and phone written through dedicated CiviCRM entities
+  rather than the API v4 join-field shorthand.
 
 ## v0.3.0 — The extraction seam
 

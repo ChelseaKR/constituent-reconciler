@@ -22,6 +22,22 @@ _CONSENT_REQUIRED_PACKS: frozenset[str] = frozenset({"dv", "hipaa"})
 
 
 @dataclass(frozen=True)
+class OutputConfig:
+    """Where resolved records are written. Secrets are never stored here.
+
+    For the CiviCRM connector, ``auth_env`` names the environment variable that
+    holds the API key; the key itself is read at write time, not from the recipe.
+    """
+
+    connector: str = "csv"
+    endpoint: str = ""
+    auth_env: str = "CIVICRM_API_KEY"
+    auth_header: str = "Authorization"
+    auth_scheme: str = "Bearer"
+    external_id_field: str = "external_identifier"
+
+
+@dataclass(frozen=True)
 class Recipe:
     incoming: Path
     mapping: dict[str, str]
@@ -34,6 +50,7 @@ class Recipe:
     auto_threshold: float = defaults.DEFAULT_AUTO_THRESHOLD
     review_threshold: float = defaults.DEFAULT_REVIEW_THRESHOLD
     fields: tuple[str, ...] = field(default_factory=tuple)
+    output: OutputConfig = field(default_factory=OutputConfig)
 
 
 def _resolve(base: Path, value: str) -> Path:
@@ -52,6 +69,7 @@ def load_recipe(path: str | Path) -> Recipe:
     consent_section = data.get("consent", {})
     thresholds_section = data.get("thresholds", {})
     policy_section = data.get("policy", {})
+    output_section = data.get("output", {})
 
     if "incoming" not in input_section:
         raise ValueError("recipe [input] must set 'incoming'")
@@ -75,6 +93,15 @@ def load_recipe(path: str | Path) -> Recipe:
     existing_value = input_section.get("existing")
     existing = _resolve(base, str(existing_value)) if existing_value else None
 
+    output = OutputConfig(
+        connector=str(output_section.get("connector", "csv")),
+        endpoint=str(output_section.get("endpoint", "")),
+        auth_env=str(output_section.get("auth_env", "CIVICRM_API_KEY")),
+        auth_header=str(output_section.get("auth_header", "Authorization")),
+        auth_scheme=str(output_section.get("auth_scheme", "Bearer")),
+        external_id_field=str(output_section.get("external_id_field", "external_identifier")),
+    )
+
     return Recipe(
         incoming=_resolve(base, str(input_section["incoming"])),
         mapping=mapping,
@@ -89,4 +116,5 @@ def load_recipe(path: str | Path) -> Recipe:
             thresholds_section.get("review", defaults.DEFAULT_REVIEW_THRESHOLD)
         ),
         fields=active_fields,
+        output=output,
     )

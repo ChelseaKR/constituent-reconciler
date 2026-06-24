@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from constituent_reconciler import pipeline
-from constituent_reconciler.config import load_recipe
+from constituent_reconciler.config import OutputConfig, load_recipe
 from constituent_reconciler.consent import partition_by_consent
 from constituent_reconciler.evaluate import evaluate
+from constituent_reconciler.provenance import verify_log
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "intake-demo"
 
@@ -65,12 +67,54 @@ def test_apply_approved_review_pair_merges_cluster() -> None:
     assert merged
 
 
-def test_run_writes_outputs(tmp_path: Path) -> None:
+def test_export_writes_csv_review_queue_and_provenance(tmp_path: Path) -> None:
     recipe = load_recipe(EXAMPLES / "recipe.toml")
     result = pipeline.run(recipe)
-    paths = pipeline.write_outputs(result, recipe, tmp_path)
-    assert paths["resolved"].exists()
-    assert paths["review_queue"].exists()
-    resolved_text = paths["resolved"].read_text(encoding="utf-8")
+    summary = pipeline.export(result, recipe, out_dir=tmp_path)
+    resolved = tmp_path / "resolved.csv"
+    assert resolved.exists()
+    assert summary.review_path.exists()
     # 27 records minus 6 merges leaves 21 resolved rows plus the header.
-    assert len(resolved_text.strip().splitlines()) == 22
+    assert len(resolved.read_text(encoding="utf-8").strip().splitlines()) == 22
+    # Every exported record produced one provenance entry, and the chain verifies.
+    assert summary.logged == 21
+    assert summary.provenance_path is not None
+    ok, _ = verify_log(summary.provenance_path)
+    assert ok
+
+
+class _RoutingTransport:
+    """Fake CiviCRM transport: contacts never pre-exist, so every write creates."""
+
+    def __init__(self) -> None:
+        self.created = 0
+
+    def post(self, url: str, *, headers: dict[str, str], body: bytes) -> tuple[int, bytes]:
+        if url.endswith("/get"):
+            return 200, json.dumps({"values": []}).encode("utf-8")
+        if url.endswith("/create"):
+            self.created += 1
+            return 200, json.dumps({"values": [{"id": self.created}]}).encode("utf-8")
+        return 200, json.dumps({"values": [{"id": 0}]}).encode("utf-8")
+
+
+def test_export_via_civicrm_creates_and_logs_provenance(tmp_path: Path) -> None:
+    import os
+
+    os.environ["CIVICRM_API_KEY"] = "test-key"
+    try:
+        recipe = replace(
+            load_recipe(EXAMPLES / "recipe.toml"),
+            output=OutputConfig(connector="civicrm", endpoint="https://x.example/api4"),
+        )
+        result = pipeline.run(recipe)
+        summary = pipeline.export(
+            result, recipe, out_dir=tmp_path, transport=_RoutingTransport()
+        )
+        # Default policy exports all 21 resolved records; none pre-exist, so all create.
+        assert summary.counts().get("created") == 21
+        assert summary.provenance_path is not None
+        ok, _ = verify_log(summary.provenance_path)
+        assert ok
+    finally:
+        del os.environ["CIVICRM_API_KEY"]
