@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "constituent-reconciler"
-version = "0.1.0"
+version = "0.2.0"
 description = "Offline-first pipeline that resolves and deduplicates nonprofit constituent records with a human review gate."
 readme = "README.md"
 requires-python = ">=3.11"
