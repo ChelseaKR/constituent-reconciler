@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "constituent-reconciler"
-version = "0.2.0"
+version = "0.3.0"
 description = "Offline-first pipeline that resolves and deduplicates nonprofit constituent records with a human review gate."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -33,7 +33,8 @@ dependencies = [
 reconcile = "constituent_reconciler.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "mypy>=1.8", "ruff>=0.5"]
+extract = ["pdfplumber>=0.11"]
+dev = ["pytest>=8", "mypy>=1.8", "ruff>=0.5", "pdfplumber>=0.11"]
 
 [project.urls]
 Homepage = "https://github.com/ChelseaKR/constituent-reconciler"
@@ -55,7 +56,7 @@ strict = true
 files = ["src", "tests"]
 
 [[tool.mypy.overrides]]
-module = ["splink.*", "pandas.*", "duckdb.*"]
+module = ["splink.*", "pandas.*", "duckdb.*", "pdfplumber.*", "boto3.*", "botocore.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

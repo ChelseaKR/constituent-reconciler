@@ -16,9 +16,26 @@ from constituent_reconciler import defaults
 from constituent_reconciler.models import CANONICAL_FIELDS
 
 # Policy packs that flip consent enforcement on by default. The DV pack also
-# forbids the cloud extraction seam, which v0.1 does not ship, so here it acts
-# through consent enforcement; the seam restriction lands with extraction.
+# forbids the cloud extraction seam; make_seam() enforces that independently.
 _CONSENT_REQUIRED_PACKS: frozenset[str] = frozenset({"dv", "hipaa"})
+
+
+@dataclass(frozen=True)
+class ExtractConfig:
+    """Document extraction settings, loaded from the recipe's [extract] section.
+
+    ``backend`` selects which extractor runs:
+      - ``"none"`` (default): no extraction; only CSV sources are read.
+      - ``"pdfplumber"``: offline extraction for digitally-created PDFs.
+      - ``"bedrock"``: route low-confidence pages to Claude on Bedrock (cloud
+        call; forbidden under DV and HIPAA packs regardless of this setting).
+
+    ``confidence_threshold`` is the page-level score below which a page is
+    considered low-confidence and offered to the cloud seam if one is active.
+    """
+
+    backend: str = "none"
+    confidence_threshold: float = 0.5
 
 
 @dataclass(frozen=True)
@@ -50,6 +67,7 @@ class Recipe:
     auto_threshold: float = defaults.DEFAULT_AUTO_THRESHOLD
     review_threshold: float = defaults.DEFAULT_REVIEW_THRESHOLD
     fields: tuple[str, ...] = field(default_factory=tuple)
+    extract: ExtractConfig = field(default_factory=ExtractConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
 
 
@@ -69,6 +87,7 @@ def load_recipe(path: str | Path) -> Recipe:
     consent_section = data.get("consent", {})
     thresholds_section = data.get("thresholds", {})
     policy_section = data.get("policy", {})
+    extract_section = data.get("extract", {})
     output_section = data.get("output", {})
 
     if "incoming" not in input_section:
@@ -93,6 +112,11 @@ def load_recipe(path: str | Path) -> Recipe:
     existing_value = input_section.get("existing")
     existing = _resolve(base, str(existing_value)) if existing_value else None
 
+    extract = ExtractConfig(
+        backend=str(extract_section.get("backend", "none")),
+        confidence_threshold=float(extract_section.get("confidence_threshold", 0.5)),
+    )
+
     output = OutputConfig(
         connector=str(output_section.get("connector", "csv")),
         endpoint=str(output_section.get("endpoint", "")),
@@ -116,5 +140,6 @@ def load_recipe(path: str | Path) -> Recipe:
             thresholds_section.get("review", defaults.DEFAULT_REVIEW_THRESHOLD)
         ),
         fields=active_fields,
+        extract=extract,
         output=output,
     )

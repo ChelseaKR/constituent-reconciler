@@ -64,14 +64,23 @@ The smallest version that ships the differentiator.
   instance, and email and phone written through dedicated CiviCRM entities
   rather than the API v4 join-field shorthand.
 
-## v0.3.0 — The extraction seam
+## v0.3.0 — The extraction seam (shipped)
 
-* Offline document extraction (a parser such as Docling or pdfplumber) with
-  source-span pointers surfaced in the review UI.
-* Optional cloud seam (Claude on Bedrock) for low-confidence pages only, gated
-  by the active policy pack.
-* If the extraction step uses an LLM judge for field confidence, calibrate it
-  against human labels with Cohen's kappa and fail closed on drift.
+* Offline document extraction (pdfplumber) with source-span pointers surfaced
+  in the review queue CSV. Each extracted field carries the PDF filename, page
+  number, and bounding box so a reviewer can navigate back to the source.
+* Policy-gated cloud seam: `CloudSeam` protocol with `NoOpSeam` (default) and
+  `BedrockSeam` (the documented extension point for deployers with AWS
+  credentials). Under DV and HIPAA policy packs the seam is always `NoOpSeam`
+  at construction time; PII cannot egress regardless of recipe settings.
+* Folder-based ingestion: `incoming` in the recipe can now point to a directory;
+  the pipeline walks it and routes `.csv` files through the structured reader and
+  `.pdf` files through the extractor.
+* `cohen_kappa()` in `evaluate.py` is the calibration seam for when an LLM
+  extraction judge is wired in and its confidence scores are compared against
+  human-labeled field accuracy.
+* Still open: the full `BedrockSeam.refine()` implementation (page-to-image
+  conversion and response parser), and the WCAG 2.2 AA web review UI.
 
 ## v0.4.0 — Address normalization
 

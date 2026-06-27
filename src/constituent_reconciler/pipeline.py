@@ -20,7 +20,7 @@ from constituent_reconciler.config import Recipe
 from constituent_reconciler.connectors.base import Connector, WriteResult
 from constituent_reconciler.connectors.civicrm import CivicrmConfig, CivicrmConnector, Transport
 from constituent_reconciler.connectors.csv_out import CsvConnector
-from constituent_reconciler.models import GoldenRecord, Pair, Record, RunResult
+from constituent_reconciler.models import GoldenRecord, Pair, Record, RunResult, SourceSpan
 from constituent_reconciler.normalize import normalize_record
 from constituent_reconciler.provenance import ProvenanceLog, TimestampAuthority
 
@@ -62,6 +62,115 @@ def read_records(
     return records
 
 
+def read_pdf_records(
+    path: Path,
+    source: str,
+    *,
+    recipe: Recipe,
+    id_prefix: str,
+    _start_index: int = 1,
+) -> list[Record]:
+    """Extract records from a PDF, routing low-confidence pages through the seam.
+
+    Each page that yields at least a first_name or last_name becomes one Record.
+    Pages that produce nothing useful are skipped. Low-confidence pages are
+    offered to the cloud seam when the policy pack allows it; under DV and HIPAA
+    packs the seam is always a NoOp regardless of the recipe's backend setting.
+    """
+    from constituent_reconciler.extract.pdf import PdfplumberExtractor
+    from constituent_reconciler.extract.seam import make_seam
+
+    extractor = PdfplumberExtractor()
+    seam = make_seam(recipe.policy_pack, recipe.extract.backend)
+    extraction = extractor.extract(path)
+
+    records: list[Record] = []
+    for page in extraction.pages:
+        page_fields = list(page.fields)
+
+        if page.confidence < recipe.extract.confidence_threshold and seam.is_enabled():
+            refined = seam.refine(path, page.page_num)
+            if refined:
+                page_fields = refined
+
+        raw: dict[str, str] = {}
+        spans: dict[str, SourceSpan] = {}
+        for ef in page_fields:
+            if ef.field_name in recipe.mapping and ef.value:
+                raw[ef.field_name] = ef.value
+                if ef.span is not None:
+                    spans[ef.field_name] = ef.span
+
+        if not raw.get("first_name") and not raw.get("last_name"):
+            continue
+
+        unique_id = f"{id_prefix}{_start_index + len(records):04d}"
+        records.append(
+            Record(
+                unique_id=unique_id,
+                source=source,
+                raw=raw,
+                spans=spans,
+            )
+        )
+
+    return records
+
+
+def _ingest_source(
+    path: Path,
+    source: str,
+    *,
+    recipe: Recipe,
+    id_prefix: str,
+    _start_index: int = 1,
+) -> list[Record]:
+    """Route a source path to the right reader based on file type.
+
+    A directory is walked; each .csv is read as a structured source and each
+    .pdf is run through the extractor. A single file is routed by extension.
+    Files with other extensions are silently skipped inside a directory;
+    passed as a direct argument they fall through to the CSV reader.
+    """
+    if path.is_dir():
+        records: list[Record] = []
+        for child in sorted(path.iterdir()):
+            suffix = child.suffix.lower()
+            if suffix == ".csv":
+                chunk = read_records(
+                    child,
+                    source,
+                    mapping=recipe.mapping,
+                    id_column=recipe.id_column,
+                    consent_column=recipe.consent_column,
+                    id_prefix=id_prefix,
+                )
+                records += chunk
+            elif suffix == ".pdf" and recipe.extract.backend != "none":
+                chunk = read_pdf_records(
+                    child,
+                    source,
+                    recipe=recipe,
+                    id_prefix=id_prefix,
+                    _start_index=_start_index + len(records),
+                )
+                records += chunk
+        return records
+    elif path.suffix.lower() == ".pdf" and recipe.extract.backend != "none":
+        return read_pdf_records(
+            path, source, recipe=recipe, id_prefix=id_prefix, _start_index=_start_index
+        )
+    else:
+        return read_records(
+            path,
+            source,
+            mapping=recipe.mapping,
+            id_column=recipe.id_column,
+            consent_column=recipe.consent_column,
+            id_prefix=id_prefix,
+        )
+
+
 def _apply_overrides(
     pairs: list[Pair],
     force_auto: frozenset[frozenset[str]],
@@ -98,21 +207,18 @@ def run(
 
     raw_records: list[Record] = []
     if recipe.existing is not None:
-        raw_records += read_records(
+        raw_records += _ingest_source(
             recipe.existing,
             "existing",
-            mapping=recipe.mapping,
-            id_column=recipe.id_column,
-            consent_column=recipe.consent_column,
+            recipe=recipe,
             id_prefix="E",
         )
-    raw_records += read_records(
+    raw_records += _ingest_source(
         recipe.incoming,
         "incoming",
-        mapping=recipe.mapping,
-        id_column=recipe.id_column,
-        consent_column=recipe.consent_column,
+        recipe=recipe,
         id_prefix="N",
+        _start_index=len(raw_records) + 1,
     )
 
     records = {r.unique_id: normalize_record(r, recipe.fields) for r in raw_records}
@@ -141,11 +247,15 @@ def run(
 def _write_review_queue(result: RunResult, recipe: Recipe, out_dir: Path) -> Path:
     review_path = out_dir / "review_queue.csv"
     out_dir.mkdir(parents=True, exist_ok=True)
+    has_spans = any(record.spans for record in result.records.values())
     with review_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         header = ["left", "right", "probability", "left_source", "right_source"]
         for f in recipe.fields:
             header += [f"{f}_left", f"{f}_right"]
+        if has_spans:
+            for f in recipe.fields:
+                header += [f"{f}_left_span", f"{f}_right_span"]
         writer.writerow(header)
         for pair in sorted(
             result.review_pairs, key=lambda p: (-p.probability, p.left, p.right)
@@ -155,6 +265,14 @@ def _write_review_queue(result: RunResult, recipe: Recipe, out_dir: Path) -> Pat
             row = [pair.left, pair.right, f"{pair.probability:.4f}", left.source, right.source]
             for f in recipe.fields:
                 row += [left.raw.get(f, ""), right.raw.get(f, "")]
+            if has_spans:
+                for f in recipe.fields:
+                    left_span = left.spans.get(f)
+                    right_span = right.spans.get(f)
+                    row += [
+                        str(left_span) if left_span else "",
+                        str(right_span) if right_span else "",
+                    ]
             writer.writerow(row)
     return review_path
 

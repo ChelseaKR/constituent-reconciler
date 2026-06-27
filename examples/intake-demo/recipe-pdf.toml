@@ -1,0 +1,42 @@
+# recipe-pdf.toml — example recipe that reads a folder of mixed PDFs and CSVs.
+#
+# Usage:
+#   reconcile run --config examples/intake-demo/recipe-pdf.toml --out out
+#
+# Requires: pip install 'constituent-reconciler[extract]'
+#
+# The [extract] section enables pdfplumber for offline PDF extraction. With
+# backend = "pdfplumber", the pipeline accepts a directory as `incoming` and
+# routes .csv files through the structured reader and .pdf files through the
+# extractor. Pages with fewer than 5 words or garbled-looking text (avg word >
+# 15 chars) score below 0.5 and are candidates for the cloud seam, but the
+# seam is NoOp by default. Set backend = "bedrock" to enable the Claude on
+# Bedrock seam for low-confidence pages; under policy pack = "dv" the cloud
+# seam is always disabled regardless.
+
+[input]
+existing = "existing.csv"
+incoming = "incoming.csv"       # replace with a folder path to mix PDFs and CSVs
+id_column = "id"
+
+[mapping]
+first_name = "first"
+last_name  = "last"
+dob        = "dob"
+email      = "email"
+phone      = "phone"
+
+[extract]
+backend              = "pdfplumber"
+confidence_threshold = 0.5
+
+[consent]
+column  = "consent"
+
+[thresholds]
+prior  = 0.01
+auto   = 0.97
+review = 0.80
+
+[output]
+connector = "csv"

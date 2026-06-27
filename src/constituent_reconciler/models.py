@@ -10,6 +10,29 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+
+@dataclass(frozen=True)
+class SourceSpan:
+    """Location of an extracted value within its source document.
+
+    Coordinates follow pdfplumber convention: x0/x1 are horizontal, top/bottom
+    are measured from the top of the page. All values are in PDF user units
+    (1/72 inch). ``page`` is 1-indexed.
+    """
+
+    source_file: str
+    page: int
+    x0: float
+    top: float
+    x1: float
+    bottom: float
+
+    def __str__(self) -> str:
+        return (
+            f"{self.source_file}:p{self.page}"
+            f":x={self.x0:.0f}-{self.x1:.0f},y={self.top:.0f}-{self.bottom:.0f}"
+        )
+
 # The canonical fields the matcher reasons over. Source columns are mapped onto
 # these by the recipe; v0.1 supports this fixed person schema.
 CANONICAL_FIELDS: tuple[str, ...] = ("first_name", "last_name", "dob", "email", "phone")
@@ -35,6 +58,8 @@ class Record:
     ``raw`` holds the source column values keyed by canonical field name (the
     recipe mapping is applied at read time). ``normalized`` is filled in by the
     normalize step. ``consent_status`` is the raw consent token, lower-cased.
+    ``spans`` maps each canonical field name to where it was found in a source
+    document; empty for records read from structured CSV.
     """
 
     unique_id: str
@@ -42,6 +67,7 @@ class Record:
     raw: dict[str, str]
     normalized: dict[str, str] = field(default_factory=dict)
     consent_status: str = ""
+    spans: dict[str, SourceSpan] = field(default_factory=dict)
 
     def has_consent(self) -> bool:
         return self.consent_status.strip().lower() in CONSENT_GRANTED

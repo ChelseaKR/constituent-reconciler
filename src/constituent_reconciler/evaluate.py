@@ -73,6 +73,39 @@ class EvalReport:
     blocking_misses: int
 
 
+def cohen_kappa(predicted: list[bool], actual: list[bool]) -> float:
+    """Cohen's kappa agreement coefficient between two binary label sequences.
+
+    Used to calibrate extraction confidence against human labels: set
+    ``predicted[i]`` to True when the extractor's confidence for record i is
+    above the threshold, and ``actual[i]`` to True when a human annotator
+    confirmed the field was correctly extracted. A kappa below 0.6 signals
+    that confidence scores are not tracking accuracy well enough to trust the
+    gate.
+
+    Returns 1.0 for perfect agreement, 0.0 for chance-level agreement, and
+    a negative value for below-chance agreement. Returns 0.0 if kappa is
+    undefined (all labels on one side).
+
+    Raises ``ValueError`` if the sequences are empty or differ in length.
+    """
+    n = len(predicted)
+    if n == 0:
+        raise ValueError("predicted and actual must be non-empty")
+    if len(actual) != n:
+        raise ValueError("predicted and actual must have equal length")
+
+    p_agree = sum(p == a for p, a in zip(predicted, actual, strict=True)) / n
+    p_pred_pos = sum(predicted) / n
+    p_actual_pos = sum(actual) / n
+    p_expected = p_pred_pos * p_actual_pos + (1 - p_pred_pos) * (1 - p_actual_pos)
+
+    if p_expected >= 1.0:
+        return 0.0
+
+    return (p_agree - p_expected) / (1.0 - p_expected)
+
+
 def evaluate(
     pairs: Iterable[Pair],
     truth_clusters: Iterable[Iterable[str]],
