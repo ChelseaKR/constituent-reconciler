@@ -6,12 +6,13 @@ system a nonprofit already runs. A non-technical reviewer approves, corrects,
 or rejects every uncertain match before anything is written. Nothing merges
 silently.
 
-> **Status: v0.3, early but working.** The pipeline runs and is tested:
+> **Status: v0.4, early but working.** The pipeline runs and is tested:
 > CSV or PDF in, deduplicated records out, with source-span pointers in the
-> review queue, a committed eval ([eval/report.md](eval/report.md)), CiviCRM
-> write-back, and a tamper-evident provenance log. Address normalization and the
-> web review UI are not built yet. Track progress in
-> [docs/ROADMAP.md](docs/ROADMAP.md); the build is specified in [CLAUDE.md](CLAUDE.md).
+> review queue, CASS-style address normalization, a committed eval
+> ([eval/report.md](eval/report.md)), CiviCRM write-back, and a tamper-evident
+> provenance log. The DV privacy pack's full invariant set and the web review UI
+> are next. Track progress in [docs/ROADMAP.md](docs/ROADMAP.md); the build is
+> specified in [CLAUDE.md](CLAUDE.md).
 
 ## The problem
 
@@ -170,6 +171,29 @@ can be routed to a cloud seam (Claude on Bedrock) by setting `backend =
 pack the cloud seam is always disabled, regardless of the recipe setting; PII
 does not leave the machine.
 
+### Normalizing addresses
+
+Map an `address` field in the recipe to bring address into the match. The
+default backend is a vendored, deterministic CASS-style ruleset that standardizes
+to USPS-style abbreviations, so "123 North Main Street" and "123 N Main St" both
+reduce to "123 N MAIN ST" and stop reading as a mismatch:
+
+```toml
+[mapping]
+first_name = "first"
+last_name  = "last"
+address    = "street"
+
+[normalize]
+address_backend = "deterministic"   # or "libpostal" (optional, see below)
+```
+
+See `examples/address-demo/` for a runnable demo. The standardizer is
+**CASS-style and not USPS-certified** — real certification requires licensed USPS
+data. For heavier parsing, set `address_backend = "libpostal"`, which requires
+the libpostal C library and the `postal` Python package; without them, selecting
+that backend fails with a clear message rather than silently changing results.
+
 ### Writing back to a case system
 
 By default the resolved records are written to `out/resolved.csv`. To write them
@@ -236,9 +260,11 @@ gates, the privacy invariants that are merge-blocking tests, the rule against
 reimplementing the matcher). Then read [docs/ROADMAP.md](docs/ROADMAP.md) and
 build phase by phase. A phase is done when its acceptance criteria and its
 merge-blocking metrics pass, not before. v0.1 (resolve and review), v0.2 (CiviCRM write-back and the append-only
-provenance log), and v0.3 (offline pdfplumber extraction with source-span
-pointers, policy-gated cloud seam) are implemented and green. The next target
-is v0.4: address normalization with libpostal.
+provenance log), v0.3 (offline pdfplumber extraction with source-span pointers,
+policy-gated cloud seam), and v0.4 (CASS-style address normalization with an
+optional libpostal backend) are implemented and green. The next target is v0.5:
+the DV policy pack's full invariant set (cloud seam fused off, aggregate
+suppression-aware export, the VAWA and FVPSA invariants as merge-blocking tests).
 
 ## License
 

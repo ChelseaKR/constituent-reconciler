@@ -34,8 +34,16 @@ class SourceSpan:
         )
 
 # The canonical fields the matcher reasons over. Source columns are mapped onto
-# these by the recipe; v0.1 supports this fixed person schema.
-CANONICAL_FIELDS: tuple[str, ...] = ("first_name", "last_name", "dob", "email", "phone")
+# these by the recipe. A recipe activates only the fields it maps, so address is
+# available but does not affect a run that does not map it.
+CANONICAL_FIELDS: tuple[str, ...] = (
+    "first_name",
+    "last_name",
+    "dob",
+    "email",
+    "phone",
+    "address",
+)
 
 # Consent values that permit a record to be exported. Anything else (missing,
 # "revoked", "expired", unknown) is treated as no-consent and blocks export when

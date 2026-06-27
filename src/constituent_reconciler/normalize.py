@@ -14,6 +14,7 @@ import re
 import unicodedata
 from datetime import datetime
 
+from constituent_reconciler.address import normalize_address
 from constituent_reconciler.models import Record
 
 _WHITESPACE = re.compile(r"\s+")
@@ -85,6 +86,8 @@ def normalize_phone(value: str) -> str:
     return digits[-10:] if len(digits) >= 10 else digits
 
 
+# Single-argument normalizers, keyed by canonical field. Address is handled
+# separately in ``normalize_record`` because it takes a backend argument.
 _FIELD_NORMALIZERS = {
     "first_name": normalize_name,
     "last_name": normalize_name,
@@ -94,17 +97,31 @@ _FIELD_NORMALIZERS = {
 }
 
 
-def normalize_record(record: Record, fields: tuple[str, ...]) -> Record:
-    """Return a copy of ``record`` with ``normalized`` filled for ``fields``."""
+def normalize_record(
+    record: Record,
+    fields: tuple[str, ...],
+    *,
+    address_backend: str = "deterministic",
+) -> Record:
+    """Return a copy of ``record`` with ``normalized`` filled for ``fields``.
+
+    ``address_backend`` selects the address standardizer; it is ignored unless
+    ``address`` is among ``fields``.
+    """
 
     normalized: dict[str, str] = {}
     for field_name in fields:
-        normalizer = _FIELD_NORMALIZERS.get(field_name, normalize_name)
-        normalized[field_name] = normalizer(record.raw.get(field_name, ""))
+        raw_value = record.raw.get(field_name, "")
+        if field_name == "address":
+            normalized[field_name] = normalize_address(raw_value, backend=address_backend)
+        else:
+            normalizer = _FIELD_NORMALIZERS.get(field_name, normalize_name)
+            normalized[field_name] = normalizer(raw_value)
     return Record(
         unique_id=record.unique_id,
         source=record.source,
         raw=record.raw,
         normalized=normalized,
         consent_status=record.consent_status,
+        spans=record.spans,
     )

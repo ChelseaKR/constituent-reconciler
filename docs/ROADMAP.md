@@ -82,10 +82,22 @@ The smallest version that ships the differentiator.
 * Still open: the full `BedrockSeam.refine()` implementation (page-to-image
   conversion and response parser), and the WCAG 2.2 AA web review UI.
 
-## v0.4.0 — Address normalization
+## v0.4.0 — Address normalization (shipped)
 
-* libpostal parsing plus a vendored deterministic ruleset.
-* Labeled in the output and docs as CASS-style and not USPS-certified.
+* A vendored, deterministic CASS-style ruleset (`address.py`) standardizes an
+  address into USPS-style abbreviations from USPS Publication 28 tables, so two
+  writings of the same address ("123 North Main Street" / "123 N Main St") reduce
+  to the same matching key. Idempotent, offline, no model.
+* Labeled in the code and docs as CASS-style and **not USPS-certified**; the
+  standardization is position-insensitive, a documented simplification.
+* libpostal is an optional backend (`address_backend = "libpostal"`), never
+  required; selecting it without the library installed raises a clear error
+  rather than silently falling back.
+* Address is added to the canonical schema but a recipe activates it only when it
+  maps the field, so the committed demo eval is unchanged (CI verifies this). A
+  separate `examples/address-demo/` fixture exercises the field end to end.
+* Address agreement is weighted below email and a loose match routes to review,
+  because families and shelter residents share an address and people move.
 
 ## v0.5.0 — The DV policy pack
 

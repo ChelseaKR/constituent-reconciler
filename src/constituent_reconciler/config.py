@@ -21,6 +21,19 @@ _CONSENT_REQUIRED_PACKS: frozenset[str] = frozenset({"dv", "hipaa"})
 
 
 @dataclass(frozen=True)
+class NormalizeConfig:
+    """Normalization settings, loaded from the recipe's [normalize] section.
+
+    ``address_backend`` selects the address standardizer: ``"deterministic"``
+    (the default vendored CASS-style ruleset) or ``"libpostal"`` (optional,
+    requires the libpostal C library). It has no effect unless the recipe maps
+    the ``address`` field.
+    """
+
+    address_backend: str = "deterministic"
+
+
+@dataclass(frozen=True)
 class ExtractConfig:
     """Document extraction settings, loaded from the recipe's [extract] section.
 
@@ -67,6 +80,7 @@ class Recipe:
     auto_threshold: float = defaults.DEFAULT_AUTO_THRESHOLD
     review_threshold: float = defaults.DEFAULT_REVIEW_THRESHOLD
     fields: tuple[str, ...] = field(default_factory=tuple)
+    normalize: NormalizeConfig = field(default_factory=NormalizeConfig)
     extract: ExtractConfig = field(default_factory=ExtractConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
 
@@ -87,6 +101,7 @@ def load_recipe(path: str | Path) -> Recipe:
     consent_section = data.get("consent", {})
     thresholds_section = data.get("thresholds", {})
     policy_section = data.get("policy", {})
+    normalize_section = data.get("normalize", {})
     extract_section = data.get("extract", {})
     output_section = data.get("output", {})
 
@@ -111,6 +126,10 @@ def load_recipe(path: str | Path) -> Recipe:
 
     existing_value = input_section.get("existing")
     existing = _resolve(base, str(existing_value)) if existing_value else None
+
+    normalize = NormalizeConfig(
+        address_backend=str(normalize_section.get("address_backend", "deterministic")),
+    )
 
     extract = ExtractConfig(
         backend=str(extract_section.get("backend", "none")),
@@ -140,6 +159,7 @@ def load_recipe(path: str | Path) -> Recipe:
             thresholds_section.get("review", defaults.DEFAULT_REVIEW_THRESHOLD)
         ),
         fields=active_fields,
+        normalize=normalize,
         extract=extract,
         output=output,
     )

@@ -1,0 +1,4 @@
+id,first,last,dob,email,phone,street,consent
+A001,Maria,Gonzalez,1988-03-14,maria.g@example.org,555-201-3344,123 North Main Street,granted
+A002,James,Carter,1975-11-02,jcarter@example.org,555-202-7788,4400 Southwest Pine Boulevard Apartment 12,granted
+A003,Linda,Nguyen,1990-06-30,linda.n@example.org,555-203-9911,78 Oak Court,granted

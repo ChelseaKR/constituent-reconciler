@@ -221,7 +221,12 @@ def run(
         _start_index=len(raw_records) + 1,
     )
 
-    records = {r.unique_id: normalize_record(r, recipe.fields) for r in raw_records}
+    records = {
+        r.unique_id: normalize_record(
+            r, recipe.fields, address_backend=recipe.normalize.address_backend
+        )
+        for r in raw_records
+    }
 
     scored = matching.score_pairs(
         records.values(), recipe.fields, prior=recipe.prior

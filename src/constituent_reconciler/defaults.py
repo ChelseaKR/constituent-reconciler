@@ -41,6 +41,12 @@ DEFAULT_REVIEW_THRESHOLD: float = 0.80
 # typo, transliteration) rather than equal or different.
 _NAME_CLOSE: float = 0.88
 
+# Jaro-Winkler similarity above which two standardized addresses count as
+# "close" (a unit suffix present on one side, a minor typo) rather than
+# different. Higher than the name threshold because addresses are longer and a
+# loose match is riskier: people share addresses and move.
+_ADDRESS_CLOSE: float = 0.90
+
 
 def _name_comparison(column: str) -> dict[str, Any]:
     """Three-level name comparison: exact, close (Jaro-Winkler), else."""
@@ -72,6 +78,47 @@ def _name_comparison(column: str) -> dict[str, Any]:
                 "label_for_charts": "different",
                 "m_probability": 0.01,
                 "u_probability": 0.96,
+            },
+        ],
+    }
+
+
+def _address_comparison(column: str) -> dict[str, Any]:
+    """Three-level address comparison: exact, close (Jaro-Winkler), else.
+
+    Agreement on a full standardized address is good evidence but not as decisive
+    as email: families and shelter residents share an address, so the weights are
+    set below the email level and a loose match is sent toward review rather than
+    auto-merge.
+    """
+
+    return {
+        "output_column_name": column,
+        "comparison_levels": [
+            {
+                "sql_condition": f'"{column}_l" IS NULL OR "{column}_r" IS NULL '
+                f'OR "{column}_l" = \'\' OR "{column}_r" = \'\'',
+                "label_for_charts": "null or empty",
+                "is_null_level": True,
+            },
+            {
+                "sql_condition": f'"{column}_l" = "{column}_r"',
+                "label_for_charts": "exact",
+                "m_probability": 0.80,
+                "u_probability": 0.03,
+            },
+            {
+                "sql_condition": f'jaro_winkler_similarity("{column}_l", "{column}_r") '
+                f">= {_ADDRESS_CLOSE}",
+                "label_for_charts": "close",
+                "m_probability": 0.13,
+                "u_probability": 0.05,
+            },
+            {
+                "sql_condition": "ELSE",
+                "label_for_charts": "different",
+                "m_probability": 0.07,
+                "u_probability": 0.92,
             },
         ],
     }
@@ -114,6 +161,7 @@ _COMPARISON_BUILDERS = {
     "dob": lambda: _exact_comparison("dob", m_yes=0.90, u_yes=0.01),
     "email": lambda: _exact_comparison("email", m_yes=0.85, u_yes=0.005),
     "phone": lambda: _exact_comparison("phone", m_yes=0.80, u_yes=0.01),
+    "address": lambda: _address_comparison("address"),
 }
 
 

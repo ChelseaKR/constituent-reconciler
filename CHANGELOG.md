@@ -8,6 +8,37 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 Nothing yet — see `docs/ROADMAP.md` for what comes next.
 
+## [0.4.0] — 2026-06-27
+
+### Added
+- **Address normalization** (`src/constituent_reconciler/address.py`): a
+  vendored, deterministic CASS-style standardizer that maps an address to
+  USPS-style abbreviations (USPS Publication 28 street suffixes, directionals,
+  unit designators), so two writings of the same address reduce to one matching
+  key. Idempotent and offline.
+- **`address` canonical field** with a three-level matcher comparison (exact,
+  close by Jaro-Winkler at 0.90, else), weighted below email.
+- **Optional libpostal backend**: `[normalize] address_backend = "libpostal"`.
+  Never required; selecting it without the `postal` package and libpostal C
+  library raises a clear `ImportError` instead of silently falling back.
+- **`[normalize]` recipe section** with `address_backend` (default
+  `"deterministic"`).
+- **`examples/address-demo/`**: fixture and recipe demonstrating address-format
+  variation resolving to a merge.
+- **ADR 0004** (`docs/decisions/0004-address-normalization.md`).
+
+### Changed
+- `Record` gains an `address` slot in the canonical schema, active only when a
+  recipe maps it; the committed demo eval is unchanged (CI-verified).
+- `normalize_record` now preserves `Record.spans` (a latent v0.3 bug where spans
+  were dropped before reaching the review queue in a full pipeline run).
+- Version bumped to `0.4.0`.
+
+### Not yet
+- The DV policy pack full invariant set (v0.5), the WCAG 2.2 AA web review UI,
+  and RFC 3161 trusted timestamping wired to a TSA. The address standardizer is
+  CASS-style and is **not** USPS-certified. See `docs/ROADMAP.md`.
+
 ## [0.3.0] — 2026-06-27
 
 ### Added
