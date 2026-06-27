@@ -39,6 +39,10 @@ class WriteResult:
 @runtime_checkable
 class Connector(Protocol):
     name: str
+    # True when the destination stays on the machine running the tool (a local
+    # file), false when a write leaves the machine (a network API). The DV pack
+    # refuses a non-local target, so client PII never egresses.
+    is_local: bool
 
     def write_all(
         self,

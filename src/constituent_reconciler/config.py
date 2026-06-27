@@ -14,10 +14,7 @@ from pathlib import Path
 
 from constituent_reconciler import defaults
 from constituent_reconciler.models import CANONICAL_FIELDS
-
-# Policy packs that flip consent enforcement on by default. The DV pack also
-# forbids the cloud extraction seam; make_seam() enforces that independently.
-_CONSENT_REQUIRED_PACKS: frozenset[str] = frozenset({"dv", "hipaa"})
+from constituent_reconciler.policy import policy_for
 
 
 @dataclass(frozen=True)
@@ -76,6 +73,9 @@ class Recipe:
     consent_column: str | None = None
     require_consent: bool = False
     policy_pack: str = "default"
+    require_local_targets: bool = False
+    aggregate_export: bool = False
+    suppression_threshold: int = 11
     prior: float = defaults.DEFAULT_PRIOR
     auto_threshold: float = defaults.DEFAULT_AUTO_THRESHOLD
     review_threshold: float = defaults.DEFAULT_REVIEW_THRESHOLD
@@ -90,7 +90,14 @@ def _resolve(base: Path, value: str) -> Path:
     return candidate if candidate.is_absolute() else (base / candidate)
 
 
-def load_recipe(path: str | Path) -> Recipe:
+def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
+    """Load a recipe. ``policy_pack`` overrides the recipe's [policy] pack.
+
+    The override exists so ``reconcile run --policy-pack dv`` can apply the DV
+    posture to any recipe without editing it, which matches how the pack is
+    described to users. An unknown pack raises a PolicyViolation, fail-closed.
+    """
+
     recipe_path = Path(path)
     base = recipe_path.parent
     with recipe_path.open("rb") as handle:
@@ -119,10 +126,11 @@ def load_recipe(path: str | Path) -> Recipe:
     if "first_name" not in mapping or "last_name" not in mapping:
         raise ValueError("recipe [mapping] must include first_name and last_name")
 
-    pack = str(policy_section.get("pack", "default"))
-    require_consent = bool(
-        consent_section.get("require", pack in _CONSENT_REQUIRED_PACKS)
-    )
+    pack = policy_pack if policy_pack is not None else str(policy_section.get("pack", "default"))
+    policy = policy_for(pack)
+    # A recipe may turn consent enforcement on explicitly even under a permissive
+    # pack; it may not turn off a requirement the pack imposes (fail-closed).
+    require_consent = policy.require_consent or bool(consent_section.get("require", False))
 
     existing_value = input_section.get("existing")
     existing = _resolve(base, str(existing_value)) if existing_value else None
@@ -153,6 +161,9 @@ def load_recipe(path: str | Path) -> Recipe:
         consent_column=(str(consent_section["column"]) if "column" in consent_section else None),
         require_consent=require_consent,
         policy_pack=pack,
+        require_local_targets=policy.require_local_targets,
+        aggregate_export=policy.aggregate_export,
+        suppression_threshold=policy.suppression_threshold,
         prior=float(thresholds_section.get("prior", defaults.DEFAULT_PRIOR)),
         auto_threshold=float(thresholds_section.get("auto", defaults.DEFAULT_AUTO_THRESHOLD)),
         review_threshold=float(

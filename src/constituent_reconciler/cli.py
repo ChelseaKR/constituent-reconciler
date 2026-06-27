@@ -20,8 +20,10 @@ from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.consent import partition_by_consent
 from constituent_reconciler.evaluate import evaluate
 from constituent_reconciler.pipeline import ExportSummary
+from constituent_reconciler.policy import PolicyViolation
 from constituent_reconciler.provenance import verify_log
 from constituent_reconciler.report import render_eval_markdown, render_run_summary
+from constituent_reconciler.suppression import render_summary
 
 
 def _load_pairs(path: Path, keys: Sequence[str]) -> list[frozenset[str]]:
@@ -43,10 +45,19 @@ def _print_export(recipe: Recipe, summary: ExportSummary, *, dry_run: bool) -> N
         print(f"  withheld:     {summary.withheld_path}")
     if summary.provenance_path:
         print(f"  provenance:   {summary.provenance_path} ({summary.logged} entries)")
+    if summary.aggregate is not None:
+        if summary.aggregate_path:
+            print(f"  aggregate:    {summary.aggregate_path}")
+        print()
+        print(render_summary(summary.aggregate))
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
-    recipe = load_recipe(args.config)
+    try:
+        recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+    except PolicyViolation as error:
+        print(f"policy error: {error}", file=sys.stderr)
+        return 2
     result = pipeline.run(recipe)
     _, withheld = partition_by_consent(result.golden, require_consent=recipe.require_consent)
     print(render_run_summary(result, withheld=len(withheld)))
@@ -54,6 +65,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
         summary = pipeline.export(
             result, recipe, out_dir=Path(args.out), dry_run=args.dry_run
         )
+    except PolicyViolation as error:
+        print(f"\npolicy error: {error}", file=sys.stderr)
+        return 2
     except ConnectorError as error:
         print(f"\nconnector error: {error}", file=sys.stderr)
         return 2
@@ -79,7 +93,11 @@ def _cmd_eval(args: argparse.Namespace) -> int:
 
 
 def _cmd_apply(args: argparse.Namespace) -> int:
-    recipe = load_recipe(args.config)
+    try:
+        recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+    except PolicyViolation as error:
+        print(f"policy error: {error}", file=sys.stderr)
+        return 2
     decisions_path = Path(args.decisions)
     force_auto = _load_pairs(decisions_path, ["approved"])
     force_drop = _load_pairs(decisions_path, ["rejected"])
@@ -88,6 +106,9 @@ def _cmd_apply(args: argparse.Namespace) -> int:
     print(render_run_summary(result, withheld=len(withheld)))
     try:
         summary = pipeline.export(result, recipe, out_dir=Path(args.out), dry_run=False)
+    except PolicyViolation as error:
+        print(f"\npolicy error: {error}", file=sys.stderr)
+        return 2
     except ConnectorError as error:
         print(f"\nconnector error: {error}", file=sys.stderr)
         return 2
@@ -113,6 +134,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--config", required=True, help="path to recipe.toml")
     run_parser.add_argument("--out", default="out", help="output directory")
     run_parser.add_argument("--dry-run", action="store_true", help="do not write files")
+    run_parser.add_argument(
+        "--policy-pack",
+        default=None,
+        help="override the recipe's policy pack (e.g. dv); fail-closed on unknown",
+    )
     run_parser.set_defaults(func=_cmd_run)
 
     eval_parser = sub.add_parser("eval", help="score a run against ground-truth clusters")
@@ -128,6 +154,11 @@ def build_parser() -> argparse.ArgumentParser:
     apply_parser.add_argument("--config", required=True, help="path to recipe.toml")
     apply_parser.add_argument("--decisions", required=True, help="decisions JSON")
     apply_parser.add_argument("--out", default="out", help="output directory")
+    apply_parser.add_argument(
+        "--policy-pack",
+        default=None,
+        help="override the recipe's policy pack (e.g. dv); fail-closed on unknown",
+    )
     apply_parser.set_defaults(func=_cmd_apply)
 
     verify_parser = sub.add_parser("verify", help="check a provenance log's hash chain")

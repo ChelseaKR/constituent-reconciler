@@ -1,8 +1,13 @@
-# The same demo data under the DV (VAWA/FVPSA) policy pack. The pack turns on
-# consent enforcement: a resolved record whose survivor does not carry granted
-# consent is withheld from the export and recorded, without field values, in
-# withheld.csv. Record N009 (consent: revoked) is withheld under this recipe and
-# exported under recipe.toml, which is the difference the pack makes.
+# The same demo data under the DV (VAWA/FVPSA) policy pack. The pack enforces
+# four invariants, each a merge-blocking test:
+#   - consent required: a resolved record whose survivor does not carry granted
+#     consent is withheld and recorded, without field values, in withheld.csv
+#     (record N009, consent revoked, is withheld here and exported under
+#     recipe.toml — that is the difference the pack makes);
+#   - no cloud egress: the optional extraction seam is fused off;
+#   - local write targets only: a non-local connector (e.g. civicrm) is refused;
+#   - aggregate, suppressed sharing: an aggregate_summary.json of non-identifying
+#     counts with small cells suppressed is written as the only shareable artifact.
 #
 #   reconcile run --config recipe-dv.toml --out out-dv
 

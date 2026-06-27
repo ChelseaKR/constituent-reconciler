@@ -6,13 +6,14 @@ system a nonprofit already runs. A non-technical reviewer approves, corrects,
 or rejects every uncertain match before anything is written. Nothing merges
 silently.
 
-> **Status: v0.4, early but working.** The pipeline runs and is tested:
+> **Status: v0.5, early but working.** The pipeline runs and is tested:
 > CSV or PDF in, deduplicated records out, with source-span pointers in the
 > review queue, CASS-style address normalization, a committed eval
-> ([eval/report.md](eval/report.md)), CiviCRM write-back, and a tamper-evident
-> provenance log. The DV privacy pack's full invariant set and the web review UI
-> are next. Track progress in [docs/ROADMAP.md](docs/ROADMAP.md); the build is
-> specified in [CLAUDE.md](CLAUDE.md).
+> ([eval/report.md](eval/report.md)), CiviCRM write-back, a tamper-evident
+> provenance log, and a DV privacy pack that enforces VAWA/FVPSA confidentiality
+> as merge-blocking tests. The WCAG 2.2 AA web review UI is next. Track progress
+> in [docs/ROADMAP.md](docs/ROADMAP.md); the build is specified in
+> [CLAUDE.md](CLAUDE.md).
 
 ## The problem
 
@@ -80,19 +81,30 @@ Client information may not be entered into shared databases
 That makes a cloud service a structural non-starter for this segment, not a
 preference.
 
-The `dv` policy pack is the answer. Set `pack = "dv"` in the recipe, or use the
-bundled `recipe-dv.toml`. Consent is a first-class field, and under this pack the
-export refuses, fail-closed, to emit any record whose consent is not granted;
-withheld records are recorded by id and reason only, never with field values, so
-the record of what was withheld leaks nothing. When document extraction lands,
-the same pack fuses the optional cloud seam off so PII never leaves the machine
-and restricts exports to org-local, aggregate, suppression-aware shapes. The
-point holds at every phase: the tool cannot be configured into leaking data it
-was told not to share.
+The `dv` policy pack is the answer. Set `pack = "dv"` in the recipe, use the
+bundled `recipe-dv.toml`, or pass `--policy-pack dv` to apply it to any recipe.
+The pack enforces four invariants, each a merge-blocking test:
 
-This is a reference implementation, not legal advice. An organization adopting
-it needs its own review against its own obligations. See
-[docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md).
+* **Consent required.** The export refuses, fail-closed, to emit any record whose
+  consent is not granted; withheld records are recorded by id and reason only,
+  never with field values.
+* **No cloud egress.** The optional cloud extraction seam is fused off at
+  construction, so no page or field value can be sent to a remote model.
+* **Local write targets only.** A non-local target (such as CiviCRM over the
+  network) is refused before any write, so client records stay on the machine —
+  the comparable-database posture HUD requires of victim-service providers.
+* **Aggregate, suppressed sharing.** The pack emits an `aggregate_summary.json`
+  of non-identifying counts with small cells suppressed (counts of 1-10, modeled
+  on the U.S. CMS Cell Size Suppression Policy, with complementary suppression
+  and true zeros preserved). It is the only artifact the pack treats as
+  shareable.
+
+The invariants are grounded in primary VAWA, FVPSA, and CMS sources, with the
+citations and the honest scope of each claim in
+[docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) and
+[docs/decisions/0005-dv-policy-pack.md](docs/decisions/0005-dv-policy-pack.md).
+This is a reference implementation, not legal advice. An organization adopting it
+needs its own review against its own obligations.
 
 ## Usage
 
@@ -261,10 +273,12 @@ reimplementing the matcher). Then read [docs/ROADMAP.md](docs/ROADMAP.md) and
 build phase by phase. A phase is done when its acceptance criteria and its
 merge-blocking metrics pass, not before. v0.1 (resolve and review), v0.2 (CiviCRM write-back and the append-only
 provenance log), v0.3 (offline pdfplumber extraction with source-span pointers,
-policy-gated cloud seam), and v0.4 (CASS-style address normalization with an
-optional libpostal backend) are implemented and green. The next target is v0.5:
-the DV policy pack's full invariant set (cloud seam fused off, aggregate
-suppression-aware export, the VAWA and FVPSA invariants as merge-blocking tests).
+policy-gated cloud seam), v0.4 (CASS-style address normalization with an optional
+libpostal backend), and v0.5 (the DV policy pack: no egress, local targets only,
+aggregate suppression-aware export, VAWA/FVPSA invariants as merge-blocking
+tests) are implemented and green. The next target is v1.0: a second connector,
+one-command Docker self-host, the WCAG 2.2 AA web review UI, and schema-stability
+guarantees.
 
 ## License
 

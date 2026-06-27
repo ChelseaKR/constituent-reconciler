@@ -17,6 +17,8 @@ from constituent_reconciler.models import GoldenRecord
 
 class CsvConnector:
     name = "csv"
+    # A local file on the machine running the tool; permitted under the DV pack.
+    is_local = True
 
     def __init__(self, path: Path) -> None:
         self.path = path
