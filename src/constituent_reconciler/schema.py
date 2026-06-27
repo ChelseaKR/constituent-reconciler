@@ -1,0 +1,34 @@
+"""Declared schema and interface versions for the stability contract.
+
+These are the surfaces the project commits to versioning explicitly: the recipe
+TOML shape, the ``Connector`` protocol, and the JSON artifacts (the aggregate
+summary and the provenance log entries). They are integers, bumped independently
+of the package version.
+
+The contract: once the project reaches 1.0, a breaking change to any of these
+surfaces bumps the package MAJOR version and ships a migration note. Before 1.0,
+a surface may change with a MINOR bump and a CHANGELOG entry. A consumer can read
+these constants (or ``reconcile schema``) to check what it is integrating
+against. The rationale is in docs/decisions/0006-schema-stability.md.
+"""
+
+from __future__ import annotations
+
+# The recipe TOML shape: sections, keys, and their meaning.
+CONFIG_SCHEMA_VERSION = 1
+
+# The Connector protocol: write_all signature, WriteResult shape, is_local.
+CONNECTOR_INTERFACE_VERSION = 1
+
+# The JSON artifacts: aggregate_summary.json and the provenance log entry shape.
+REPORT_SCHEMA_VERSION = 1
+
+
+def versions() -> dict[str, int]:
+    """Return the declared schema versions as a mapping."""
+
+    return {
+        "config_schema": CONFIG_SCHEMA_VERSION,
+        "connector_interface": CONNECTOR_INTERFACE_VERSION,
+        "report_schema": REPORT_SCHEMA_VERSION,
+    }

@@ -1,0 +1,40 @@
+# One-command self-host for constituent-reconciler.
+#
+# Build:
+#   docker build -t constituent-reconciler .
+#
+# Run the bundled demo (writes to a mounted ./out):
+#   docker run --rm -v "$PWD/out:/work/out" constituent-reconciler \
+#     run --config examples/intake-demo/recipe.toml --out out
+#
+# Run against your own data and recipe mounted at /work/data:
+#   docker run --rm -v "$PWD/data:/work/data" constituent-reconciler \
+#     run --config /work/data/recipe.toml --out /work/data/out
+#
+# The image installs the PDF extraction extra (pdfplumber). The libpostal address
+# backend is not included because it needs a system C library; the default
+# deterministic address backend works without it.
+
+FROM python:3.11-slim
+
+# Avoid interactive prompts and keep the image lean.
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /work
+
+# Install the package first so its layer caches independently of the examples.
+COPY pyproject.toml README.md LICENSE ./
+COPY src ./src
+RUN pip install ".[extract]"
+
+# Ship the example fixtures so the demo runs out of the box.
+COPY examples ./examples
+
+# A non-root user; the work directory is writable for mounted volumes.
+RUN useradd --create-home runner && chown -R runner:runner /work
+USER runner
+
+ENTRYPOINT ["reconcile"]
+CMD ["--help"]

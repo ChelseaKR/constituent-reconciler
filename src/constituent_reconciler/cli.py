@@ -122,6 +122,14 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def _cmd_schema(args: argparse.Namespace) -> int:
+    from constituent_reconciler.schema import versions
+
+    for name, version in versions().items():
+        print(f"{name}: {version}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="reconcile",
@@ -164,6 +172,11 @@ def build_parser() -> argparse.ArgumentParser:
     verify_parser = sub.add_parser("verify", help="check a provenance log's hash chain")
     verify_parser.add_argument("--provenance", required=True, help="path to provenance.jsonl")
     verify_parser.set_defaults(func=_cmd_verify)
+
+    schema_parser = sub.add_parser(
+        "schema", help="print the declared config, connector, and report schema versions"
+    )
+    schema_parser.set_defaults(func=_cmd_schema)
 
     return parser
 

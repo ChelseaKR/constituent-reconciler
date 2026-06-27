@@ -1,0 +1,40 @@
+# The demo data written to a Salesforce org (NPSP Contact) instead of a CSV.
+#
+# The write is an upsert keyed on an external id field, so a re-run updates the
+# same contacts rather than creating duplicates. Create the external id field on
+# Contact (an External ID text field, here External_Id__c) before the first run.
+# Pass the OAuth access token through the environment, never the recipe:
+#
+#   SF_TOKEN=your-access-token reconcile run \
+#     --config examples/intake-demo/recipe-salesforce.toml --out out
+#
+# Use --dry-run to see what would be written without contacting the org. Under the
+# DV policy pack this target is refused, because it leaves the machine.
+
+[input]
+existing = "existing.csv"
+incoming = "incoming.csv"
+id_column = "id"
+
+[mapping]
+first_name = "First Name"
+last_name = "Last Name"
+dob = "DOB"
+email = "Email"
+phone = "Phone"
+
+[consent]
+column = "Consent"
+
+[thresholds]
+prior = 0.01
+auto = 0.97
+review = 0.80
+
+[output]
+connector = "salesforce"
+endpoint = "https://your-instance.my.salesforce.com"
+auth_env = "SF_TOKEN"
+external_id_field = "External_Id__c"
+api_version = "v60.0"
+object_name = "Contact"

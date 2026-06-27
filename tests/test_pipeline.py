@@ -98,6 +98,45 @@ class _RoutingTransport:
         return 200, json.dumps({"values": [{"id": 0}]}).encode("utf-8")
 
 
+class _SalesforceTransport:
+    """Fake Salesforce transport: every upsert returns a 201 created."""
+
+    def __init__(self) -> None:
+        self.created = 0
+
+    def send(
+        self, method: str, url: str, *, headers: dict[str, str], body: bytes | None
+    ) -> tuple[int, bytes]:
+        self.created += 1
+        payload = {"id": f"003{self.created:03d}", "success": True, "created": True}
+        return 201, json.dumps(payload).encode("utf-8")
+
+
+def test_export_via_salesforce_creates_and_logs_provenance(tmp_path: Path) -> None:
+    import os
+
+    os.environ["SF_TOKEN"] = "test-token"
+    try:
+        recipe = replace(
+            load_recipe(EXAMPLES / "recipe.toml"),
+            output=OutputConfig(
+                connector="salesforce",
+                endpoint="https://x.my.salesforce.com",
+                auth_env="SF_TOKEN",
+            ),
+        )
+        result = pipeline.run(recipe)
+        summary = pipeline.export(
+            result, recipe, out_dir=tmp_path, sf_transport=_SalesforceTransport()
+        )
+        assert summary.counts().get("created") == 21
+        assert summary.provenance_path is not None
+        ok, _ = verify_log(summary.provenance_path)
+        assert ok
+    finally:
+        del os.environ["SF_TOKEN"]
+
+
 def test_export_via_civicrm_creates_and_logs_provenance(tmp_path: Path) -> None:
     import os
 

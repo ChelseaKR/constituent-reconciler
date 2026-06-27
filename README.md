@@ -6,13 +6,15 @@ system a nonprofit already runs. A non-technical reviewer approves, corrects,
 or rejects every uncertain match before anything is written. Nothing merges
 silently.
 
-> **Status: v0.5, early but working.** The pipeline runs and is tested:
+> **Status: v0.6, early but working.** The pipeline runs and is tested:
 > CSV or PDF in, deduplicated records out, with source-span pointers in the
 > review queue, CASS-style address normalization, a committed eval
-> ([eval/report.md](eval/report.md)), CiviCRM write-back, a tamper-evident
-> provenance log, and a DV privacy pack that enforces VAWA/FVPSA confidentiality
-> as merge-blocking tests. The WCAG 2.2 AA web review UI is next. Track progress
-> in [docs/ROADMAP.md](docs/ROADMAP.md); the build is specified in
+> ([eval/report.md](eval/report.md)), CiviCRM and Salesforce write-back, a
+> tamper-evident provenance log, a DV privacy pack that enforces VAWA/FVPSA
+> confidentiality as merge-blocking tests, and one-command Docker self-host. The
+> WCAG 2.2 AA web review UI and supply-chain hardening remain before the 1.0
+> stability tag, which is gated on real-organization adoption. Track progress in
+> [docs/ROADMAP.md](docs/ROADMAP.md); the build is specified in
 > [CLAUDE.md](CLAUDE.md).
 
 ## The problem
@@ -221,6 +223,15 @@ The write is an upsert keyed on an external identifier, so a second run updates
 the same contacts rather than creating duplicates. Use `--dry-run` to see what
 would be written without contacting the server.
 
+Salesforce NPSP is the second connector, using the REST upsert-by-external-id
+endpoint. Configure it the same way and pass the access token through the
+environment:
+
+```sh
+SF_TOKEN=your-access-token reconcile run \
+  --config examples/intake-demo/recipe-salesforce.toml --out out
+```
+
 Every write is recorded in an append-only, tamper-evident provenance log
 (`out/provenance.jsonl`): each entry carries a BLAKE2b hash of the written fields
 and the hash of the previous entry, so altering any past entry breaks the chain.
@@ -229,6 +240,20 @@ Check it at any time:
 ```sh
 reconcile verify --provenance out/provenance.jsonl
 ```
+
+### Running with Docker
+
+The tool runs as a one-command container, with PDF extraction included:
+
+```sh
+docker build -t constituent-reconciler .            # or: make docker
+docker run --rm -v "$PWD/out:/work/out" constituent-reconciler \
+  run --config examples/intake-demo/recipe.toml --out out
+```
+
+Mount your own recipe and data at `/work/data` to run against real input. The
+`reconcile schema` command prints the config, connector, and report schema
+versions the build commits to (see `docs/decisions/0006-schema-stability.md`).
 
 ## What it does not do
 
@@ -271,14 +296,13 @@ conventions, and the build plan, and it states the hard guardrails (fail-closed
 gates, the privacy invariants that are merge-blocking tests, the rule against
 reimplementing the matcher). Then read [docs/ROADMAP.md](docs/ROADMAP.md) and
 build phase by phase. A phase is done when its acceptance criteria and its
-merge-blocking metrics pass, not before. v0.1 (resolve and review), v0.2 (CiviCRM write-back and the append-only
-provenance log), v0.3 (offline pdfplumber extraction with source-span pointers,
-policy-gated cloud seam), v0.4 (CASS-style address normalization with an optional
-libpostal backend), and v0.5 (the DV policy pack: no egress, local targets only,
-aggregate suppression-aware export, VAWA/FVPSA invariants as merge-blocking
-tests) are implemented and green. The next target is v1.0: a second connector,
-one-command Docker self-host, the WCAG 2.2 AA web review UI, and schema-stability
-guarantees.
+merge-blocking metrics pass, not before. v0.1 through v0.6 are implemented and green: resolve and review (v0.1), CiviCRM
+write-back and provenance (v0.2), the pdfplumber extraction seam (v0.3),
+CASS-style address normalization (v0.4), the DV policy pack (v0.5), and the v1.0
+engineering deliverables — Salesforce connector, Docker self-host, schema-version
+declarations, DPG conformance note (v0.6). What remains before the 1.0 stability
+tag is the WCAG 2.2 AA web review UI, supply-chain hardening, and the
+real-organization adoption the tag is gated on.
 
 ## License
 
