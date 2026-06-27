@@ -6,12 +6,12 @@ system a nonprofit already runs. A non-technical reviewer approves, corrects,
 or rejects every uncertain match before anything is written. Nothing merges
 silently.
 
-> **Status: v0.2, early but working.** The pipeline runs and is tested:
-> CSV in, deduplicated records out, with a human review queue, a committed eval
-> ([eval/report.md](eval/report.md)), CiviCRM write-back, and a tamper-evident
-> provenance log. Document extraction and address normalization are not built
-> yet. Track progress in [docs/ROADMAP.md](docs/ROADMAP.md); the build is
-> specified in [CLAUDE.md](CLAUDE.md).
+> **Status: v0.3, early but working.** The pipeline runs and is tested:
+> CSV or PDF in, deduplicated records out, with source-span pointers in the
+> review queue, a committed eval ([eval/report.md](eval/report.md)), CiviCRM
+> write-back, and a tamper-evident provenance log. Address normalization and the
+> web review UI are not built yet. Track progress in
+> [docs/ROADMAP.md](docs/ROADMAP.md); the build is specified in [CLAUDE.md](CLAUDE.md).
 
 ## The problem
 
@@ -101,6 +101,12 @@ Install (Python 3.11+):
 make install
 ```
 
+For PDF extraction, install the optional extract extra:
+
+```sh
+pip install 'constituent-reconciler[extract]'
+```
+
 Run the bundled demo, which resolves an incoming intake batch against an existing
 record set:
 
@@ -135,6 +141,34 @@ fixtures the false-merge rate is 0%, and every true duplicate is surfaced to a
 human at the auto or review level. The gated metric is the false-merge rate
 because a wrong merge is the expensive, sometimes irreversible error; a missed
 match only leaves a duplicate.
+
+### Reading from PDFs
+
+With the `extract` extra installed, point the recipe's `incoming` at a folder
+and add an `[extract]` section to enable pdfplumber:
+
+```toml
+[input]
+existing = "existing.csv"
+incoming = "intake-docs/"    # folder with .csv and .pdf files
+
+[extract]
+backend              = "pdfplumber"
+confidence_threshold = 0.5
+```
+
+The pipeline routes `.csv` files through the structured reader and `.pdf` files
+through the extractor. Each extracted field carries a source-span pointer (PDF
+filename, page number, bounding box) that appears in the review queue CSV as
+`{field}_left_span` and `{field}_right_span` columns, so a reviewer can navigate
+back to where the value was read.
+
+Pages with fewer than five words, or where the average word length looks garbled
+(over 15 characters), score below 0.5 and are flagged as low-confidence. They
+can be routed to a cloud seam (Claude on Bedrock) by setting `backend =
+"bedrock"` — see `examples/intake-demo/recipe-pdf.toml`. Under the `dv` policy
+pack the cloud seam is always disabled, regardless of the recipe setting; PII
+does not leave the machine.
 
 ### Writing back to a case system
 
@@ -201,10 +235,10 @@ conventions, and the build plan, and it states the hard guardrails (fail-closed
 gates, the privacy invariants that are merge-blocking tests, the rule against
 reimplementing the matcher). Then read [docs/ROADMAP.md](docs/ROADMAP.md) and
 build phase by phase. A phase is done when its acceptance criteria and its
-merge-blocking metrics pass, not before. v0.1 (resolve and review) and v0.2
-(CiviCRM write-back and the append-only provenance log) are implemented and
-green. The next target is v0.3: the offline document-extraction seam with
-source-span pointers surfaced in the review queue.
+merge-blocking metrics pass, not before. v0.1 (resolve and review), v0.2 (CiviCRM write-back and the append-only
+provenance log), and v0.3 (offline pdfplumber extraction with source-span
+pointers, policy-gated cloud seam) are implemented and green. The next target
+is v0.4: address normalization with libpostal.
 
 ## License
 

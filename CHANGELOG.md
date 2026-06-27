@@ -6,14 +6,67 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 ## [Unreleased]
 
+Nothing yet — see `docs/ROADMAP.md` for what comes next.
+
+## [0.3.0] — 2026-06-27
+
 ### Added
-- v0.2: CiviCRM write-back via API v4, an upsert keyed on an external identifier
+- **Extraction seam** (`src/constituent_reconciler/extract/`): an offline
+  pdfplumber-based PDF extractor that pulls canonical fields from form-like PDFs
+  using label-adjacent patterns and returns a confidence score and source-span
+  pointer per field.
+- **Source-span pointers** on `Record.spans` (`dict[str, SourceSpan]`): each
+  PDF-sourced field carries the source filename, page number, and bounding box.
+  The review queue CSV gains `{field}_left_span` and `{field}_right_span` columns
+  when any record has spans, so a reviewer can navigate back to the original.
+- **`SourceSpan`** type in `constituent_reconciler.models`, re-exported from the
+  top-level package.
+- **Policy-gated cloud seam**: `NoOpSeam` (default) and `BedrockSeam` (the
+  documented extension point for deployers with AWS credentials). `make_seam()`
+  returns `NoOpSeam` unconditionally for `dv` and `hipaa` policy packs; the
+  non-egress invariant is enforced at construction time and covered by tests.
+- **Folder-based ingestion**: the recipe's `incoming` field can point to a
+  directory; the pipeline routes `.csv` files through the structured reader and
+  `.pdf` files through the extractor.
+- **`[extract]` recipe section**: `backend` (default `"none"`) and
+  `confidence_threshold` (default `0.5`).
+- **`pdfplumber>=0.11`** added as an optional `[extract]` dependency and to the
+  `[dev]` extras so extraction tests run in CI.
+- **`cohen_kappa(predicted, actual)`** in `evaluate.py`: the calibration seam
+  for comparing an LLM extraction judge's confidence against human-labeled field
+  accuracy. Not yet wired into the eval report; the function is the planned seam.
+- **ADR 0003** (`docs/decisions/0003-extraction-seam.md`): documents the
+  pdfplumber choice, the regex-over-text-layer approach, the confidence
+  heuristic, and the cloud-seam protocol.
+
+### Changed
+- `Record` gains `spans: dict[str, SourceSpan]` (default empty dict). Existing
+  CSV-only code and tests are unaffected.
+- `Recipe` gains `extract: ExtractConfig` (default `backend="none"`). Existing
+  recipes with no `[extract]` section use the CSV-only path unchanged.
+- Version bumped to `0.3.0`.
+
+### Not yet
+- `BedrockSeam.refine()` raises `NotImplementedError` until a deployer wires in
+  page-to-image conversion and the Bedrock response parser.
+- Address normalization, the WCAG 2.2 AA web review UI, and the DV policy pack
+  full invariant set. RFC 3161 trusted timestamping is a pluggable authority, not
+  yet wired to a TSA. See `docs/ROADMAP.md`.
+
+## [0.2.0] — 2026-06-24
+
+### Added
+- CiviCRM write-back via API v4, an upsert keyed on an external identifier
   so re-runs update contacts instead of duplicating them, built on an injected
   transport for testability. A connector interface with the CSV writer refactored
   onto it. An append-only, tamper-evident provenance log (BLAKE2b hash chain)
   with a `reconcile verify` command and a pluggable timestamp authority. An
   `[output]` recipe section that selects the connector.
-- v0.1 core: resolve and review. Reads existing and incoming CSVs, normalizes,
+
+## [0.1.0] — 2026-06-24
+
+### Added
+- Resolve and review core. Reads existing and incoming CSVs, normalizes,
   scores candidate pairs with a Splink matcher configured by pre-tuned m and u
   defaults (no training, no labeled pairs), assigns each pair to an auto, review,
   or drop band, clusters confident merges, and writes resolved records plus a
@@ -24,8 +77,3 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 - `reconcile run`, `reconcile eval`, and `reconcile apply` commands.
 - Committed eval (`eval/report.md`) on seeded synthetic fixtures with planted
   ground truth, reporting a gated false-merge rate with Wilson intervals.
-
-### Not yet
-- Document extraction (PDF and scan), address normalization, and a web review
-  UI. RFC 3161 trusted timestamping is a pluggable authority, not yet wired to a
-  timestamp authority server. See `docs/ROADMAP.md`.

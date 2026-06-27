@@ -8,7 +8,7 @@ v1.0.
 
 from __future__ import annotations
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 from constituent_reconciler.models import (
     Band,
@@ -17,6 +17,7 @@ from constituent_reconciler.models import (
     Pair,
     Record,
     RunResult,
+    SourceSpan,
 )
 
 __all__ = [
@@ -27,4 +28,5 @@ __all__ = [
     "Pair",
     "Record",
     "RunResult",
+    "SourceSpan",
 ]
