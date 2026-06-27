@@ -20,6 +20,11 @@ from constituent_reconciler.config import Recipe
 from constituent_reconciler.connectors.base import Connector, WriteResult
 from constituent_reconciler.connectors.civicrm import CivicrmConfig, CivicrmConnector, Transport
 from constituent_reconciler.connectors.csv_out import CsvConnector
+from constituent_reconciler.connectors.salesforce import (
+    SalesforceConfig,
+    SalesforceConnector,
+)
+from constituent_reconciler.connectors.salesforce import Transport as SalesforceTransport
 from constituent_reconciler.models import GoldenRecord, Pair, Record, RunResult, SourceSpan
 from constituent_reconciler.normalize import normalize_record
 from constituent_reconciler.policy import PolicyViolation
@@ -293,9 +298,12 @@ def _write_aggregate_summary(summary: AggregateSummary, out_dir: Path) -> Path:
 
     import json
 
+    from constituent_reconciler.schema import REPORT_SCHEMA_VERSION
+
     summary_path = out_dir / "aggregate_summary.json"
     out_dir.mkdir(parents=True, exist_ok=True)
     payload = {
+        "schema_version": REPORT_SCHEMA_VERSION,
         "total_resolved": summary.total,
         "breakdowns": {b.name: b.cells for b in summary.breakdowns},
         "note": (
@@ -320,7 +328,11 @@ def _write_withheld(withheld: Sequence[GoldenRecord], out_dir: Path) -> Path:
 
 
 def build_connector(
-    recipe: Recipe, out_dir: Path, *, transport: Transport | None = None
+    recipe: Recipe,
+    out_dir: Path,
+    *,
+    transport: Transport | None = None,
+    sf_transport: SalesforceTransport | None = None,
 ) -> Connector:
     """Construct the connector named by the recipe. Secrets come from the env.
 
@@ -341,6 +353,15 @@ def build_connector(
             external_id_field=output.external_id_field,
         )
         connector = CivicrmConnector(config, transport=transport)
+    elif output.connector == "salesforce":
+        sf_config = SalesforceConfig(
+            instance_url=output.endpoint,
+            access_token=os.environ.get(output.auth_env, ""),
+            api_version=output.api_version,
+            external_id_field=output.external_id_field,
+            object_name=output.object_name,
+        )
+        connector = SalesforceConnector(sf_config, transport=sf_transport)
     else:
         raise ValueError(f"unknown output connector: {output.connector!r}")
 
@@ -385,6 +406,7 @@ def export(
     dry_run: bool = False,
     authority: TimestampAuthority | None = None,
     transport: Transport | None = None,
+    sf_transport: SalesforceTransport | None = None,
 ) -> ExportSummary:
     """Write resolved records through the configured connector.
 
@@ -400,7 +422,9 @@ def export(
     )
     by_id = {record.cluster_id: record for record in exportable}
 
-    connector = build_connector(recipe, out_dir, transport=transport)
+    connector = build_connector(
+        recipe, out_dir, transport=transport, sf_transport=sf_transport
+    )
     write_results = connector.write_all(exportable, recipe.fields, dry_run=dry_run)
 
     provenance_path = out_dir / "provenance.jsonl"

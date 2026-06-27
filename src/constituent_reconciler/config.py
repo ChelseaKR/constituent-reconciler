@@ -52,8 +52,10 @@ class ExtractConfig:
 class OutputConfig:
     """Where resolved records are written. Secrets are never stored here.
 
-    For the CiviCRM connector, ``auth_env`` names the environment variable that
-    holds the API key; the key itself is read at write time, not from the recipe.
+    ``auth_env`` names the environment variable that holds the credential (a
+    CiviCRM API key, a Salesforce access token); the value is read at write time,
+    not from the recipe. ``api_version`` and ``object_name`` apply to the
+    Salesforce connector; CiviCRM ignores them.
     """
 
     connector: str = "csv"
@@ -62,6 +64,8 @@ class OutputConfig:
     auth_header: str = "Authorization"
     auth_scheme: str = "Bearer"
     external_id_field: str = "external_identifier"
+    api_version: str = "v60.0"
+    object_name: str = "Contact"
 
 
 @dataclass(frozen=True)
@@ -151,6 +155,8 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
         auth_header=str(output_section.get("auth_header", "Authorization")),
         auth_scheme=str(output_section.get("auth_scheme", "Bearer")),
         external_id_field=str(output_section.get("external_id_field", "external_identifier")),
+        api_version=str(output_section.get("api_version", "v60.0")),
+        object_name=str(output_section.get("object_name", "Contact")),
     )
 
     return Recipe(

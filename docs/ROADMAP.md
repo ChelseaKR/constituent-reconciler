@@ -119,14 +119,32 @@ docs/decisions/0005-dv-policy-pack.md and docs/RESPONSIBLE-TECH-AUDITS.md. The
 unknown name. `hipaa` is a partial pack (consent plus no cloud seam) and does not
 claim the DV local-target and aggregate rules.
 
+## v0.6.0 — The v1.0 engineering deliverables (shipped)
+
+The concrete build items of the 1.0 milestone, shipped without the 1.0 tag,
+because the tag itself is gated on adoption (see below):
+
+* A second connector, **Salesforce NPSP**, on the same `Connector` interface and
+  injected-transport pattern as CiviCRM, using the REST upsert-by-external-id
+  endpoint. Proves the connector interface is real, not a one-off.
+* **One-command Docker self-host** (`Dockerfile`, `make docker`), with the PDF
+  extraction extra included.
+* A **DPG Standard conformance note** (`docs/DPG-CONFORMANCE.md`) mapping the
+  project against the nine indicators, honestly.
+* **Declared schema and interface versions** (`schema.py`, `reconcile schema`)
+  for the config, the connector interface, and the JSON artifacts, with the
+  versioning contract in docs/decisions/0006-schema-stability.md.
+
 ## v1.0.0 — Stability commitments
 
-Gated on the pipeline proving out against more than one real organization and
-on no breaking change to the connector interface or report schema for two
-consecutive releases. Adds a second connector (Salesforce NPSP), one-command
-Docker self-host, committed RESPONSIBLE-TECH-AUDITS and a DPG Standard
-conformance note, and semantic-versioning guarantees on the config schema, the
-connector interface, and the JSON report schema.
+Gated on the pipeline proving out against more than one real organization and on
+no breaking change to the named surfaces for two consecutive releases. The
+engineering deliverables landed in v0.6; what remains for the 1.0 tag is the
+adoption evidence and the demonstrated-stability window, plus the WCAG 2.2 AA web
+review UI and supply-chain hardening (SBOM, signed releases, SHA-pinned actions).
+The tag is deliberately withheld until those are real, rather than claimed early:
+1.0 means a stability promise, and a promise that depends on adoption cannot be
+made by a release script.
 
 ## Eval and quality plan
 

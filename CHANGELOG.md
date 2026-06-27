@@ -8,6 +8,36 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 Nothing yet — see `docs/ROADMAP.md` for what comes next.
 
+## [0.6.0] — 2026-06-27
+
+The v1.0 engineering deliverables, shipped without the 1.0 tag (the tag is gated
+on real-organization adoption, per `docs/ROADMAP.md`).
+
+### Added
+- **Salesforce NPSP connector** (`connectors/salesforce.py`): a second
+  destination on the same `Connector` interface, using the REST
+  upsert-by-external-id endpoint (`PATCH /sobjects/Contact/<ExternalIdField>/...`)
+  for idempotent re-runs. Built on an injected transport, fully tested offline.
+  `is_local = False`, so the DV pack refuses it like any network target.
+- **`[output]` recipe keys** `api_version` and `object_name` for Salesforce;
+  `auth_env` now names the token env var for either CRM.
+- **One-command Docker self-host** (`Dockerfile`, `.dockerignore`,
+  `make docker`), with the PDF extraction extra included.
+- **Declared schema/interface versions** (`schema.py`): config, connector
+  interface, and report schema versions, exposed by a new `reconcile schema`
+  command and stamped into `aggregate_summary.json` as `schema_version`.
+- **DPG Standard conformance note** (`docs/DPG-CONFORMANCE.md`) mapping the
+  project against the nine indicators.
+- **ADR 0006** (`docs/decisions/0006-schema-stability.md`) defining the
+  stability contract.
+- `examples/intake-demo/recipe-salesforce.toml`; 13 new tests (108 total).
+
+### Note
+- The Docker image was not built end-to-end in CI in this release (the
+  Dockerfile follows standard patterns); `make docker` builds it locally.
+
+## [0.5.0] — 2026-06-27
+
 ## [0.5.0] — 2026-06-27
 
 ### Added
