@@ -67,6 +67,9 @@ class CivicrmConfig:
 
 class CivicrmConnector:
     name = "civicrm"
+    # A write goes over the network to a CiviCRM server, so the DV pack refuses
+    # this target: client PII must not leave the machine.
+    is_local = False
 
     def __init__(self, config: CivicrmConfig, transport: Transport | None = None) -> None:
         self.config = config

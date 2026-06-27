@@ -10,7 +10,8 @@ This tool handles some of the most sensitive data a nonprofit holds. The audit
 is not a launch afterthought; its checks are wired into CI from the first phase,
 and the privacy invariants below are merge-blocking tests, not prose.
 
-Status: pre-v0.1. Sections marked TODO are scoped but not yet measured.
+Status: v0.5. The privacy section's DV-pack invariants are implemented and
+merge-blocking; sections marked TODO are scoped but not yet measured.
 
 ## Ethics
 
@@ -42,9 +43,42 @@ The strongest claims live here and are enforced as tests.
   pluggable authority (the local clock by default; RFC 3161 trusted timestamping
   is the seam for production). Chain integrity and tamper detection are covered
   by `tests/test_provenance.py`.
-* Under the DV pack there is no cloud egress path in v0.2, because the optional
-  extraction seam is not built yet; a non-egress test guards it when the seam
-  lands, alongside aggregate, suppression-aware exports.
+* The **DV policy pack** (v0.5) enforces the VAWA and FVPSA confidentiality
+  posture as four merge-blocking invariants, each grounded in primary guidance
+  rather than memory:
+  * **No PII egress.** The cloud extraction seam is fused off
+    (`tests/test_extract.py`, `tests/test_no_egress.py`) and a non-local write
+    target is refused before any write (`tests/test_no_egress.py`). VAWA bars a
+    grantee from disclosing personally identifying client information "regardless
+    of whether the information has been encoded, encrypted, hashed, or otherwise
+    protected" (34 U.S.C. § 12291(b)(2)(B)(i); FVPSA parallel at 42 U.S.C.
+    § 10406(c)(5)). NNEDV and HUD read entry into a shared database such as HMIS
+    as a prohibited disclosure, which is why a victim-service provider keeps
+    client data in its own comparable database (HUD HMIS Comparable Database;
+    McKinney-Vento as amended, 42 U.S.C. § 11383(a)(7)). The statute's operative
+    verbs are "disclose, reveal, or release"; the shared-database reading is
+    attributed to NNEDV and HUD, not quoted as statute.
+  * **Consent required.** Informed, written, reasonably time-limited consent is
+    required before release (34 U.S.C. § 12291(b)(2)(B)(ii)), and consent may not
+    be a condition of services (§ 12291(b)(2)(D)(ii)(I)). The export withholds any
+    record without granted consent, recorded by id and reason only. Revocability
+    is NNEDV Safety Net best practice, not statutory text, and is described as
+    such.
+  * **Aggregate, suppressed sharing.** Only non-personally-identifying data in
+    the aggregate may be shared for reporting (34 U.S.C. § 12291(b)(2)(D)(i)(I)).
+    The pack emits an aggregate summary with no field values and small-cell
+    suppression (counts of 1-10 suppressed, true zeros preserved, complementary
+    suppression applied), modeled on the U.S. CMS Cell Size Suppression Policy.
+    No uniform federal threshold exists and HUD, VAWA, and FVPSA set none; the
+    CMS rule is the most defensible bright line and is cited as such, not as a DV
+    mandate. Covered by `tests/test_suppression.py` and `tests/test_no_egress.py`.
+
+Sources: 34 U.S.C. § 12291 (law.cornell.edu/uscode/text/34/12291); 42 U.S.C.
+§ 10406 (FVPSA); NNEDV Safety Net, "Comparable Database 101" and
+"Confidentiality in VAWA, FVPSA, and VOCA" (techsafety.org); CMS Cell Size
+Suppression Policy (resdac.org/articles/cms-cell-size-suppression-policy). The
+limitation: suppression here does not defend against cross-tabulation attacks
+that correlate several breakdowns.
 
 TODO: complete the data-flow map and the retention and destruction model per
 policy pack.

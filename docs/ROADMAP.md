@@ -99,15 +99,25 @@ The smallest version that ships the differentiator.
 * Address agreement is weighted below email and a loose match routes to review,
   because families and shelter residents share an address and people move.
 
-## v0.5.0 — The DV policy pack
+## v0.5.0 — The DV policy pack (shipped)
 
-The fundability unlock. A `--policy-pack dv` flag that:
+The fundability unlock. A `--policy-pack dv` flag (or `[policy] pack = "dv"`)
+that, as four merge-blocking invariants:
 
-* fuses the cloud seam off so PII never egresses,
-* restricts the write step to org-local targets,
-* makes exports aggregate and suppression-aware,
-* documents the VAWA and FVPSA invariants it enforces, each as a
-  merge-blocking test.
+* fuses the cloud seam off so PII never egresses (enforced at seam construction),
+* refuses any non-local write target before a write happens, so client data stays
+  on the machine (the comparable-database posture),
+* emits an aggregate, suppression-aware summary (CMS-style small-cell
+  suppression, complementary suppression, true zeros preserved) as the only
+  shareable artifact,
+* withholds any record without granted consent, recorded by id and reason only.
+
+The invariants are grounded in primary VAWA, FVPSA, and CMS sources, with the
+citations and three honesty corrections recorded in
+docs/decisions/0005-dv-policy-pack.md and docs/RESPONSIBLE-TECH-AUDITS.md. The
+`policy.py` model maps a pack name to its invariants and fails closed on an
+unknown name. `hipaa` is a partial pack (consent plus no cloud seam) and does not
+claim the DV local-target and aggregate rules.
 
 ## v1.0.0 — Stability commitments
 

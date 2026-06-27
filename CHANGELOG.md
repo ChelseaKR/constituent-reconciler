@@ -8,6 +8,46 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 Nothing yet — see `docs/ROADMAP.md` for what comes next.
 
+## [0.5.0] — 2026-06-27
+
+### Added
+- **DV policy pack** (`src/constituent_reconciler/policy.py`): a declarative
+  bundle of VAWA/FVPSA confidentiality invariants enforced as merge-blocking
+  behavior. `policy_for` maps a pack name to a `Policy`; an unknown pack raises
+  `PolicyViolation`, fail-closed.
+- **`--policy-pack` CLI flag** on `run` and `apply`, and a `policy_pack` override
+  on `load_recipe`, so the DV posture can be applied to any recipe without
+  editing it.
+- **No-egress enforcement**: connectors now declare `is_local`; under a
+  local-targets policy the export refuses a non-local target (CiviCRM) before any
+  write. The cloud extraction seam was already fused off for the dv/hipaa packs.
+- **Aggregate, suppression-aware export** (`suppression.py`): the DV pack writes
+  `aggregate_summary.json` of non-identifying counts with CMS-style small-cell
+  suppression — counts of 1-10 suppressed, true zeros preserved, complementary
+  suppression so a lone suppressed cell is not recoverable by subtraction.
+- **`PolicyViolation`** exception, surfaced by the CLI with a clear message and a
+  non-zero exit.
+- **ADR 0005** (`docs/decisions/0005-dv-policy-pack.md`) and an expanded privacy
+  section in `docs/RESPONSIBLE-TECH-AUDITS.md` with primary VAWA/FVPSA/CMS
+  citations and three honesty corrections (the statutory verb is "disclose,
+  reveal, or release"; revocable consent is NNEDV best practice not statute; the
+  n<11 threshold is the CMS rule, not a HUD/DV mandate).
+- 30 new tests across `test_policy.py`, `test_suppression.py`, and the
+  merge-blocking `test_no_egress.py` (95 total).
+
+### Changed
+- `Recipe` gains `require_local_targets`, `aggregate_export`, and
+  `suppression_threshold`, derived from the active pack. `require_consent` now
+  comes from the pack and cannot be turned off below what the pack imposes.
+- `ExportSummary` gains `aggregate` and `aggregate_path`.
+- Version bumped to `0.5.0`.
+
+### Not yet
+- The WCAG 2.2 AA web review UI, RFC 3161 timestamping wired to a TSA, and a
+  recorded end-to-end demo into a running CiviCRM instance. The `hipaa` pack is
+  partial (consent plus no cloud seam) and does not claim the DV pack's full
+  invariant set. See `docs/ROADMAP.md`.
+
 ## [0.4.0] — 2026-06-27
 
 ### Added

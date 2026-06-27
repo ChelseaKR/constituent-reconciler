@@ -15,14 +15,16 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from constituent_reconciler import consent, decisions, matching
+from constituent_reconciler import consent, decisions, matching, suppression
 from constituent_reconciler.config import Recipe
 from constituent_reconciler.connectors.base import Connector, WriteResult
 from constituent_reconciler.connectors.civicrm import CivicrmConfig, CivicrmConnector, Transport
 from constituent_reconciler.connectors.csv_out import CsvConnector
 from constituent_reconciler.models import GoldenRecord, Pair, Record, RunResult, SourceSpan
 from constituent_reconciler.normalize import normalize_record
+from constituent_reconciler.policy import PolicyViolation
 from constituent_reconciler.provenance import ProvenanceLog, TimestampAuthority
+from constituent_reconciler.suppression import AggregateSummary
 
 
 def read_records(
@@ -282,6 +284,30 @@ def _write_review_queue(result: RunResult, recipe: Recipe, out_dir: Path) -> Pat
     return review_path
 
 
+def _write_aggregate_summary(summary: AggregateSummary, out_dir: Path) -> Path:
+    """Write the non-identifying, suppressed aggregate summary as JSON.
+
+    This is the only artifact the DV pack considers shareable: counts with small
+    cells suppressed and no field values, ids, or member lists.
+    """
+
+    import json
+
+    summary_path = out_dir / "aggregate_summary.json"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "total_resolved": summary.total,
+        "breakdowns": {b.name: b.cells for b in summary.breakdowns},
+        "note": (
+            "Non-identifying aggregate. Small cells suppressed (counts 1-10), "
+            "modeled on the U.S. CMS Cell Size Suppression Policy; true zeros "
+            "preserved. Not a substitute for review against your own obligations."
+        ),
+    }
+    summary_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return summary_path
+
+
 def _write_withheld(withheld: Sequence[GoldenRecord], out_dir: Path) -> Path:
     withheld_path = out_dir / "withheld.csv"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -296,12 +322,17 @@ def _write_withheld(withheld: Sequence[GoldenRecord], out_dir: Path) -> Path:
 def build_connector(
     recipe: Recipe, out_dir: Path, *, transport: Transport | None = None
 ) -> Connector:
-    """Construct the connector named by the recipe. Secrets come from the env."""
+    """Construct the connector named by the recipe. Secrets come from the env.
+
+    Under a policy pack that requires local targets (the DV pack), a non-local
+    connector is refused before it is built, fail-closed: client PII must not
+    egress, so the network write target is rejected rather than configured.
+    """
 
     output = recipe.output
     if output.connector == "csv":
-        return CsvConnector(out_dir / "resolved.csv")
-    if output.connector == "civicrm":
+        connector: Connector = CsvConnector(out_dir / "resolved.csv")
+    elif output.connector == "civicrm":
         config = CivicrmConfig(
             endpoint=output.endpoint,
             api_key=os.environ.get(output.auth_env, ""),
@@ -309,8 +340,17 @@ def build_connector(
             auth_scheme=output.auth_scheme,
             external_id_field=output.external_id_field,
         )
-        return CivicrmConnector(config, transport=transport)
-    raise ValueError(f"unknown output connector: {output.connector!r}")
+        connector = CivicrmConnector(config, transport=transport)
+    else:
+        raise ValueError(f"unknown output connector: {output.connector!r}")
+
+    if recipe.require_local_targets and not connector.is_local:
+        raise PolicyViolation(
+            f"policy pack {recipe.policy_pack!r} forbids the non-local write target "
+            f"{connector.name!r}; client information must stay on this machine. "
+            f"Use the csv connector or a local target."
+        )
+    return connector
 
 
 @dataclass(frozen=True)
@@ -321,6 +361,8 @@ class ExportSummary:
     withheld_path: Path | None
     provenance_path: Path | None
     logged: int
+    aggregate: AggregateSummary | None = None
+    aggregate_path: Path | None = None
 
     def counts(self) -> dict[str, int]:
         out: dict[str, int] = {}
@@ -382,6 +424,18 @@ def export(
     review_path = _write_review_queue(result, recipe, out_dir)
     withheld_path = _write_withheld(withheld, out_dir) if withheld else None
 
+    # Under a pack that requires aggregate sharing (the DV pack), build a
+    # non-identifying, suppressed summary over the exportable records. It is the
+    # only artifact that pack treats as shareable beyond the org's own machine.
+    aggregate: AggregateSummary | None = None
+    aggregate_path: Path | None = None
+    if recipe.aggregate_export:
+        aggregate = suppression.aggregate_summary(
+            exportable, threshold=recipe.suppression_threshold
+        )
+        if not dry_run:
+            aggregate_path = _write_aggregate_summary(aggregate, out_dir)
+
     return ExportSummary(
         write_results=tuple(write_results),
         withheld=tuple(withheld),
@@ -389,4 +443,6 @@ def export(
         withheld_path=withheld_path,
         provenance_path=provenance_path if (not dry_run and logged) else None,
         logged=logged,
+        aggregate=aggregate,
+        aggregate_path=aggregate_path,
     )
