@@ -13,6 +13,7 @@ pack requires of any artifact the review step produces.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +23,37 @@ APPROVED = "approved"
 REJECTED = "rejected"
 _VERDICTS = frozenset({APPROVED, REJECTED})
 
+# Plain-language labels for the canonical fields, so the rationale and the
+# comparison table read the way a caseworker speaks rather than the way the
+# schema is keyed. Unmapped names fall back to the underscored form spelled out.
+FIELD_LABELS: dict[str, str] = {
+    "first_name": "first name",
+    "last_name": "last name",
+    "dob": "date of birth",
+    "email": "email",
+    "phone": "phone",
+    "address": "address",
+}
+
+
+def field_label(name: str) -> str:
+    """Human label for a canonical field, for jargon-free display."""
+
+    return FIELD_LABELS.get(name, name.replace("_", " "))
+
+
+def _join(labels: Sequence[str]) -> str:
+    """Join field labels into a readable list: a; a and b; a, b, and c."""
+
+    items = list(labels)
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
+
 
 @dataclass(frozen=True)
 class FieldCell:
@@ -29,8 +61,11 @@ class FieldCell:
 
     ``left`` and ``right`` are the raw source values shown to the reviewer.
     ``agrees`` compares the normalized values, so it reflects what the matcher
-    saw rather than surface formatting. The span strings point back to where a
-    value was read in a source document; empty for records read from CSV.
+    saw rather than surface formatting. ``comparable`` is True only when both
+    sides carry a normalized value; when one is blank the matcher had no evidence
+    on that field, which is different from a disagreement and is said so. The span
+    strings point back to where a value was read in a source document; empty for
+    records read from CSV.
     """
 
     field: str
@@ -39,6 +74,74 @@ class FieldCell:
     left_span: str
     right_span: str
     agrees: bool
+    comparable: bool
+
+
+@dataclass(frozen=True)
+class MatchRationale:
+    """Why a pair landed in review, in the reviewer's own words.
+
+    The three buckets hold field labels: those the two records agree on, those
+    they disagree on, and those that could not be compared because one side was
+    blank. ``summary`` is the sentence shown beside the pair; ``short`` is the
+    one-line version for the queue list.
+    """
+
+    agree: tuple[str, ...]
+    differ: tuple[str, ...]
+    uncompared: tuple[str, ...]
+
+    def summary(self) -> str:
+        parts: list[str] = []
+        if self.agree:
+            parts.append(f"These records agree on {_join(self.agree)}.")
+        if self.differ:
+            lead = "They differ" if parts else "These records differ"
+            parts.append(f"{lead} on {_join(self.differ)}.")
+        if self.uncompared:
+            verb = "was" if len(self.uncompared) == 1 else "were"
+            pronoun = "it" if len(self.uncompared) == 1 else "they"
+            joined = _join(self.uncompared)
+            lead_word = joined[0].upper() + joined[1:]
+            parts.append(
+                f"{lead_word} {verb} blank on at least one record, "
+                f"so {pronoun} could not be compared."
+            )
+        if not parts:
+            return "There were no fields to compare on this pair."
+        return " ".join(parts)
+
+    def short(self) -> str:
+        bits: list[str] = []
+        if self.agree:
+            bits.append(f"agree on {_join(self.agree)}")
+        if self.differ:
+            bits.append(f"differ on {_join(self.differ)}")
+        if self.uncompared:
+            bits.append(f"{_join(self.uncompared)} not compared")
+        return "; ".join(bits) if bits else "nothing to compare"
+
+
+def rationale_for(view: PairView) -> MatchRationale:
+    """Bucket a pair's fields into agree, differ, and could-not-compare.
+
+    A field counts as compared only when both records carry a normalized value,
+    matching the matcher's null level: a blank on either side is no evidence, not
+    a disagreement, and the reviewer is told which it is.
+    """
+
+    agree: list[str] = []
+    differ: list[str] = []
+    uncompared: list[str] = []
+    for cell in view.fields:
+        label = field_label(cell.field)
+        if not cell.comparable:
+            uncompared.append(label)
+        elif cell.agrees:
+            agree.append(label)
+        else:
+            differ.append(label)
+    return MatchRationale(tuple(agree), tuple(differ), tuple(uncompared))
 
 
 @dataclass(frozen=True)
@@ -127,6 +230,7 @@ class ReviewSession:
             right_norm = right.normalized.get(field_name, "")
             left_span = left.spans.get(field_name)
             right_span = right.spans.get(field_name)
+            comparable = bool(left_norm) and bool(right_norm)
             cells.append(
                 FieldCell(
                     field=field_name,
@@ -134,7 +238,8 @@ class ReviewSession:
                     right=right.raw.get(field_name, ""),
                     left_span=str(left_span) if left_span else "",
                     right_span=str(right_span) if right_span else "",
-                    agrees=bool(left_norm) and left_norm == right_norm,
+                    agrees=comparable and left_norm == right_norm,
+                    comparable=comparable,
                 )
             )
         return PairView(

@@ -20,6 +20,8 @@ from constituent_reconciler.review.session import (
     REJECTED,
     PairView,
     ReviewSession,
+    field_label,
+    rationale_for,
 )
 
 _STYLE = """
@@ -52,12 +54,19 @@ table.compare th, table.compare td {
 }
 table.compare th[scope=row] { width: 9rem; background: #f2f4f7; }
 .agree { font-weight: 600; }
+.rationale {
+  border: 1px solid #003366; border-left-width: 6px; border-radius: 6px;
+  background: #f2f4f7; padding: 0.6rem 1rem; margin: 1rem 0;
+}
+.rationale h3 { margin: 0 0 0.3rem; font-size: 1.05rem; }
+.rationale p { margin: 0; }
 .tag {
   display: inline-block; padding: 0.05rem 0.45rem; border: 1px solid; border-radius: 4px;
   font-size: 0.8rem; font-weight: 700;
 }
 .tag.match { color: #054d1c; border-color: #054d1c; background: #e6f4ea; }
 .tag.differ { color: #6b1010; border-color: #6b1010; background: #fdecea; }
+.tag.neutral { color: #333; border-color: #999; background: #f2f4f7; }
 .span { color: #444; font-size: 0.8rem; }
 .verdict { margin: 0.4rem 0; font-weight: 700; }
 .verdict.approved { color: #054d1c; }
@@ -147,9 +156,11 @@ def render_overview(session: ReviewSession, *, apply_command: str) -> str:
         else:
             state = "<span>not yet reviewed</span>"
         label = f"{escape(view.left_id)} vs {escape(view.right_id)}"
+        why = escape(rationale_for(view).short())
         rows.append(
             f'<li><a href="/pair/{view.index}">Pair {view.index + 1}: {label}</a> '
-            f"&mdash; {state}</li>"
+            f"&mdash; {state}"
+            f'<div class="note">{why}.</div></li>'
         )
 
     if total == 0:
@@ -205,10 +216,12 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
     for cell in view.fields:
         if cell.agrees:
             mark = '<span class="tag match">match</span>'
-        else:
+        elif cell.comparable:
             mark = '<span class="tag differ">differs</span>'
+        else:
+            mark = '<span class="tag neutral">not compared</span>'
         field_rows.append(
-            f'<tr><th scope="row">{escape(cell.field.replace("_", " "))}</th>'
+            f'<tr><th scope="row">{escape(field_label(cell.field))}</th>'
             f"<td>{_cell(cell.left, cell.left_span)}</td>"
             f"<td>{_cell(cell.right, cell.right_span)}</td>"
             f'<td class="agree">{mark}</td></tr>'
@@ -242,6 +255,7 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
     )
 
     pct = view.probability * 100
+    rationale = escape(rationale_for(view).summary())
     body = (
         "<header>\n<h1>Review queue</h1>\n"
         f'<p class="progress" aria-live="polite">Pair {view.index + 1} of {total} '
@@ -252,6 +266,9 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
         f"<p>The matcher scored these two records at <strong>{pct:.1f}%</strong> "
         "likely to be the same person, which is below the automatic-merge line, "
         "so a person decides.</p>\n"
+        '<div class="rationale" role="note">\n'
+        "<h3>What matches and what differs</h3>\n"
+        f"<p>{rationale}</p>\n</div>\n"
         f"{current}\n"
         '<table class="compare">\n<caption class="note">Record '
         f"{escape(view.left_id)} (from {escape(view.left_source)}) compared with "

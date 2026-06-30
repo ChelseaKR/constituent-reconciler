@@ -192,15 +192,26 @@ shared standard.
 
 | Attribute | Target | Gate |
 |-----------|--------|------|
-| Test coverage (logic) | TBD, floor per CODE-QUALITY-STANDARD | AUTO |
-| False-merge rate (eval) | TBD threshold, fail-closed | AUTO |
-| Matching pairwise precision and recall | TBD, reported with Wilson CIs | REVIEW |
-| Extraction field precision and recall | TBD | REVIEW |
-| LLM field-judge calibration (Cohen's kappa) | TBD, fail-closed on drift | AUTO |
+| Test coverage (logic) | At least 85% line coverage on `src/`; 86% at v0.7, measured with `coverage run -m pytest` | AUTO |
+| False-merge rate (eval) | 0% among auto-merged pairs on the committed fixtures, fail-closed; CI runs the gate at 0.0 | AUTO |
+| Matching pairwise precision and recall | Auto-merge precision 100% (a false merge fails the gate); auto+review coverage recall at least 95%, reported with Wilson CIs | REVIEW |
+| Extraction field precision and recall | At least 0.95 precision and 0.90 recall on a labeled extraction fixture; target only, the fixture and its measurement are not landed | REVIEW |
+| LLM field-judge calibration (Cohen's kappa) | Kappa at least 0.60, fail-closed on drift, the 0.6 line `evaluate.cohen_kappa` documents; wired into the eval in R10 | AUTO |
 | Review queue accessibility | WCAG 2.2 AA, axe clean, screen-reader walkthrough | AUTO + REVIEW |
 | i18n parity (EN, ES) | key and placeholder parity | AUTO |
 | Supply chain | SBOM, Sigstore, SHA-pinned actions, OIDC | AUTO |
 | DV policy-pack invariants | PII non-egress, consent-gated write | AUTO |
+
+Enforcement today: the false-merge gate and the DV policy-pack invariants (PII
+non-egress and consent-gated write) run as merge-blocking checks in CI now, and
+CI also fails if the committed eval report drifts. The coverage floor, the kappa
+drift gate, the i18n parity check, and the supply-chain items are committed
+targets not yet wired as automatic CI gates; each lands with the phase named
+beside it (the kappa gate with R10, the supply-chain items with R3, EN/ES parity
+with R1). The matching and extraction precision and recall figures are REVIEW
+metrics a person reads from the eval report rather than pass-or-fail gates. The
+coverage figure is measured on demand with `coverage run -m pytest`; `coverage`
+is not a committed dependency.
 
 ## Out of scope
 
