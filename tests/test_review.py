@@ -28,7 +28,14 @@ from constituent_reconciler.review.server import (
     handle_get,
     handle_post,
 )
-from constituent_reconciler.review.session import APPROVED, REJECTED, ReviewSession
+from constituent_reconciler.review.session import (
+    APPROVED,
+    REJECTED,
+    FieldCell,
+    PairView,
+    ReviewSession,
+    rationale_for,
+)
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "intake-demo"
 
@@ -107,6 +114,69 @@ def test_decisions_file_carries_no_field_values(tmp_path: Path) -> None:
                 assert value not in blob
 
 
+# -- match rationale ---------------------------------------------------------
+
+
+def _cell(field: str, *, comparable: bool, agrees: bool) -> FieldCell:
+    return FieldCell(
+        field=field,
+        left="x",
+        right="y",
+        left_span="",
+        right_span="",
+        agrees=agrees,
+        comparable=comparable,
+    )
+
+
+def _view(fields: tuple[FieldCell, ...]) -> PairView:
+    return PairView(
+        index=0,
+        left_id="E001",
+        right_id="N002",
+        left_source="existing",
+        right_source="incoming",
+        probability=0.9,
+        fields=fields,
+    )
+
+
+def test_match_rationale_buckets_and_summarizes() -> None:
+    view = _view(
+        (
+            _cell("last_name", comparable=True, agrees=True),
+            _cell("dob", comparable=True, agrees=False),
+            _cell("email", comparable=False, agrees=False),
+        )
+    )
+    rationale = rationale_for(view)
+    assert rationale.agree == ("last name",)
+    assert rationale.differ == ("date of birth",)
+    assert rationale.uncompared == ("email",)
+    assert rationale.summary() == (
+        "These records agree on last name. They differ on date of birth. "
+        "Email was blank on at least one record, so it could not be compared."
+    )
+    assert rationale.short() == "agree on last name; differ on date of birth; email not compared"
+
+
+def test_match_rationale_joins_multiple_fields_and_pluralizes() -> None:
+    view = _view(
+        (
+            _cell("first_name", comparable=True, agrees=True),
+            _cell("last_name", comparable=True, agrees=True),
+            _cell("address", comparable=True, agrees=True),
+            _cell("email", comparable=False, agrees=False),
+            _cell("phone", comparable=False, agrees=False),
+        )
+    )
+    summary = rationale_for(view).summary()
+    assert "agree on first name, last name, and address" in summary
+    assert "Email and phone were blank on at least one record, so they could not be compared" in (
+        summary
+    )
+
+
 # -- pure request handlers ---------------------------------------------------
 
 
@@ -116,6 +186,10 @@ def test_handle_get_renders_overview_and_pair(tmp_path: Path) -> None:
     assert overview.status == HTTPStatus.OK
     assert 'lang="en"' in overview.body
     assert "Review queue" in overview.body
+    # The queue lists a one-line rationale beside each pair, so a reviewer can
+    # triage before opening it. A blocked review pair agrees on at least one
+    # field by construction.
+    assert "agree on" in overview.body
 
     pair = handle_get(session, "/pair/0")
     assert pair.status == HTTPStatus.OK
@@ -123,6 +197,9 @@ def test_handle_get_renders_overview_and_pair(tmp_path: Path) -> None:
     # Accessibility: status is conveyed with a text label, not colour alone.
     assert "Agreement" in pair.body
     assert "Approve merge" in pair.body
+    # R11: a plain-language rationale sits beside the pair, not source spans alone.
+    assert "What matches and what differs" in pair.body
+    assert "agree on" in pair.body
 
 
 def test_handle_get_unknown_pair_is_404(tmp_path: Path) -> None:

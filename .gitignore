@@ -22,3 +22,4 @@ out-dv/
 
 # OS
 .DS_Store
+.coverage
