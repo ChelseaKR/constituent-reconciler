@@ -28,8 +28,10 @@ from constituent_reconciler.connectors.base import ConnectorError, WriteResult
 from constituent_reconciler.models import GoldenRecord
 
 # Canonical field -> Salesforce NPSP Contact field. Address maps to the mailing
-# street; a full structured address mapping is a later refinement.
-_FIELD_MAP = {
+# street; a full structured address mapping is a later refinement. Public so the
+# import-ready CSV exporter (connectors/crm_csv.py) maps to the same schema, which
+# keeps the live API push and the offline export file in agreement.
+FIELD_MAP = {
     "first_name": "FirstName",
     "last_name": "LastName",
     "dob": "Birthdate",
@@ -107,7 +109,7 @@ class SalesforceConnector:
     def _payload(self, record: GoldenRecord, fields: tuple[str, ...]) -> dict[str, str]:
         payload: dict[str, str] = {}
         for field_name in fields:
-            target = _FIELD_MAP.get(field_name)
+            target = FIELD_MAP.get(field_name)
             value = record.fields.get(field_name, "")
             if target and value:
                 payload[target] = value

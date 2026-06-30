@@ -8,6 +8,46 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 Nothing yet — see `docs/ROADMAP.md` for what comes next.
 
+## [0.7.0] — 2026-06-29
+
+The WCAG 2.2 AA web review queue and the offline-first CRM export files, two of
+the items the README named as remaining before the 1.0 tag.
+
+### Added
+- **Local web review UI** (`review/`, `reconcile review`): a non-technical
+  reviewer steps through the uncertain candidate pairs in a browser, sees the two
+  records side by side with their source spans, and approves or rejects each
+  merge. Verdicts are written to `decisions.json` in the same shape
+  `reconcile apply` consumes, so the web step replaces the hand-edited CSV without
+  changing the rest of the pipeline. Built on `http.server` with no web-framework
+  dependency.
+  - **Offline by construction**: binds the loopback interface only, inlines all
+    CSS and script (no CDN or network fetch), and under the DV pack refuses a
+    non-loopback bind, fail-closed, mirroring the connector local-target gate.
+  - **Minimization**: the only artifact the review step persists is
+    `decisions.json`, which carries record ids and verdicts and no field value;
+    request logging is suppressed. A test asserts no reviewed field value reaches
+    the file.
+  - **Accessibility (WCAG 2.2 AA)**: a real comparison table with scoped headers,
+    status carried by text and a symbol rather than colour alone, decision
+    controls that work with no JavaScript, keyboard shortcuts as enhancement.
+- **Import-ready CRM export connectors** (`connectors/crm_csv.py`):
+  `salesforce_csv` and `civicrm_csv` write a CSV mapped to the target CRM's import
+  schema (NPSP Contact columns; CiviCRM import columns) plus an external-id column
+  keyed on the cluster id, for an idempotent CRM-side upsert. This is the
+  offline-first default path: no network call, no secret. The live API push
+  connectors stay the explicit opt-in. The column schema is shared with the live
+  connectors (`salesforce.FIELD_MAP`, `civicrm.IMPORT_FIELD_MAP`) so the file and
+  the API payload cannot drift. Both targets are `is_local = True`, so the DV pack
+  permits them while still refusing the network push.
+- **ADR 0007** (`docs/decisions/0007-review-ui-and-crm-export.md`).
+- `examples/intake-demo/recipe-salesforce-csv.toml` and `recipe-civicrm-csv.toml`;
+  20 new tests (128 total).
+
+### Note
+- The review UI's structural WCAG 2.2 AA work is in place; a full axe audit and a
+  screen-reader walkthrough remain a REVIEW gate in `docs/ROADMAP.md`.
+
 ## [0.6.0] — 2026-06-27
 
 The v1.0 engineering deliverables, shipped without the 1.0 tag (the tag is gated

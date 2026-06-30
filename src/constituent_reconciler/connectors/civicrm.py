@@ -34,6 +34,19 @@ _FIELD_MAP = {
     "phone": "phone_primary.phone",
 }
 
+# Canonical field -> CiviCRM "Import Contacts" CSV column. The import tool maps
+# header names to its own fields, so the join syntax the live API uses is not a
+# valid column header here: email, phone, and street address are plain columns.
+# This is the schema the offline export file (connectors/crm_csv.py) maps to.
+IMPORT_FIELD_MAP = {
+    "first_name": "first_name",
+    "last_name": "last_name",
+    "dob": "birth_date",
+    "email": "email",
+    "phone": "phone",
+    "address": "street_address",
+}
+
 
 class Transport(Protocol):
     def post(self, url: str, *, headers: dict[str, str], body: bytes) -> tuple[int, bytes]: ...

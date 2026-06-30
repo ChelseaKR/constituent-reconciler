@@ -6,13 +6,14 @@ system a nonprofit already runs. A non-technical reviewer approves, corrects,
 or rejects every uncertain match before anything is written. Nothing merges
 silently.
 
-> **Status: v0.6, early but working.** The pipeline runs and is tested:
+> **Status: v0.7, early but working.** The pipeline runs and is tested:
 > CSV or PDF in, deduplicated records out, with source-span pointers in the
 > review queue, CASS-style address normalization, a committed eval
-> ([eval/report.md](eval/report.md)), CiviCRM and Salesforce write-back, a
-> tamper-evident provenance log, a DV privacy pack that enforces VAWA/FVPSA
-> confidentiality as merge-blocking tests, and one-command Docker self-host. The
-> WCAG 2.2 AA web review UI and supply-chain hardening remain before the 1.0
+> ([eval/report.md](eval/report.md)), a local WCAG 2.2 AA web review UI, CiviCRM
+> and Salesforce write-back (live API push and offline import-ready export files),
+> a tamper-evident provenance log, a DV privacy pack that enforces VAWA/FVPSA
+> confidentiality as merge-blocking tests, and one-command Docker self-host. A
+> full accessibility audit and supply-chain hardening remain before the 1.0
 > stability tag, which is gated on real-organization adoption. Track progress in
 > [docs/ROADMAP.md](docs/ROADMAP.md); the build is specified in
 > [CLAUDE.md](CLAUDE.md).
@@ -139,10 +140,39 @@ resolved records:    21 (6 formed by merging)
 
 It writes `out/resolved.csv` (the deduplicated records) and
 `out/review_queue.csv` (the uncertain pairs, with the two source values side by
-side for a human to approve, correct, or reject). In v0.1 the review queue is a
-CSV; the WCAG 2.2 AA web UI is the next phase. Carry decisions back in with
+side for a human to approve, correct, or reject). Review the uncertain pairs in a
+browser (see below) or edit the CSV by hand, then carry decisions back in with
 `reconcile apply --decisions decisions.json`, which treats approved pairs as
 merges and re-resolves.
+
+### Reviewing matches in the browser
+
+`reconcile review` opens a local web queue over the uncertain pairs. A reviewer
+steps through each candidate, sees the two records side by side with their
+source spans, and approves the merge or rejects it, with no jargon and no
+spreadsheet:
+
+```sh
+reconcile review --config examples/intake-demo/recipe.toml --out out
+```
+
+It runs the pipeline, starts a server on `http://127.0.0.1:8765/`, and opens a
+browser. Each decision is saved as you go to `out/decisions.json`, so you can stop
+and resume. When you are done, apply the decisions:
+
+```sh
+reconcile apply --config examples/intake-demo/recipe.toml --decisions out/decisions.json --out out
+```
+
+The server is offline by construction: it binds the loopback interface only,
+loads no external asset, and writes no field value to disk (the decisions file
+carries record ids and verdicts only). Under the `dv` policy pack it refuses any
+non-loopback bind, fail-closed, so the review surface cannot become an egress
+path for client information. The pages are built for WCAG 2.2 AA: a real
+comparison table, status shown by text and not colour alone, and decision buttons
+that work with the keyboard and with no JavaScript (`A` approve, `R` reject, `J`
+and `K` to move between pairs). Pass `--no-browser` to skip opening a window, or
+`--port 0` to bind a free port.
 
 Score a run against known answers:
 
@@ -210,7 +240,28 @@ that backend fails with a clear message rather than silently changing results.
 
 ### Writing back to a case system
 
-By default the resolved records are written to `out/resolved.csv`. To write them
+By default the resolved records are written to `out/resolved.csv`. Two paths
+carry them into a CRM, and the offline one is the default.
+
+**Import-ready export file (offline, no network).** The `salesforce_csv` and
+`civicrm_csv` connectors write a CSV mapped to the CRM's own import schema (NPSP
+Contact columns, or CiviCRM import columns) plus an external-id column keyed on
+the resolved cluster id. You load it with the CRM's native import tool (the
+Salesforce Data Import Wizard or Data Loader, CiviCRM's Import Contacts) and
+upsert on that external id, so a re-run updates rather than duplicates. Nothing
+leaves the machine:
+
+```sh
+reconcile run --config examples/intake-demo/recipe-salesforce-csv.toml --out out
+# writes out/salesforce_import.csv
+
+reconcile run --config examples/intake-demo/recipe-civicrm-csv.toml --out out
+# writes out/civicrm_import.csv
+```
+
+Because the file stays local, this path is permitted under the `dv` policy pack.
+
+**Live API push (opt-in, network).** To write directly
 into a running CiviCRM instance instead, select the connector in the recipe's
 `[output]` section and pass the API key through the environment:
 
@@ -296,13 +347,14 @@ conventions, and the build plan, and it states the hard guardrails (fail-closed
 gates, the privacy invariants that are merge-blocking tests, the rule against
 reimplementing the matcher). Then read [docs/ROADMAP.md](docs/ROADMAP.md) and
 build phase by phase. A phase is done when its acceptance criteria and its
-merge-blocking metrics pass, not before. v0.1 through v0.6 are implemented and green: resolve and review (v0.1), CiviCRM
+merge-blocking metrics pass, not before. v0.1 through v0.7 are implemented and green: resolve and review (v0.1), CiviCRM
 write-back and provenance (v0.2), the pdfplumber extraction seam (v0.3),
-CASS-style address normalization (v0.4), the DV policy pack (v0.5), and the v1.0
+CASS-style address normalization (v0.4), the DV policy pack (v0.5), the v1.0
 engineering deliverables — Salesforce connector, Docker self-host, schema-version
-declarations, DPG conformance note (v0.6). What remains before the 1.0 stability
-tag is the WCAG 2.2 AA web review UI, supply-chain hardening, and the
-real-organization adoption the tag is gated on.
+declarations, DPG conformance note (v0.6), and the WCAG 2.2 AA web review UI plus
+import-ready CRM export files (v0.7). What remains before the 1.0 stability tag is
+a full accessibility audit, supply-chain hardening, and the real-organization
+adoption the tag is gated on.
 
 ## License
 
