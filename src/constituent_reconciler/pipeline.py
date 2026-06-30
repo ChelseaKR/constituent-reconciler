@@ -19,6 +19,11 @@ from constituent_reconciler import consent, decisions, matching, suppression
 from constituent_reconciler.config import Recipe
 from constituent_reconciler.connectors.base import Connector, WriteResult
 from constituent_reconciler.connectors.civicrm import CivicrmConfig, CivicrmConnector, Transport
+from constituent_reconciler.connectors.crm_csv import (
+    CIVICRM_IMPORT_MAP,
+    SALESFORCE_IMPORT_MAP,
+    CrmCsvConnector,
+)
 from constituent_reconciler.connectors.csv_out import CsvConnector
 from constituent_reconciler.connectors.salesforce import (
     SalesforceConfig,
@@ -344,6 +349,20 @@ def build_connector(
     output = recipe.output
     if output.connector == "csv":
         connector: Connector = CsvConnector(out_dir / "resolved.csv")
+    elif output.connector == "salesforce_csv":
+        connector = CrmCsvConnector(
+            "salesforce_csv",
+            out_dir / "salesforce_import.csv",
+            SALESFORCE_IMPORT_MAP,
+            external_id_column=output.external_id_field,
+        )
+    elif output.connector == "civicrm_csv":
+        connector = CrmCsvConnector(
+            "civicrm_csv",
+            out_dir / "civicrm_import.csv",
+            CIVICRM_IMPORT_MAP,
+            external_id_column=output.external_id_field,
+        )
     elif output.connector == "civicrm":
         config = CivicrmConfig(
             endpoint=output.endpoint,

@@ -116,6 +116,44 @@ def _cmd_apply(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_review(args: argparse.Namespace) -> int:
+    from constituent_reconciler.review.server import serve
+    from constituent_reconciler.review.session import ReviewSession
+
+    try:
+        recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+    except PolicyViolation as error:
+        print(f"policy error: {error}", file=sys.stderr)
+        return 2
+    result = pipeline.run(recipe)
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    decisions_path = Path(args.decisions) if args.decisions else out_dir / "decisions.json"
+    session = ReviewSession(
+        result,
+        recipe.fields,
+        decisions_path,
+        privacy_mode=recipe.require_local_targets,
+    )
+    print(render_run_summary(result))
+    try:
+        serve(
+            session,
+            host=args.host,
+            port=args.port,
+            open_browser=not args.no_browser,
+        )
+    except PolicyViolation as error:
+        print(f"\npolicy error: {error}", file=sys.stderr)
+        return 2
+    counts = session.counts()
+    print(
+        f"\nreview saved to {decisions_path}: "
+        f"{counts.approved} approved, {counts.rejected} rejected, {counts.pending} pending"
+    )
+    return 0
+
+
 def _cmd_verify(args: argparse.Namespace) -> int:
     ok, message = verify_log(Path(args.provenance))
     print(message)
@@ -168,6 +206,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="override the recipe's policy pack (e.g. dv); fail-closed on unknown",
     )
     apply_parser.set_defaults(func=_cmd_apply)
+
+    review_parser = sub.add_parser(
+        "review", help="open the local web review queue for uncertain pairs"
+    )
+    review_parser.add_argument("--config", required=True, help="path to recipe.toml")
+    review_parser.add_argument("--out", default="out", help="output directory")
+    review_parser.add_argument(
+        "--decisions", default=None, help="decisions file to write (default <out>/decisions.json)"
+    )
+    review_parser.add_argument(
+        "--host", default="127.0.0.1", help="bind host (loopback only under the dv pack)"
+    )
+    review_parser.add_argument(
+        "--port", type=int, default=8765, help="bind port (0 picks a free one)"
+    )
+    review_parser.add_argument(
+        "--no-browser", action="store_true", help="do not open a browser window"
+    )
+    review_parser.add_argument(
+        "--policy-pack",
+        default=None,
+        help="override the recipe's policy pack (e.g. dv); fail-closed on unknown",
+    )
+    review_parser.set_defaults(func=_cmd_review)
 
     verify_parser = sub.add_parser("verify", help="check a provenance log's hash chain")
     verify_parser.add_argument("--provenance", required=True, help="path to provenance.jsonl")

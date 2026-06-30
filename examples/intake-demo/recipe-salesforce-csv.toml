@@ -1,0 +1,36 @@
+# The demo data written to an import-ready Salesforce NPSP file instead of pushed
+# over the network. This is the offline-first path: no token, no API call. The
+# pipeline writes out/salesforce_import.csv with NPSP Contact column headers
+# (FirstName, LastName, Birthdate, Email, Phone) plus the external-id column, so
+# you load it with the Salesforce Data Import Wizard or Data Loader and upsert on
+# External_Id__c. A re-run keyed on the same external id updates rather than
+# duplicates.
+#
+#   reconcile run --config recipe-salesforce-csv.toml --out out
+#
+# The live API push is the opt-in alternative (recipe-salesforce.toml). This file
+# target stays on the machine, so the DV policy pack permits it.
+
+[input]
+existing = "existing.csv"
+incoming = "incoming.csv"
+id_column = "id"
+
+[mapping]
+first_name = "First Name"
+last_name = "Last Name"
+dob = "DOB"
+email = "Email"
+phone = "Phone"
+
+[consent]
+column = "Consent"
+
+[thresholds]
+prior = 0.01
+auto = 0.97
+review = 0.80
+
+[output]
+connector = "salesforce_csv"
+external_id_field = "External_Id__c"

@@ -135,16 +135,39 @@ because the tag itself is gated on adoption (see below):
   for the config, the connector interface, and the JSON artifacts, with the
   versioning contract in docs/decisions/0006-schema-stability.md.
 
+## v0.7.0 — Web review UI and offline CRM export (shipped)
+
+The differentiator's review surface, and the offline-first write path, two items
+the 1.0 milestone named.
+
+* **Local WCAG 2.2 AA web review queue** (`review/`, `reconcile review`): a
+  non-technical reviewer steps through the uncertain pairs in a browser, sees the
+  two records side by side with source spans, and approves or rejects each merge.
+  Verdicts write to the same `decisions.json` that `reconcile apply` consumes, so
+  the web step replaces the hand-edited CSV without changing the pipeline. Built
+  on `http.server`, no web-framework dependency.
+* **Offline by construction**: loopback-only bind, all assets inlined, and under
+  the DV pack a non-loopback bind is refused fail-closed (mirroring the connector
+  local-target gate). The only persisted artifact is `decisions.json` with ids and
+  verdicts and no field value, the minimization the DV pack requires.
+* **Import-ready CRM export connectors** (`salesforce_csv`, `civicrm_csv`): a CSV
+  mapped to the CRM's import schema plus an external-id column for an idempotent
+  CRM-side upsert. The offline-first default path; the live API push stays opt-in.
+  Both are local-file targets, so the DV pack permits them.
+* Still open before the 1.0 accessibility gate: a full axe audit and a
+  screen-reader walkthrough. The structural AA work (table semantics, non-colour
+  status, keyboard-complete controls, no-JS fallback) is in place.
+
 ## v1.0.0 — Stability commitments
 
 Gated on the pipeline proving out against more than one real organization and on
 no breaking change to the named surfaces for two consecutive releases. The
-engineering deliverables landed in v0.6; what remains for the 1.0 tag is the
-adoption evidence and the demonstrated-stability window, plus the WCAG 2.2 AA web
-review UI and supply-chain hardening (SBOM, signed releases, SHA-pinned actions).
-The tag is deliberately withheld until those are real, rather than claimed early:
-1.0 means a stability promise, and a promise that depends on adoption cannot be
-made by a release script.
+engineering deliverables landed in v0.6 and the web review UI in v0.7; what
+remains for the 1.0 tag is the adoption evidence and the demonstrated-stability
+window, plus a full accessibility audit and supply-chain hardening (SBOM, signed
+releases, SHA-pinned actions). The tag is deliberately withheld until those are
+real, rather than claimed early: 1.0 means a stability promise, and a promise that
+depends on adoption cannot be made by a release script.
 
 ## Eval and quality plan
 

@@ -93,9 +93,14 @@ optional extraction seam.
 
 ## Accessibility
 
-The review queue is the human surface and meets WCAG 2.2 AA, with an axe
-AUTO-GATE and a screen-reader walkthrough REVIEW-GATE. EN and ES at parity.
-TODO: commit the ACR.
+The review queue is the human surface. As of v0.7 it is a local web UI
+(`reconcile review`) built to the WCAG 2.2 AA structural bar: a comparison table
+with scoped headers, status carried by text and a symbol rather than colour
+alone, decision controls that work with the keyboard and with no JavaScript, and
+no external asset fetch. The axe AUTO-GATE and the screen-reader walkthrough
+REVIEW-GATE are not yet run, and EN/ES parity for the UI copy is not yet done;
+both stay open before the 1.0 accessibility claim. TODO: run axe in CI, complete
+the screen-reader walkthrough, add the ES copy, and commit the ACR.
 
 ## Security
 

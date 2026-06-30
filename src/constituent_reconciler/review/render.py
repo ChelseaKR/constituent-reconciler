@@ -1,0 +1,281 @@
+"""HTML for the review queue.
+
+Every page is self-contained: the CSS and the small progressive-enhancement
+script are inlined, and nothing is fetched from a network or a CDN. That keeps
+the UI working with no connection and is part of the no-egress guarantee.
+
+The markup is built for WCAG 2.2 AA. Status is carried by text and a symbol, not
+colour alone; the comparison is a real table with scoped headers; the decision
+controls are ordinary buttons that work without JavaScript, and a keyboard
+reviewer can complete a pass using Tab and the visible access keys. The script
+only adds single-key shortcuts on top of controls that already work.
+"""
+
+from __future__ import annotations
+
+from html import escape
+
+from constituent_reconciler.review.session import (
+    APPROVED,
+    REJECTED,
+    PairView,
+    ReviewSession,
+)
+
+_STYLE = """
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body {
+  font: 16px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  margin: 0; color: #1a1a1a; background: #fff;
+}
+.skip-link {
+  position: absolute; left: -999px; top: 0; background: #003366; color: #fff;
+  padding: 0.5rem 1rem; z-index: 10;
+}
+.skip-link:focus { left: 0; }
+header, main, footer { max-width: 60rem; margin: 0 auto; padding: 0 1rem; }
+header { border-bottom: 2px solid #003366; padding-top: 1rem; padding-bottom: 0.5rem; }
+h1 { font-size: 1.4rem; margin: 0.2rem 0; }
+.privacy {
+  background: #002b1d; color: #fff; padding: 0.5rem 1rem; font-weight: 600;
+}
+.progress { margin: 0.5rem 0; font-weight: 600; }
+.bar {
+  background: #eee; border: 1px solid #999; height: 0.9rem;
+  border-radius: 4px; overflow: hidden;
+}
+.bar > span { display: block; height: 100%; background: #003366; }
+table.compare { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+table.compare th, table.compare td {
+  border: 1px solid #999; padding: 0.5rem 0.6rem; text-align: left; vertical-align: top;
+}
+table.compare th[scope=row] { width: 9rem; background: #f2f4f7; }
+.agree { font-weight: 600; }
+.tag {
+  display: inline-block; padding: 0.05rem 0.45rem; border: 1px solid; border-radius: 4px;
+  font-size: 0.8rem; font-weight: 700;
+}
+.tag.match { color: #054d1c; border-color: #054d1c; background: #e6f4ea; }
+.tag.differ { color: #6b1010; border-color: #6b1010; background: #fdecea; }
+.span { color: #444; font-size: 0.8rem; }
+.verdict { margin: 0.4rem 0; font-weight: 700; }
+.verdict.approved { color: #054d1c; }
+.verdict.rejected { color: #6b1010; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 1rem 0; }
+button, .btn {
+  font: inherit; padding: 0.55rem 1rem; border: 2px solid #003366; border-radius: 6px;
+  background: #003366; color: #fff; cursor: pointer; text-decoration: none;
+}
+button.secondary, .btn.secondary { background: #fff; color: #003366; }
+a { color: #003366; }
+:focus-visible { outline: 3px solid #c05600; outline-offset: 2px; }
+ol.queue { padding-left: 1.2rem; }
+ol.queue li { margin: 0.3rem 0; }
+kbd {
+  border: 1px solid #999; border-bottom-width: 2px; border-radius: 4px;
+  padding: 0 0.35rem; font-size: 0.85rem; background: #f2f4f7;
+}
+.note { color: #333; font-size: 0.9rem; }
+"""
+
+_SCRIPT = """
+// Progressive enhancement only: every action below also works via Tab + Enter
+// on a visible control. a=approve, r=reject, j=next, k=previous.
+document.addEventListener('keydown', function (e) {
+  if (e.target.matches('input, textarea, select')) return;
+  var k = e.key.toLowerCase();
+  var map = { a: 'approve', r: 'reject' };
+  if (map[k]) {
+    var b = document.querySelector('button[value="' + map[k] + '"]');
+    if (b) { e.preventDefault(); b.click(); }
+  } else if (k === 'j' || k === 'k') {
+    var sel = k === 'j' ? '[data-nav="next"]' : '[data-nav="prev"]';
+    var link = document.querySelector(sel);
+    if (link) { e.preventDefault(); window.location = link.href; }
+  }
+});
+"""
+
+
+def _page(title: str, body: str, *, privacy: bool) -> str:
+    privacy_banner = (
+        '<div class="privacy" role="status">Privacy mode (DV policy pack): '
+        "this server stays on your machine and writes no field values to disk.</div>"
+        if privacy
+        else ""
+    )
+    return (
+        "<!doctype html>\n"
+        '<html lang="en">\n<head>\n'
+        '<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        f"<title>{escape(title)}</title>\n"
+        f"<style>{_STYLE}</style>\n"
+        "</head>\n<body>\n"
+        '<a class="skip-link" href="#main">Skip to main content</a>\n'
+        f"{privacy_banner}"
+        f"{body}\n"
+        f"<script>{_SCRIPT}</script>\n"
+        "</body>\n</html>\n"
+    )
+
+
+def _progress_bar(done: int, total: int) -> str:
+    pct = 0 if total == 0 else round(done / total * 100)
+    return (
+        f'<div class="bar" role="img" aria-label="{done} of {total} pairs decided">'
+        f'<span style="width:{pct}%"></span></div>'
+    )
+
+
+def render_overview(session: ReviewSession, *, apply_command: str) -> str:
+    """The landing page: progress, the queue, and what to do when finished."""
+
+    counts = session.counts()
+    decided = counts.approved + counts.rejected
+    total = session.total
+    privacy = session.privacy_mode
+
+    rows: list[str] = []
+    for view in session.views():
+        verdict = session.verdict(view.index)
+        if verdict == APPROVED:
+            state = '<span class="tag match">APPROVED &#10003;</span>'
+        elif verdict == REJECTED:
+            state = '<span class="tag differ">REJECTED &#10007;</span>'
+        else:
+            state = "<span>not yet reviewed</span>"
+        label = f"{escape(view.left_id)} vs {escape(view.right_id)}"
+        rows.append(
+            f'<li><a href="/pair/{view.index}">Pair {view.index + 1}: {label}</a> '
+            f"&mdash; {state}</li>"
+        )
+
+    if total == 0:
+        queue_html = (
+            "<p>There are no uncertain pairs to review. "
+            "Every match was decided automatically.</p>"
+        )
+        next_link = ""
+    else:
+        queue_html = '<ol class="queue">\n' + "\n".join(rows) + "\n</ol>"
+        nxt = session.next_undecided()
+        if nxt is not None:
+            next_link = f'<p><a class="btn" href="/pair/{nxt}">Review next pair</a></p>'
+        else:
+            next_link = "<p><strong>All pairs reviewed.</strong></p>"
+
+    body = (
+        "<header>\n<h1>Review queue</h1>\n"
+        f'<p class="progress" aria-live="polite">{decided} of {total} decided '
+        f"&mdash; {counts.approved} approved, {counts.rejected} rejected, "
+        f"{counts.pending} pending.</p>\n"
+        f"{_progress_bar(decided, total)}\n</header>\n"
+        '<main id="main">\n'
+        f"{next_link}\n{queue_html}\n"
+        "<h2>When you are done</h2>\n"
+        "<p>Your decisions are saved as you go to "
+        f"<code>{escape(str(session.decisions_path))}</code>. Apply them with:</p>\n"
+        f"<pre><code>{escape(apply_command)}</code></pre>\n"
+        '<p class="note">Approved pairs are merged; rejected pairs are kept '
+        "separate. You can stop and resume at any time.</p>\n"
+        "</main>\n"
+        '<footer><p class="note">This page runs locally and sends no data over '
+        "the network.</p></footer>"
+    )
+    return _page("Review queue", body, privacy=privacy)
+
+
+def _cell(value: str, span: str) -> str:
+    shown = escape(value) if value else "<em>(blank)</em>"
+    span_html = f'<div class="span">source: {escape(span)}</div>' if span else ""
+    return f"{shown}{span_html}"
+
+
+def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -> str:
+    """The decision screen for one candidate pair."""
+
+    counts = session.counts()
+    decided = counts.approved + counts.rejected
+    total = session.total
+    verdict = session.verdict(view.index)
+
+    field_rows: list[str] = []
+    for cell in view.fields:
+        if cell.agrees:
+            mark = '<span class="tag match">match</span>'
+        else:
+            mark = '<span class="tag differ">differs</span>'
+        field_rows.append(
+            f'<tr><th scope="row">{escape(cell.field.replace("_", " "))}</th>'
+            f"<td>{_cell(cell.left, cell.left_span)}</td>"
+            f"<td>{_cell(cell.right, cell.right_span)}</td>"
+            f'<td class="agree">{mark}</td></tr>'
+        )
+
+    if verdict == APPROVED:
+        current = (
+            '<p class="verdict approved" role="status">'
+            "Current decision: APPROVED &#10003; (merge)</p>"
+        )
+    elif verdict == REJECTED:
+        current = (
+            '<p class="verdict rejected" role="status">'
+            "Current decision: REJECTED &#10007; (keep separate)</p>"
+        )
+    else:
+        current = '<p class="verdict" role="status">No decision yet.</p>'
+
+    prev_index = view.index - 1
+    next_index = view.index + 1
+    prev_link = (
+        f'<a class="btn secondary" data-nav="prev" href="/pair/{prev_index}">'
+        "&larr; Previous</a>"
+        if prev_index >= 0
+        else ""
+    )
+    next_link = (
+        f'<a class="btn secondary" data-nav="next" href="/pair/{next_index}">Next &rarr;</a>'
+        if next_index < total
+        else '<a class="btn secondary" data-nav="next" href="/">Back to queue</a>'
+    )
+
+    pct = view.probability * 100
+    body = (
+        "<header>\n<h1>Review queue</h1>\n"
+        f'<p class="progress" aria-live="polite">Pair {view.index + 1} of {total} '
+        f"&mdash; {decided} decided, {counts.pending} pending.</p>\n"
+        f"{_progress_bar(decided, total)}\n</header>\n"
+        '<main id="main">\n'
+        f"<h2>Is this the same person?</h2>\n"
+        f"<p>The matcher scored these two records at <strong>{pct:.1f}%</strong> "
+        "likely to be the same person, which is below the automatic-merge line, "
+        "so a person decides.</p>\n"
+        f"{current}\n"
+        '<table class="compare">\n<caption class="note">Record '
+        f"{escape(view.left_id)} (from {escape(view.left_source)}) compared with "
+        f"{escape(view.right_id)} (from {escape(view.right_source)}).</caption>\n"
+        "<thead><tr><th scope=\"col\">Field</th>"
+        f'<th scope="col">{escape(view.left_id)} ({escape(view.left_source)})</th>'
+        f'<th scope="col">{escape(view.right_id)} ({escape(view.right_source)})</th>'
+        '<th scope="col">Agreement</th></tr></thead>\n'
+        "<tbody>\n" + "\n".join(field_rows) + "\n</tbody>\n</table>\n"
+        f'<form method="post" action="/pair/{view.index}">\n'
+        '<div class="actions">\n'
+        '<button type="submit" name="verdict" value="approve" accesskey="a">'
+        "Approve merge <kbd>A</kbd></button>\n"
+        '<button type="submit" class="secondary" name="verdict" value="reject" '
+        'accesskey="r">Reject, keep separate <kbd>R</kbd></button>\n'
+        "</div>\n</form>\n"
+        '<nav class="actions" aria-label="Move between pairs">\n'
+        f"{prev_link}\n{next_link}\n</nav>\n"
+        '<p class="note">Keyboard: <kbd>A</kbd> approve, <kbd>R</kbd> reject, '
+        "<kbd>J</kbd> next, <kbd>K</kbd> previous. "
+        f'<a href="/">Back to the full queue</a>.</p>\n'
+        "</main>\n"
+        '<footer><p class="note">Decisions save to '
+        f"<code>{escape(str(session.decisions_path))}</code>. Apply with "
+        f"<code>{escape(apply_command)}</code>.</p></footer>"
+    )
+    return _page(f"Pair {view.index + 1} of {total}", body, privacy=session.privacy_mode)
