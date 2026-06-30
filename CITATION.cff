@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use constituent-reconciler, please cite it using this metadata."
+title: "constituent-reconciler"
+abstract: >-
+  An offline-first pipeline that resolves and deduplicates nonprofit constituent
+  records and writes the verified results back into a case system, with a
+  non-technical human review gate over every uncertain match. It chains extract,
+  normalize, resolve, review, and write around a pre-tuned record-linkage matcher,
+  and ships a privacy mode a victim-service provider can legally use: under the DV
+  policy pack the cloud seam is fused off, PII does not egress, and consent is read
+  on every field on every write. The privacy invariants are merge-blocking tests,
+  not prose.
+type: software
+authors:
+  - given-names: "Chelsea"
+    family-names: "Kelly-Reif"
+    email: "ckellyreif@gmail.com"
+    alias: "ChelseaKR"
+version: "0.7.0"
+date-released: "2026-06-29"
+license: "Apache-2.0"
+repository-code: "https://github.com/ChelseaKR/constituent-reconciler"
+url: "https://github.com/ChelseaKR/constituent-reconciler"
+keywords:
+  - "nonprofit"
+  - "record-linkage"
+  - "deduplication"
+  - "entity-resolution"
+  - "data-intake"
+  - "human-services"

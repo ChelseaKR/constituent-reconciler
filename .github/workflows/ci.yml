@@ -13,11 +13,10 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      # Actions are pinned to tags here for readability. Per the portfolio
-      # supply-chain standard these are pinned to commit SHAs before the first
-      # tagged release; tracked in docs/RESPONSIBLE-TECH-AUDITS.md.
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      # Actions are pinned to a full commit SHA per the portfolio supply-chain
+      # standard; the trailing comment records the human-readable version.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
       # Drive CI through the Makefile so it runs byte for byte the same path as
       # `make verify` does locally.
       - name: Install
