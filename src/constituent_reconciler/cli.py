@@ -34,20 +34,40 @@ from constituent_reconciler.report import (
 from constituent_reconciler.suppression import render_comparable, render_summary
 
 
-def _load_pairs(path: Path, keys: Sequence[str]) -> list[frozenset[str]]:
-    data = json.loads(path.read_text(encoding="utf-8"))
+def _load_pairs(data: dict[str, object], keys: Sequence[str]) -> list[frozenset[str]]:
     pairs: list[frozenset[str]] = []
     for key in keys:
-        for entry in data.get(key, []):
-            if len(entry) != 2:
+        entries = data.get(key, [])
+        if not isinstance(entries, list):
+            raise ValueError(f"{key} must be a list of [left, right] pairs")
+        for entry in entries:
+            if not isinstance(entry, list) or len(entry) != 2:
                 raise ValueError(f"{key} entries must be 2-element [left, right] lists")
             pairs.append(frozenset((str(entry[0]), str(entry[1]))))
     return pairs
 
 
-def _load_household_ids(path: Path, key: str) -> frozenset[str]:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return frozenset(str(entry) for entry in data.get(key, []))
+def _load_household_ids(data: dict[str, object], key: str) -> frozenset[str]:
+    entries = data.get(key, [])
+    if not isinstance(entries, list):
+        raise ValueError(f"{key} must be a list of household ids")
+    return frozenset(str(entry) for entry in entries)
+
+
+def _pairs_awaiting_second_review(data: dict[str, object]) -> list[str]:
+    """Audit-trail pairs that are neither approved nor rejected yet.
+
+    A version-2 decisions file holds every recorded verdict in its ``audit``
+    section. A pair present there but absent from both top-level lists carries
+    a single approval under two-person review; applying such a file must fail,
+    naming the pairs, rather than silently skipping them.
+    """
+
+    audit = data.get("audit")
+    if not isinstance(audit, dict):
+        return []
+    decided = set(_load_pairs(data, ["approved", "rejected"]))
+    return sorted(key for key in audit if frozenset(str(key).split("|")) not in decided)
 
 
 def _print_export(recipe: Recipe, summary: ExportSummary, *, dry_run: bool) -> None:
@@ -162,12 +182,31 @@ def _cmd_apply(args: argparse.Namespace) -> int:
         print(f"policy error: {error}", file=sys.stderr)
         return 2
     decisions_path = Path(args.decisions)
-    force_auto = _load_pairs(decisions_path, ["approved"])
-    force_drop = _load_pairs(decisions_path, ["rejected"])
+    decisions_data = json.loads(decisions_path.read_text(encoding="utf-8"))
+    if not isinstance(decisions_data, dict):
+        print(f"error: {decisions_path} is not a decisions JSON object", file=sys.stderr)
+        return 2
+    awaiting = _pairs_awaiting_second_review(decisions_data)
+    if awaiting:
+        print(
+            f"error: {decisions_path} holds {len(awaiting)} pair(s) still awaiting "
+            "a second reviewer; they cannot be applied:",
+            file=sys.stderr,
+        )
+        for key in awaiting:
+            print(f"  {key.replace('|', ' and ')}", file=sys.stderr)
+        print(
+            "Have a second reviewer finish the review "
+            "(reconcile review --reviewer <other-name>), or reject the pairs.",
+            file=sys.stderr,
+        )
+        return 2
+    force_auto = _load_pairs(decisions_data, ["approved"])
+    force_drop = _load_pairs(decisions_data, ["rejected"])
     # "households_confirmed" is a list of household ids copied from an earlier
     # run's household_suggestions.csv by a reviewer; a suggestion never applies
     # to the CRM export column until it appears here (household.py).
-    confirmed_households = _load_household_ids(decisions_path, "households_confirmed")
+    confirmed_households = _load_household_ids(decisions_data, "households_confirmed")
     result = pipeline.run(recipe, force_auto=force_auto, force_drop=force_drop)
     _, withheld = partition_by_consent(result.golden, require_consent=recipe.require_consent)
     print(render_run_summary(result, withheld=len(withheld)))
@@ -225,12 +264,21 @@ def _cmd_review(args: argparse.Namespace) -> int:
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     decisions_path = Path(args.decisions) if args.decisions else out_dir / "decisions.json"
-    session = ReviewSession(
-        result,
-        recipe.fields,
-        decisions_path,
-        privacy_mode=recipe.require_local_targets,
-    )
+    # The flag may turn two-person review on for any pack; it cannot turn off
+    # a pack that requires it (the dv pack defaults it on), fail-closed.
+    require_second = bool(args.require_second_reviewer) or recipe.require_second_reviewer
+    try:
+        session = ReviewSession(
+            result,
+            recipe.fields,
+            decisions_path,
+            reviewer=args.reviewer,
+            privacy_mode=recipe.require_local_targets,
+            require_second_reviewer=require_second,
+        )
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
     print(render_run_summary(result))
     try:
         serve(
@@ -243,10 +291,13 @@ def _cmd_review(args: argparse.Namespace) -> int:
         print(f"\npolicy error: {error}", file=sys.stderr)
         return 2
     counts = session.counts()
-    print(
+    line = (
         f"\nreview saved to {decisions_path}: "
         f"{counts.approved} approved, {counts.rejected} rejected, {counts.pending} pending"
     )
+    if counts.awaiting_second:
+        line += f", {counts.awaiting_second} awaiting a second reviewer"
+    print(line)
     return 0
 
 
@@ -375,6 +426,19 @@ def build_parser() -> argparse.ArgumentParser:
         "review", help="open the local web review queue for uncertain pairs"
     )
     review_parser.add_argument("--config", required=True, help="path to recipe.toml")
+    review_parser.add_argument(
+        "--reviewer",
+        required=True,
+        help="name recorded with every verdict; the decisions file attributes each decision",
+    )
+    review_parser.add_argument(
+        "--require-second-reviewer",
+        action="store_true",
+        help=(
+            "hold each approval until a second, different reviewer also approves "
+            "(the dv policy pack turns this on by default)"
+        ),
+    )
     review_parser.add_argument("--out", default="out", help="output directory")
     review_parser.add_argument(
         "--decisions", default=None, help="decisions file to write (default <out>/decisions.json)"

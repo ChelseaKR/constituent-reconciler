@@ -114,6 +114,7 @@ class Recipe:
     policy_pack: str = "default"
     require_local_targets: bool = False
     aggregate_export: bool = False
+    require_second_reviewer: bool = False
     suppression_threshold: int = 11
     # The comparable-database export profile is explicit opt-in: no breakdown
     # beyond the base consent/resolution counts is emitted unless the recipe
@@ -160,6 +161,7 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
     output_section = data.get("output", {})
     household_section = data.get("household", {})
     comparable_section = data.get("comparable", {})
+    review_section = data.get("review", {})
 
     if "incoming" not in input_section:
         raise ValueError("recipe [input] must set 'incoming'")
@@ -180,6 +182,11 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
     # A recipe may turn consent enforcement on explicitly even under a permissive
     # pack; it may not turn off a requirement the pack imposes (fail-closed).
     require_consent = policy.require_consent or bool(consent_section.get("require", False))
+    # Same rule for two-person review: the [review] section may turn it on under
+    # any pack, and may not turn off the DV pack's default.
+    require_second_reviewer = policy.require_second_reviewer or bool(
+        review_section.get("require_second_reviewer", False)
+    )
 
     existing_value = input_section.get("existing")
     existing = _resolve(base, str(existing_value)) if existing_value else None
@@ -237,6 +244,7 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
         policy_pack=pack,
         require_local_targets=policy.require_local_targets,
         aggregate_export=policy.aggregate_export,
+        require_second_reviewer=require_second_reviewer,
         suppression_threshold=policy.suppression_threshold,
         comparable_export=bool(comparable_section.get("export", False)),
         comparable_breakdown_fields=comparable_breakdown_fields,

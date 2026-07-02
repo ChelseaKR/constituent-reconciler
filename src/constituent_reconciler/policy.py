@@ -62,6 +62,10 @@ class Policy:
     * ``forbid_cloud_seam`` -> the extraction seam factory (extract/seam.py)
     * ``require_local_targets`` -> connector selection (pipeline.build_connector)
     * ``aggregate_export`` -> the aggregate summary writer (pipeline.export)
+    * ``require_second_reviewer`` -> the review session (review/session.py):
+      a merge decided by a human takes effect only after two distinct
+      reviewers approve it. Not a statutory mandate; a separation-of-duties
+      control for merges whose consequences are hardest to reverse.
     """
 
     pack: str
@@ -69,6 +73,7 @@ class Policy:
     forbid_cloud_seam: bool = False
     require_local_targets: bool = False
     aggregate_export: bool = False
+    require_second_reviewer: bool = False
     suppression_threshold: int = DEFAULT_SUPPRESSION_THRESHOLD
 
 
@@ -84,6 +89,7 @@ _PACKS: dict[str, Policy] = {
         forbid_cloud_seam=True,
         require_local_targets=True,
         aggregate_export=True,
+        require_second_reviewer=True,
     ),
     "hipaa": Policy(
         pack="hipaa",
