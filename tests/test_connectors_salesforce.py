@@ -10,24 +10,9 @@ from constituent_reconciler.connectors.salesforce import (
     SalesforceConnector,
 )
 from constituent_reconciler.models import GoldenRecord
+from tests.conftest import FakeSalesforceTransport
 
 FIELDS = ("first_name", "last_name", "dob", "email", "phone")
-
-
-class _FakeTransport:
-    """Returns queued responses and records every request for inspection."""
-
-    def __init__(self, responses: list[tuple[int, dict[str, object] | None]]) -> None:
-        self._responses = responses
-        self.calls: list[tuple[str, str, dict[str, str], bytes | None]] = []
-
-    def send(
-        self, method: str, url: str, *, headers: dict[str, str], body: bytes | None
-    ) -> tuple[int, bytes]:
-        self.calls.append((method, url, headers, body))
-        status, payload = self._responses.pop(0)
-        raw = b"" if payload is None else json.dumps(payload).encode("utf-8")
-        return status, raw
 
 
 def _golden(cluster_id: str, fields: dict[str, str], consent: bool = True) -> GoldenRecord:
@@ -40,7 +25,7 @@ def _golden(cluster_id: str, fields: dict[str, str], consent: bool = True) -> Go
     )
 
 
-def _connector(transport: _FakeTransport) -> SalesforceConnector:
+def _connector(transport: FakeSalesforceTransport) -> SalesforceConnector:
     return SalesforceConnector(
         SalesforceConfig(instance_url="https://x.my.salesforce.com", access_token="tok"),
         transport=transport,
@@ -48,7 +33,7 @@ def _connector(transport: _FakeTransport) -> SalesforceConnector:
 
 
 def test_upsert_creates_when_record_is_new() -> None:
-    transport = _FakeTransport([(201, {"id": "003ABC", "success": True, "created": True})])
+    transport = FakeSalesforceTransport([(201, {"id": "003ABC", "success": True, "created": True})])
     connector = _connector(transport)
     record = _golden("E1", {"first_name": "jane", "last_name": "doe", "dob": "1990-01-01"})
 
@@ -68,7 +53,9 @@ def test_upsert_creates_when_record_is_new() -> None:
 
 
 def test_upsert_updates_when_record_exists_with_200_body() -> None:
-    transport = _FakeTransport([(200, {"id": "003XYZ", "success": True, "created": False})])
+    transport = FakeSalesforceTransport(
+        [(200, {"id": "003XYZ", "success": True, "created": False})]
+    )
     connector = _connector(transport)
     record = _golden("E1", {"first_name": "jane", "last_name": "doe"})
 
@@ -79,7 +66,7 @@ def test_upsert_updates_when_record_exists_with_200_body() -> None:
 
 
 def test_upsert_update_with_204_no_content_falls_back_to_external_id() -> None:
-    transport = _FakeTransport([(204, None)])
+    transport = FakeSalesforceTransport([(204, None)])
     connector = _connector(transport)
     record = _golden("E1", {"first_name": "jane", "last_name": "doe"})
 
@@ -91,7 +78,7 @@ def test_upsert_update_with_204_no_content_falls_back_to_external_id() -> None:
 
 
 def test_dry_run_makes_no_network_calls() -> None:
-    transport = _FakeTransport([])
+    transport = FakeSalesforceTransport([])
     connector = _connector(transport)
     record = _golden("E1", {"first_name": "jane", "last_name": "doe"})
 
@@ -102,7 +89,7 @@ def test_dry_run_makes_no_network_calls() -> None:
 
 
 def test_missing_access_token_raises_before_any_call() -> None:
-    transport = _FakeTransport([(201, {"id": "x", "created": True})])
+    transport = FakeSalesforceTransport([(201, {"id": "x", "created": True})])
     connector = SalesforceConnector(
         SalesforceConfig(instance_url="https://x.my.salesforce.com", access_token=""),
         transport=transport,
@@ -114,7 +101,7 @@ def test_missing_access_token_raises_before_any_call() -> None:
 
 
 def test_api_error_status_raises() -> None:
-    transport = _FakeTransport([(400, {"message": "bad"})])
+    transport = FakeSalesforceTransport([(400, {"message": "bad"})])
     connector = _connector(transport)
     record = _golden("E1", {"first_name": "jane", "last_name": "doe"})
     with pytest.raises(ConnectorError):
