@@ -46,6 +46,9 @@ pre-commit install
 - Keep PRs small and reviewable, even when working solo.
 - Update `docs/ROADMAP.md` and `CHANGELOG.md` when behavior changes, and
   regenerate the eval report (`make eval`) when matching changes.
+- Before a release, grep the capability claims in `README.md` and `CLAUDE.md`
+  against the code and refresh `docs/CLAIMS-AUDIT.md`; a capability stays
+  labeled "planned" until the code exists.
 
 ## Reporting a security or privacy issue
 
