@@ -341,6 +341,14 @@ Mount your own recipe and data at `/work/data` to run against real input. The
 `reconcile schema` command prints the config, connector, and report schema
 versions the build commits to (see `docs/decisions/0006-schema-stability.md`).
 
+### Installing without internet access
+
+For a machine with outbound internet disabled, `make bundle` builds an offline
+install bundle: a dependency wheelhouse, the saved Docker image, a source
+archive, and a checksum manifest that CI signs with Sigstore. Verification,
+transfer, and install steps are in
+[docs/INSTALL-OFFLINE.md](docs/INSTALL-OFFLINE.md).
+
 ## What it does not do
 
 * It is **not a CRM or a system of record.** It writes into the systems an

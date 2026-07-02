@@ -1,4 +1,4 @@
-.PHONY: install verify format-check lint type test security eval eval-large run docker clean
+.PHONY: install verify format-check lint type test security eval eval-large run docker bundle clean
 
 # Reproduce the full local toolchain. CI mirrors `make verify` byte for byte.
 # `uv sync --frozen` refuses to run (and exits non-zero) if uv.lock is stale
@@ -57,5 +57,30 @@ run:
 docker:
 	docker build -t constituent-reconciler .
 
+# Build the offline install bundle in dist/bundle: a wheelhouse for this
+# platform and Python, the saved Docker image when Docker is available, a source
+# archive, the install doc, and SHA256SUMS over all of it. See
+# docs/INSTALL-OFFLINE.md for the receiving side.
+BUNDLE := dist/bundle
+SHA256 := $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo "shasum -a 256")
+
+bundle:
+	rm -rf $(BUNDLE)
+	mkdir -p $(BUNDLE)/wheelhouse
+	uv build --wheel --out-dir $(BUNDLE)/wheelhouse
+	uv export --frozen --format requirements.txt --group dev --extra extract --no-hashes --no-emit-project --output-file $(BUNDLE)/requirements.txt
+	.venv/bin/python -m pip download --requirement $(BUNDLE)/requirements.txt --dest $(BUNDLE)/wheelhouse
+	@if command -v docker >/dev/null 2>&1; then \
+		docker build -t constituent-reconciler . && \
+		docker save constituent-reconciler -o $(BUNDLE)/constituent-reconciler-image.tar; \
+	else \
+		echo "warning: docker not found; bundle omits constituent-reconciler-image.tar" >&2; \
+	fi
+	git archive --format=tar.gz -o $(BUNDLE)/constituent-reconciler-src.tar.gz HEAD
+	cp docs/INSTALL-OFFLINE.md $(BUNDLE)/INSTALL-OFFLINE.md
+	cd $(BUNDLE) && find . -type f ! -name SHA256SUMS | sed 's|^\./||' | LC_ALL=C sort \
+		| xargs $(SHA256) > SHA256SUMS
+	@echo "bundle written to $(BUNDLE)"
+
 clean:
-	rm -rf out out-dv .pytest_cache .mypy_cache .ruff_cache
+	rm -rf out out-dv dist .pytest_cache .mypy_cache .ruff_cache
