@@ -1,5 +1,5 @@
 {
-  "note": "Planted ground truth for the demo fixtures. Each cluster is a set of record ids that are the same person. All within-cluster pairs are true duplicates; everything else is a true non-duplicate. The two same-name, different-DOB look-alikes (E008/N007 and the non-paired Marias) are NOT here on purpose: one is a genuine non-duplicate, and E002/N004 IS a duplicate with a DOB typo, so the matcher must send those to review rather than guess.",
+  "note": "Planted ground truth for the demo fixtures. Each cluster is a set of record ids that are the same person. All within-cluster pairs are true duplicates; everything else is a true non-duplicate. The two same-name, different-DOB look-alikes (E008/N007 and the non-paired Marias) are NOT here on purpose: one is a genuine non-duplicate, and E002/N004 IS a duplicate with a DOB typo, so the matcher must send those to review rather than guess. The bias-probe clusters follow the same pattern per class: E016/N013 is one person whose first name is transliterated two ways (Mohammed/Muhammad), with look-alike N015 (same name, different DOB) planted as a non-duplicate; E017/N014 is a transliterated pair (Yousef/Yusuf) rescued by a shared email; E018/N016 is one person with a hyphenated and an unhyphenated surname, with look-alike N017 (Sofia Garcia vs Sofia Garcia-Lopez) a non-duplicate; E020/N018 is one person recorded family-name-first on intake, with look-alike N019 (same name in Western order, different DOB) a non-duplicate; E021/N020 shares a rural route written two ways, with E022/N021 (father and son sharing a PO Box, Sr/Jr in the surname field) a non-duplicate; E023/N022 is the standard-address control for the rural pair.",
   "clusters": [
     ["E003", "N002"],
     ["E005", "N006"],
@@ -7,6 +7,33 @@
     ["E010", "N008"],
     ["E012", "N010"],
     ["N003", "N011"],
-    ["E002", "N004"]
-  ]
+    ["E002", "N004"],
+    ["E016", "N013"],
+    ["E017", "N014"],
+    ["E018", "N016"],
+    ["E020", "N018"],
+    ["E021", "N020"],
+    ["E023", "N022"]
+  ],
+  "classes_note": "Record id -> class tags for the bias slice of the eval. A pair counts toward a class when at least one member carries the tag; records with no tag form the baseline class. Tags mark what a record probes, not every trait it has (E016/N013 carry an incidental street address so the transliteration probe isolates the name signal).",
+  "classes": {
+    "E016": ["name:transliterated"],
+    "N013": ["name:transliterated"],
+    "N015": ["name:transliterated"],
+    "E017": ["name:transliterated"],
+    "N014": ["name:transliterated"],
+    "E018": ["name:hyphenated"],
+    "N016": ["name:hyphenated"],
+    "E019": ["name:hyphenated"],
+    "N017": ["name:hyphenated"],
+    "E020": ["name:nonwestern-order"],
+    "N018": ["name:nonwestern-order"],
+    "N019": ["name:nonwestern-order"],
+    "E021": ["address:rural"],
+    "N020": ["address:rural"],
+    "E022": ["address:rural"],
+    "N021": ["address:rural"],
+    "E023": ["address:standard"],
+    "N022": ["address:standard"]
+  }
 }

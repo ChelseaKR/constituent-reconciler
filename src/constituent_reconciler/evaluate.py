@@ -6,8 +6,11 @@ a duplicate. The false-merge rate is therefore the gated metric, reported with a
 Wilson confidence interval because the denominator (auto-merged pairs) is small
 and a normal-approximation interval would understate the uncertainty.
 
-Ground truth is given as clusters of record ids. All within-cluster pairs are the
-true duplicates; everything else is a true non-duplicate.
+Ground truth is given as clusters of record ids. All within-cluster pairs are
+the true duplicates; everything else is a true non-duplicate. The ground truth
+may also tag record ids with fixture classes (transliterated names, rural
+addresses, and so on); :func:`per_class_metrics` slices the same rates by class
+so that error concentrated in one group is reported rather than averaged away.
 
 Extraction is scored separately by ``extraction_metrics``: field-level precision
 and recall of the PDF extractor against a hand-labeled fixture set, compared on
@@ -29,6 +32,10 @@ from constituent_reconciler.normalize import (
     normalize_name,
     normalize_phone,
 )
+
+# The tag used for records that carry no class tag at all. Baseline pairs are the
+# comparison group the tagged classes are read against.
+BASELINE_TAG = "baseline"
 
 
 def wilson_interval(successes: int, trials: int, z: float = 1.96) -> tuple[float, float]:
@@ -83,6 +90,95 @@ class EvalReport:
     recall_coverage: float
 
     blocking_misses: int
+
+
+@dataclass(frozen=True)
+class ClassReport:
+    """One class's slice of the eval: the same asymmetric rates, per fixture class.
+
+    A class is a set of record ids tagged in the ground truth (for example
+    ``name:transliterated`` or ``address:rural``); a pair belongs to the class
+    when at least one member carries the tag. Rates follow :class:`EvalReport`
+    semantics restricted to the class's pairs, each with a Wilson interval
+    because the per-class denominators are small.
+    """
+
+    tag: str
+    n_true_pairs: int
+    n_auto: int
+    n_review: int
+
+    false_merges: int
+    false_merge_rate: float
+    false_merge_ci: tuple[float, float]
+
+    missed: int
+    missed_match_rate: float
+    missed_match_ci: tuple[float, float]
+
+    recall_auto: float
+    recall_coverage: float
+
+
+def per_class_metrics(
+    pairs: Iterable[Pair],
+    truth_clusters: Iterable[Iterable[str]],
+    classes: Mapping[str, Iterable[str]],
+) -> list[ClassReport]:
+    """Slice the eval metrics by fixture class.
+
+    ``classes`` maps a record id to the class tags it probes (for example
+    ``{"E016": ["name:transliterated"]}``). Records that carry no tag form the
+    ``baseline`` class, reported first so the tagged classes can be read against
+    it. False merges and misses are judged against the full ground truth; only
+    the pair population is restricted to the class.
+    """
+
+    all_pairs = list(pairs)
+    truth = truth_pairs(truth_clusters)
+    auto = {p.key() for p in all_pairs if p.band is Band.AUTO}
+    review = {p.key() for p in all_pairs if p.band is Band.REVIEW}
+    coverage = auto | review
+
+    members_by_tag: dict[str, set[str]] = {}
+    for record_id, tags in classes.items():
+        for tag in tags:
+            members_by_tag.setdefault(tag, set()).add(record_id)
+    all_tagged: set[str] = set().union(*members_by_tag.values()) if members_by_tag else set()
+
+    def slice_for(tag: str, touches: set[str], *, complement: bool) -> ClassReport:
+        def in_class(pair: frozenset[str]) -> bool:
+            hit = bool(pair & touches)
+            return not hit if complement else hit
+
+        auto_t = {p for p in auto if in_class(p)}
+        review_t = {p for p in review if in_class(p)}
+        truth_t = {p for p in truth if in_class(p)}
+        coverage_t = auto_t | review_t
+
+        false_merges = len(auto_t - truth)
+        missed = len(truth_t - coverage)
+        caught_auto = len(auto_t & truth_t)
+        caught_cov = len(coverage_t & truth_t)
+        return ClassReport(
+            tag=tag,
+            n_true_pairs=len(truth_t),
+            n_auto=len(auto_t),
+            n_review=len(review_t),
+            false_merges=false_merges,
+            false_merge_rate=(false_merges / len(auto_t)) if auto_t else 0.0,
+            false_merge_ci=wilson_interval(false_merges, len(auto_t)),
+            missed=missed,
+            missed_match_rate=(missed / len(truth_t)) if truth_t else 0.0,
+            missed_match_ci=wilson_interval(missed, len(truth_t)),
+            recall_auto=(caught_auto / len(truth_t)) if truth_t else 1.0,
+            recall_coverage=(caught_cov / len(truth_t)) if truth_t else 1.0,
+        )
+
+    reports = [slice_for(BASELINE_TAG, all_tagged, complement=True)]
+    for tag in sorted(members_by_tag):
+        reports.append(slice_for(tag, members_by_tag[tag], complement=False))
+    return reports
 
 
 def cohen_kappa(predicted: list[bool], actual: list[bool]) -> float:

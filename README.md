@@ -190,10 +190,15 @@ reconcile eval --config examples/intake-demo/recipe.toml \
 ```
 
 The committed result is in [eval/report.md](eval/report.md): on the demo
-fixtures the false-merge rate is 0%, and every true duplicate is surfaced to a
-human at the auto or review level. The gated metric is the false-merge rate
-because a wrong merge is the expensive, sometimes irreversible error; a missed
-match only leaves a duplicate.
+fixtures the false-merge rate is 0%, and every baseline true duplicate is
+surfaced to a human at the auto or review level. The gated metric is the
+false-merge rate because a wrong merge is the expensive, sometimes irreversible
+error; a missed match only leaves a duplicate. The fixtures also plant
+deliberately hard bias probes — transliterated name variants, hyphenated
+surnames, non-Western name order, rural and informal addresses — and the report
+breaks error rates out per class ("Bias by class") instead of averaging them
+away; the one probe the matcher misses today, a family-name-first order swap,
+is reported there as a known blind spot.
 
 ### Reading from PDFs
 

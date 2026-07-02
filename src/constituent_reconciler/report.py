@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from constituent_reconciler.evaluate import EvalReport, ExtractionReport
+from constituent_reconciler.evaluate import ClassReport, EvalReport, ExtractionReport
 from constituent_reconciler.models import RunResult
 from constituent_reconciler.quality import SourceQuality
 from constituent_reconciler.suppression import SUPPRESSED
@@ -108,7 +108,85 @@ def _ci(interval: tuple[float, float]) -> str:
     return f"[{_pct(low)}, {_pct(high)}]"
 
 
-def render_eval_markdown(report: EvalReport, *, dataset: str, gate_threshold: float = 0.0) -> str:
+def _bias_section(class_reports: Sequence[ClassReport]) -> list[str]:
+    """Render the per-class bias table and the standing mitigations."""
+
+    lines = [
+        "## Bias by class",
+        "",
+        "Matcher error is not evenly distributed, so the fixtures plant records in "
+        "the name and address classes where record linkage is known to degrade: "
+        "transliterated name variants, hyphenated surnames, non-Western "
+        "(family-name-first) name order, and rural or informal addresses, each with "
+        "a true-duplicate pair and a look-alike non-duplicate. Classes come from "
+        "the `classes` map in `ground_truth.json`; a pair counts toward a class "
+        "when at least one of its records carries the tag, and untagged records "
+        "form the baseline. The planted probes count toward the headline numbers "
+        "above; a miss in a hard class is reported, not excluded.",
+        "",
+        "| Class | True pairs | Auto | Review | False-merge rate | 95% CI "
+        "| Missed-match rate | 95% CI | Auto recall | Coverage recall |",
+        "|-------|-----------|------|--------|------------------|--------"
+        "|-------------------|--------|-------------|-----------------|",
+    ]
+    for cr in class_reports:
+        lines.append(
+            f"| `{cr.tag}` | {cr.n_true_pairs} | {cr.n_auto} | {cr.n_review} "
+            f"| {_pct(cr.false_merge_rate)} ({cr.false_merges}/{cr.n_auto}) "
+            f"| {_ci(cr.false_merge_ci)} "
+            f"| {_pct(cr.missed_match_rate)} ({cr.missed}/{cr.n_true_pairs}) "
+            f"| {_ci(cr.missed_match_ci)} "
+            f"| {_pct(cr.recall_auto)} | {_pct(cr.recall_coverage)} |"
+        )
+    lines += [
+        "",
+        "### Mitigations and caveats",
+        "",
+        "- **Small denominators.** Each class holds a handful of pairs, so every "
+        "rate carries a Wilson interval; read the intervals, not the point "
+        "estimates. A 0% with a wide interval is weak evidence of fairness, and "
+        "one planted pair can swing a class rate from 0% to 100%.",
+        "- **The review band is the structural mitigation.** Pairs the matcher "
+        "under-scores are routed to a human rather than silently dropped or "
+        "merged, so a class's coverage recall (auto plus review) is the number "
+        "that matters most: it is the share of that class's true duplicates a "
+        "person still gets to see.",
+        "- **Normalization absorbs some classes entirely** "
+        "(`normalize.py`): hyphens, apostrophes, spacing, and accents are "
+        "stripped before comparison, so hyphenated and accented variants match "
+        "exactly rather than fuzzily.",
+        "- **Transliterated variants sit at the Jaro-Winkler boundary.** "
+        "Mohammed/Muhammad scores 0.85, below the 0.88 close threshold, so the "
+        "matcher reads the names as different and the pair reaches a human only "
+        "when other evidence (shared email, phone, or address) lifts it into the "
+        "review band. A transliterated pair with no shared contact field is "
+        "dropped, which baseline names do not risk.",
+        "- **Non-Western name order is a known blind spot.** A family-name-first "
+        "record scores both name fields as disagreements, and no realistic "
+        "amount of contact evidence lifts the pair back into coverage; the "
+        "fixture's swapped pair is missed and reported above. Swap-aware "
+        "comparison is roadmap work (`docs/RESEARCH-ROADMAP.md`, with E6's "
+        "matching improvements).",
+        "- **Rural and informal addresses degrade, not fail.** `RR 2 Box 152` "
+        "and `Rural Route 2 Box 152` do not standardize to the same key (the "
+        "deterministic ruleset covers USPS Pub. 28 abbreviations, not rural "
+        "route synonyms), so the address reads as a disagreement and the pair "
+        "lands in review instead of auto; the standard-address control "
+        "auto-merges on the same evidence. Shared rural PO Boxes also make "
+        "look-alikes likelier, which is why the Sr/Jr pair is planted to land "
+        "in review.",
+        "",
+    ]
+    return lines
+
+
+def render_eval_markdown(
+    report: EvalReport,
+    *,
+    dataset: str,
+    gate_threshold: float = 0.0,
+    class_reports: Sequence[ClassReport] | None = None,
+) -> str:
     gate_pass = report.false_merge_rate <= gate_threshold
     gate_word = "PASS" if gate_pass else "FAIL"
 
@@ -147,6 +225,10 @@ def render_eval_markdown(report: EvalReport, *, dataset: str, gate_threshold: fl
         f"| Recall, auto+review coverage | {_pct(report.recall_coverage)} | |",
         f"| Blocking misses (true pairs never scored) | {report.blocking_misses} | |",
         "",
+    ]
+    if class_reports:
+        lines += _bias_section(class_reports)
+    lines += [
         "## Gate",
         "",
         f"False-merge gate at threshold {_pct(gate_threshold)}: **{gate_word}** "

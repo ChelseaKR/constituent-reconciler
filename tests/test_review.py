@@ -63,12 +63,15 @@ def _session(
 
 def test_session_exposes_the_review_pairs(tmp_path: Path) -> None:
     _, _, session = _session(tmp_path)
-    assert session.total == 2
+    assert session.total == 7
     views = session.views()
-    # The two known lookalike pairs are routed to review by the pipeline.
+    # The two known lookalike pairs are routed to review by the pipeline, as are
+    # the bias probes that need a human (transliterated and rural-address pairs).
     keys = {frozenset((v.left_id, v.right_id)) for v in views}
     assert frozenset(("E002", "N004")) in keys
     assert frozenset(("E008", "N007")) in keys
+    assert frozenset(("E016", "N013")) in keys
+    assert frozenset(("E021", "N020")) in keys
 
 
 def test_record_writes_through_to_decisions_file(tmp_path: Path) -> None:
@@ -78,7 +81,7 @@ def test_record_writes_through_to_decisions_file(tmp_path: Path) -> None:
     assert len(payload["approved"]) == 1
     assert payload["rejected"] == []
     counts = session.counts()
-    assert counts.approved == 1 and counts.pending == 1
+    assert counts.approved == 1 and counts.pending == session.total - 1
 
 
 def test_unknown_verdict_is_refused(tmp_path: Path) -> None:
@@ -102,7 +105,8 @@ def test_next_undecided_skips_decided_pairs(tmp_path: Path) -> None:
     assert session.next_undecided() == 0
     session.record(0, APPROVED)
     assert session.next_undecided(after=0) == 1
-    session.record(1, REJECTED)
+    for index in range(1, session.total):
+        session.record(index, REJECTED)
     assert session.next_undecided() is None
 
 

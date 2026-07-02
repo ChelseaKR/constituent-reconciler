@@ -10,18 +10,40 @@ A false merge joins two different people and can corrupt a record irreversibly. 
 
 | Metric | Value | 95% CI |
 |--------|-------|--------|
-| Records | 27 | |
-| True duplicate pairs (ground truth) | 7 | |
-| Candidate pairs after blocking | 8 | |
-| Auto-merged pairs | 6 | |
-| Pairs sent to review | 2 | |
-| **False-merge rate (gated)** | **0.0%** (0/6) | [0.0%, 39.0%] |
-| Missed-match rate | 0.0% (0/7) | [0.0%, 35.4%] |
+| Records | 45 | |
+| True duplicate pairs (ground truth) | 13 | |
+| Candidate pairs after blocking | 18 | |
+| Auto-merged pairs | 9 | |
+| Pairs sent to review | 7 | |
+| **False-merge rate (gated)** | **0.0%** (0/9) | [0.0%, 29.9%] |
+| Missed-match rate | 7.7% (1/13) | [1.4%, 33.3%] |
 | Precision, auto | 100.0% | |
-| Recall, auto | 85.7% | |
-| Precision, auto+review coverage | 87.5% | |
-| Recall, auto+review coverage | 100.0% | |
+| Recall, auto | 69.2% | |
+| Precision, auto+review coverage | 75.0% | |
+| Recall, auto+review coverage | 92.3% | |
 | Blocking misses (true pairs never scored) | 0 | |
+
+## Bias by class
+
+Matcher error is not evenly distributed, so the fixtures plant records in the name and address classes where record linkage is known to degrade: transliterated name variants, hyphenated surnames, non-Western (family-name-first) name order, and rural or informal addresses, each with a true-duplicate pair and a look-alike non-duplicate. Classes come from the `classes` map in `ground_truth.json`; a pair counts toward a class when at least one of its records carries the tag, and untagged records form the baseline. The planted probes count toward the headline numbers above; a miss in a hard class is reported, not excluded.
+
+| Class | True pairs | Auto | Review | False-merge rate | 95% CI | Missed-match rate | 95% CI | Auto recall | Coverage recall |
+|-------|-----------|------|--------|------------------|--------|-------------------|--------|-------------|-----------------|
+| `baseline` | 7 | 6 | 2 | 0.0% (0/6) | [0.0%, 39.0%] | 0.0% (0/7) | [0.0%, 35.4%] | 85.7% | 100.0% |
+| `address:rural` | 1 | 0 | 2 | 0.0% (0/0) | [0.0%, 100.0%] | 0.0% (0/1) | [0.0%, 79.3%] | 0.0% | 100.0% |
+| `address:standard` | 1 | 1 | 0 | 0.0% (0/1) | [0.0%, 79.3%] | 0.0% (0/1) | [0.0%, 79.3%] | 100.0% | 100.0% |
+| `name:hyphenated` | 1 | 1 | 0 | 0.0% (0/1) | [0.0%, 79.3%] | 0.0% (0/1) | [0.0%, 79.3%] | 100.0% | 100.0% |
+| `name:nonwestern-order` | 1 | 0 | 1 | 0.0% (0/0) | [0.0%, 100.0%] | 100.0% (1/1) | [20.7%, 100.0%] | 0.0% | 0.0% |
+| `name:transliterated` | 2 | 1 | 2 | 0.0% (0/1) | [0.0%, 79.3%] | 0.0% (0/2) | [0.0%, 65.8%] | 50.0% | 100.0% |
+
+### Mitigations and caveats
+
+- **Small denominators.** Each class holds a handful of pairs, so every rate carries a Wilson interval; read the intervals, not the point estimates. A 0% with a wide interval is weak evidence of fairness, and one planted pair can swing a class rate from 0% to 100%.
+- **The review band is the structural mitigation.** Pairs the matcher under-scores are routed to a human rather than silently dropped or merged, so a class's coverage recall (auto plus review) is the number that matters most: it is the share of that class's true duplicates a person still gets to see.
+- **Normalization absorbs some classes entirely** (`normalize.py`): hyphens, apostrophes, spacing, and accents are stripped before comparison, so hyphenated and accented variants match exactly rather than fuzzily.
+- **Transliterated variants sit at the Jaro-Winkler boundary.** Mohammed/Muhammad scores 0.85, below the 0.88 close threshold, so the matcher reads the names as different and the pair reaches a human only when other evidence (shared email, phone, or address) lifts it into the review band. A transliterated pair with no shared contact field is dropped, which baseline names do not risk.
+- **Non-Western name order is a known blind spot.** A family-name-first record scores both name fields as disagreements, and no realistic amount of contact evidence lifts the pair back into coverage; the fixture's swapped pair is missed and reported above. Swap-aware comparison is roadmap work (`docs/RESEARCH-ROADMAP.md`, with E6's matching improvements).
+- **Rural and informal addresses degrade, not fail.** `RR 2 Box 152` and `Rural Route 2 Box 152` do not standardize to the same key (the deterministic ruleset covers USPS Pub. 28 abbreviations, not rural route synonyms), so the address reads as a disagreement and the pair lands in review instead of auto; the standard-address control auto-merges on the same evidence. Shared rural PO Boxes also make look-alikes likelier, which is why the Sr/Jr pair is planted to land in review.
 
 ## Gate
 

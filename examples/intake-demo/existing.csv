@@ -1,16 +1,24 @@
-id,First Name,Last Name,DOB,Email,Phone,Consent
-E001,Linda,Tran,1975-08-14,,,granted
-E002,James,Carter,1972-03-08,,,granted
-E003,Jonathan,Reyes,1990-04-12,,,granted
-E004,Wei,Chen,1968-01-22,wei.chen@example.org,,granted
-E005,Aisha,Okafor,1988-12-05,aisha.okafor@example.org,,granted
-E006,Carlos,Mendoza,1995-05-17,,530-555-0110,granted
-E007,Katherine,O'Brien,1978-02-20,,,granted
-E008,Maria,Lopez,1991-06-14,,,granted
-E009,Samuel,Adeyemi,1983-09-09,,,granted
-E010,Maria,Gonzalez,1985-11-03,maria.g@example.org,,granted
-E011,Priya,Patel,1999-07-25,,,granted
-E012,Robert,Smith,1965-07-19,,(530) 555-0143,granted
-E013,Grace,Kim,1980-04-01,,,granted
-E014,Daniel,Owens,1973-11-30,,,granted
-E015,Fatima,Hassan,1986-06-06,,,granted
+id,First Name,Last Name,DOB,Email,Phone,Consent,Address
+E001,Linda,Tran,1975-08-14,,,granted,
+E002,James,Carter,1972-03-08,,,granted,
+E003,Jonathan,Reyes,1990-04-12,,,granted,
+E004,Wei,Chen,1968-01-22,wei.chen@example.org,,granted,
+E005,Aisha,Okafor,1988-12-05,aisha.okafor@example.org,,granted,
+E006,Carlos,Mendoza,1995-05-17,,530-555-0110,granted,
+E007,Katherine,O'Brien,1978-02-20,,,granted,
+E008,Maria,Lopez,1991-06-14,,,granted,
+E009,Samuel,Adeyemi,1983-09-09,,,granted,
+E010,Maria,Gonzalez,1985-11-03,maria.g@example.org,,granted,
+E011,Priya,Patel,1999-07-25,,,granted,
+E012,Robert,Smith,1965-07-19,,(530) 555-0143,granted,
+E013,Grace,Kim,1980-04-01,,,granted,
+E014,Daniel,Owens,1973-11-30,,,granted,
+E015,Fatima,Hassan,1986-06-06,,,granted,
+E016,Mohammed,Karim,1979-03-02,,,granted,982 Willow Creek Road
+E017,Yousef,Abadi,1991-08-23,yousef.abadi@example.org,,granted,
+E018,Ana,Garcia-Lopez,1987-04-19,,,granted,
+E019,Sofia,Garcia-Lopez,1993-06-30,,,granted,
+E020,Wei,Zhang,1990-11-12,,530-555-0177,granted,
+E021,Earl,Whitfield,1954-09-27,,,granted,RR 2 Box 152
+E022,Walter,Odom Sr,1949-12-02,,,granted,PO Box 88
+E023,Dorothy,Mills,1948-02-11,,,granted,417 North Elm Street

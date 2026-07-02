@@ -193,8 +193,10 @@ def test_address_field_activates_only_when_mapped() -> None:
     recipe = load_recipe(EXAMPLES / "recipe.toml")
     assert "address" in recipe.fields
 
+    # The intake-demo DV recipe does not map the Address column, so the field
+    # stays inactive there even though the fixture CSVs carry it.
     demo = load_recipe(
-        Path(__file__).resolve().parents[1] / "examples" / "intake-demo" / "recipe.toml"
+        Path(__file__).resolve().parents[1] / "examples" / "intake-demo" / "recipe-dv.toml"
     )
     assert "address" not in demo.fields
 

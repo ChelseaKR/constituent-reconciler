@@ -12,6 +12,7 @@ from constituent_reconciler.evaluate import (
     evaluate,
     extraction_metrics,
     normalize_extracted_value,
+    per_class_metrics,
     truth_pairs,
     wilson_interval,
 )
@@ -234,3 +235,65 @@ def test_eval_extraction_cli_writes_report(tmp_path: Path) -> None:
     assert "# Extraction eval report" in content
     assert "Per-field breakdown" in content
     assert "**MET**" in content
+
+
+def test_per_class_metrics_slices_rates_by_tag() -> None:
+    banded = band_pairs(
+        [("a", "b", 0.99), ("a", "c", 0.85), ("x", "y", 0.99), ("p", "q", 0.10)],
+        auto_threshold=0.97,
+        review_threshold=0.80,
+    )
+    # Truth: a-b, a-c, and p-q are duplicates; x-y is not.
+    truth = [["a", "b"], ["a", "c"], ["p", "q"]]
+    # One tagged member is enough to pull a pair into a class: b and c carry no
+    # tag, yet a-b and a-c belong to name:translit because a does.
+    classes = {"a": ["name:translit"], "p": ["name:order"], "q": ["name:order"]}
+    reports = {r.tag: r for r in per_class_metrics(banded, truth, classes)}
+    assert set(reports) == {"baseline", "name:translit", "name:order"}
+
+    translit = reports["name:translit"]
+    assert translit.n_true_pairs == 2
+    assert translit.n_auto == 1
+    assert translit.n_review == 1
+    assert translit.false_merges == 0
+    assert translit.missed == 0
+    assert translit.recall_auto == 0.5
+    assert translit.recall_coverage == 1.0
+
+    # The p-q duplicate scored below the review band: a missed match, charged
+    # to its class only.
+    order = reports["name:order"]
+    assert order.n_true_pairs == 1
+    assert order.n_auto == 0
+    assert order.missed == 1
+    assert order.missed_match_rate == 1.0
+    assert order.recall_coverage == 0.0
+    # No auto-merged pairs in the class: rate 0 with the widest honest interval.
+    assert order.false_merge_rate == 0.0
+    assert order.false_merge_ci == (0.0, 1.0)
+
+    # x and y carry no tags, so the x-y false merge lands in the baseline.
+    baseline = reports["baseline"]
+    assert baseline.n_true_pairs == 0
+    assert baseline.n_auto == 1
+    assert baseline.false_merges == 1
+    assert baseline.false_merge_rate == 1.0
+
+
+def test_per_class_metrics_orders_baseline_first() -> None:
+    banded = band_pairs([("a", "b", 0.99)], auto_threshold=0.97, review_threshold=0.80)
+    reports = per_class_metrics(banded, [["a", "b"]], {"a": ["z:tag"], "b": ["a:tag"]})
+    assert [r.tag for r in reports] == ["baseline", "a:tag", "z:tag"]
+
+
+def test_per_class_metrics_empty_class_has_widest_intervals() -> None:
+    banded = band_pairs([("a", "b", 0.99)], auto_threshold=0.97, review_threshold=0.80)
+    # z appears in no scored pair and no truth cluster: every denominator is
+    # zero, so both intervals are the widest honest (0, 1).
+    reports = {r.tag: r for r in per_class_metrics(banded, [["a", "b"]], {"z": ["name:empty"]})}
+    empty = reports["name:empty"]
+    assert empty.n_true_pairs == 0
+    assert empty.n_auto == 0
+    assert empty.false_merge_rate == 0.0
+    assert empty.false_merge_ci == (0.0, 1.0)
+    assert empty.missed_match_ci == (0.0, 1.0)

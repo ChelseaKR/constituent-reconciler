@@ -14,6 +14,7 @@ last_name = "Last Name"
 dob = "DOB"
 email = "Email"
 phone = "Phone"
+address = "Address"
 
 [consent]
 column = "Consent"

@@ -197,7 +197,7 @@ shared standard.
 |-----------|--------|------|
 | Test coverage (logic) | At least 85% branch coverage on `src/`; gate temporarily set to 84% (84.63% measured 2026-07-05 for this PR's scope — see note below) | AUTO |
 | False-merge rate (eval) | 0% among auto-merged pairs on the committed fixtures, fail-closed; CI runs the gate at 0.0 | AUTO |
-| Matching pairwise precision and recall | Auto-merge precision 100% (a false merge fails the gate); auto+review coverage recall at least 95%, reported with Wilson CIs | REVIEW |
+| Matching pairwise precision and recall | Auto-merge precision 100% (a false merge fails the gate); auto+review coverage recall at least 95% on the baseline class, reported with Wilson CIs. The deliberately hard bias probes (R5) count against the overall number and are read per class in the eval's "Bias by class" table | REVIEW |
 | Extraction field precision and recall | At least 0.95 precision and 0.90 recall on a labeled extraction fixture; target only, the fixture and its measurement are not landed | REVIEW |
 | LLM field-judge calibration (Cohen's kappa) | Kappa at least 0.60, fail-closed on drift, the 0.6 line `evaluate.cohen_kappa` documents; wired into the eval in R10 | AUTO |
 | Review queue accessibility | WCAG 2.2 AA, axe clean, screen-reader walkthrough | AUTO + REVIEW |
