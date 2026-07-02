@@ -37,10 +37,15 @@ class PageResult:
 
 @dataclass
 class ExtractionResult:
-    """All pages extracted from one document."""
+    """All pages extracted from one document.
+
+    ``note`` is set when extraction did not run to completion (for example the
+    sandbox killed a hung parse); it explains why the result is fail-closed.
+    """
 
     source_file: str
     pages: list[PageResult] = field(default_factory=list)
+    note: str | None = None
 
     def low_confidence_pages(self, threshold: float) -> list[PageResult]:
         return [p for p in self.pages if p.confidence < threshold]
