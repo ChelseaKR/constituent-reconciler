@@ -80,8 +80,10 @@ Suppression Policy (resdac.org/articles/cms-cell-size-suppression-policy). The
 limitation: suppression here does not defend against cross-tabulation attacks
 that correlate several breakdowns.
 
-TODO: complete the data-flow map and the retention and destruction model per
-policy pack.
+The data-flow map and the retention and destruction model per policy pack are
+in [DATA-FLOW-AND-RETENTION.md](./DATA-FLOW-AND-RETENTION.md), including the DV
+pack's routine destruction of individual records. Retention windows stay
+counsel-gated there, consistent with this document's sourcing rules.
 
 ## Transparency
 
