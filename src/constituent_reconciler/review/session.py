@@ -16,6 +16,10 @@ The decisions file is the session's only side effect, and it carries record ids,
 verdicts, reviewer names, and timestamps only. No field value of a reviewed
 record is written, which is the minimization the DV pack requires of any artifact
 the review step produces.
+
+Optional planted calibration pairs are interleaved into the in-memory queue.
+Their verdicts are never written to the decisions file, so synthetic records
+cannot reach ``reconcile apply`` or a connector.
 """
 
 from __future__ import annotations
@@ -30,6 +34,7 @@ from pathlib import Path
 
 from constituent_reconciler import decisions
 from constituent_reconciler.models import Band, Cluster, Pair, Record, RunResult
+from constituent_reconciler.review.calibration import PlantedPair
 from constituent_reconciler.schema import DECISIONS_SCHEMA_VERSION
 
 APPROVED = "approved"
@@ -190,6 +195,7 @@ class PairView:
     right_source: str
     probability: float
     fields: tuple[FieldCell, ...]
+    synthetic: bool = False
 
 
 @dataclass(frozen=True)
@@ -226,6 +232,21 @@ def _clean_reviewer(name: str) -> str:
 # file, which carried no attribution. Under two-person mode such an approval
 # counts as one name, so a real second reviewer is still required, fail-closed.
 UNRECORDED_REVIEWER = "unrecorded"
+
+
+def _interleave_pairs(
+    real: Sequence[Pair], planted: Sequence[PlantedPair]
+) -> tuple[tuple[Pair, ...], frozenset[int]]:
+    """Spread planted pairs through the queue without reordering real pairs."""
+
+    entries: list[tuple[Pair, bool]] = [(pair, False) for pair in real]
+    total = len(real) + len(planted)
+    for offset, item in enumerate(planted):
+        position = ((offset + 1) * total) // (len(planted) + 1)
+        entries.insert(min(position, len(entries)), (item.pair, True))
+    pairs = tuple(pair for pair, _ in entries)
+    synthetic = frozenset(index for index, (_, planted_pair) in enumerate(entries) if planted_pair)
+    return pairs, synthetic
 
 
 @dataclass(frozen=True)
@@ -338,6 +359,7 @@ class ReviewSession:
         reviewer: str,
         privacy_mode: bool = False,
         require_second_reviewer: bool = False,
+        calibration: Sequence[PlantedPair] = (),
     ) -> None:
         self._result = result
         self._fields = fields
@@ -351,16 +373,25 @@ class ReviewSession:
         # Regenerated each time a session is constructed, never persisted.
         self.token = secrets.token_urlsafe(24)
         # The same ordering the review_queue.csv uses, so the two surfaces agree.
-        self._pairs: tuple[Pair, ...] = tuple(
+        real_pairs = tuple(
             sorted(result.review_pairs, key=lambda p: (-p.probability, p.left, p.right))
         )
+        self._pairs, self._synthetic_indexes = _interleave_pairs(real_pairs, calibration)
+        self._planted_records = {
+            record.unique_id: record for item in calibration for record in (item.left, item.right)
+        }
+        self._known_answers = {item.pair.key(): item.known_answer for item in calibration}
         self._entries: dict[int, list[ReviewEntry]] = {}
         self._load_existing()
 
     # -- construction helpers ------------------------------------------------
 
     def _key_to_index(self) -> dict[frozenset[str], int]:
-        return {pair.key(): index for index, pair in enumerate(self._pairs)}
+        return {
+            pair.key(): index
+            for index, pair in enumerate(self._pairs)
+            if index not in self._synthetic_indexes
+        }
 
     def _load_existing(self) -> None:
         """Resume from an existing decisions file, if one is present.
@@ -431,9 +462,19 @@ class ReviewSession:
     def total(self) -> int:
         return len(self._pairs)
 
+    @property
+    def calibration_total(self) -> int:
+        return len(self._synthetic_indexes)
+
+    def _record_for(self, record_id: str) -> Record:
+        planted = self._planted_records.get(record_id)
+        if planted is not None:
+            return planted
+        return self._result.records[record_id]
+
     def _build_view(self, index: int, pair: Pair) -> PairView:
-        left = self._result.records[pair.left]
-        right = self._result.records[pair.right]
+        left = self._record_for(pair.left)
+        right = self._record_for(pair.right)
         cells: list[FieldCell] = []
         for field_name in self._fields:
             left_norm = left.normalized.get(field_name, "")
@@ -460,6 +501,7 @@ class ReviewSession:
             right_source=right.source,
             probability=pair.probability,
             fields=tuple(cells),
+            synthetic=index in self._synthetic_indexes,
         )
 
     def views(self) -> list[PairView]:
@@ -484,6 +526,8 @@ class ReviewSession:
             return None
         if any(entry.verdict == REJECTED for entry in entries):
             return REJECTED
+        if index in self._synthetic_indexes:
+            return APPROVED
         if self.require_second_reviewer and len(self.approvers(index)) < 2:
             return AWAITING_SECOND
         return APPROVED
@@ -643,7 +687,7 @@ class ReviewSession:
         showing a cluster that ``reconcile apply`` would refuse to honor.
         """
 
-        if not (0 <= index < len(self._pairs)):
+        if not (0 <= index < len(self._pairs)) or index in self._synthetic_indexes:
             return None
         pair = self._pairs[index]
         verdict = self.verdict(index)
@@ -718,6 +762,21 @@ class ReviewSession:
         pair = self._pairs[index]
         return "|".join(sorted((pair.left, pair.right)))
 
+    def calibration_results(self) -> tuple[list[bool], list[bool]]:
+        """Return this reviewer's decided planted verdicts and known answers."""
+
+        reviewer_verdicts: list[bool] = []
+        known_answers: list[bool] = []
+        for index in sorted(self._synthetic_indexes):
+            own_entries = [
+                entry for entry in self._entries.get(index, ()) if entry.reviewer == self.reviewer
+            ]
+            if not own_entries:
+                continue
+            reviewer_verdicts.append(own_entries[-1].verdict == APPROVED)
+            known_answers.append(self._known_answers[self._pairs[index].key()])
+        return reviewer_verdicts, known_answers
+
     def to_decisions(self) -> dict[str, object]:
         """The decisions payload in the shape ``reconcile apply`` consumes.
 
@@ -734,6 +793,8 @@ class ReviewSession:
         rejected: list[list[str]] = []
         audit: dict[str, list[dict[str, str]]] = {}
         for index in sorted(self._entries):
+            if index in self._synthetic_indexes:
+                continue
             pair = self._pairs[index]
             state = self.verdict(index)
             if state == APPROVED:

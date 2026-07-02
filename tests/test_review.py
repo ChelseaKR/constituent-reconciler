@@ -25,6 +25,7 @@ from constituent_reconciler import pipeline
 from constituent_reconciler.config import Recipe, load_recipe
 from constituent_reconciler.models import Band, Pair, Record, RunResult
 from constituent_reconciler.policy import PolicyViolation
+from constituent_reconciler.review.calibration import generate_calibration_pairs
 from constituent_reconciler.review.render import render_pair
 from constituent_reconciler.review.server import (
     HeaderSource,
@@ -754,3 +755,78 @@ def test_server_refuses_a_post_with_no_token_over_a_real_socket(tmp_path: Path) 
         server.server_close()
         thread.join(timeout=5)
     assert session.verdict(0) is None
+
+
+# -- planted reviewer calibration (EXP-09) -----------------------------------
+
+
+def _calibrated_session(tmp_path: Path, count: int = 3) -> ReviewSession:
+    result, recipe, _ = _session(tmp_path)
+    return ReviewSession(
+        result,
+        recipe.fields,
+        tmp_path / "calibrated-decisions.json",
+        reviewer="casey",
+        calibration=generate_calibration_pairs(count, recipe.fields),
+    )
+
+
+def test_calibration_is_deterministic_and_visibly_synthetic() -> None:
+    fields = ("first_name", "last_name", "dob", "email", "phone")
+    planted = generate_calibration_pairs(4, fields)
+    assert planted == generate_calibration_pairs(4, fields)
+    assert {item.known_answer for item in planted} == {True, False}
+    assert all(item.left.source == "calibration" for item in planted)
+    assert all("example.invalid" in item.left.raw["email"] for item in planted)
+
+
+def test_calibration_generator_rejects_a_negative_count() -> None:
+    with pytest.raises(ValueError, match="zero or positive"):
+        generate_calibration_pairs(-1, ("first_name", "last_name"))
+
+
+def test_calibration_pairs_never_reach_decisions_or_audit(tmp_path: Path) -> None:
+    session = _calibrated_session(tmp_path)
+    for view in session.views():
+        session.record(view.index, APPROVED)
+    payload = session.to_decisions()
+    approved = payload["approved"]
+    assert isinstance(approved, list) and len(approved) == 2
+    blob = json.dumps(payload)
+    assert "CAL-" not in blob
+    assert "Calibration" not in blob
+
+
+def test_calibration_results_are_per_reviewer_and_ignore_two_person_gate(
+    tmp_path: Path,
+) -> None:
+    result, recipe, _ = _session(tmp_path)
+    planted = generate_calibration_pairs(2, recipe.fields)
+    session = ReviewSession(
+        result,
+        recipe.fields,
+        tmp_path / "decisions.json",
+        reviewer="casey",
+        require_second_reviewer=True,
+        calibration=planted,
+    )
+    synthetic = [view for view in session.views() if view.synthetic]
+    for view in synthetic:
+        answer = next(
+            item.known_answer
+            for item in planted
+            if item.pair.key() == frozenset((view.left_id, view.right_id))
+        )
+        session.record(view.index, APPROVED if answer else REJECTED)
+    verdicts, answers = session.calibration_results()
+    assert verdicts == answers
+    assert len(verdicts) == 2
+
+
+def test_calibration_banner_is_disclosed_without_marking_one_pair(tmp_path: Path) -> None:
+    session = _calibrated_session(tmp_path, count=3)
+    overview = handle_get(session, "/", _context()).body
+    assert "3 planted known-answer pairs for calibration" in overview
+    planted_view = next(view for view in session.views() if view.synthetic)
+    page = handle_get(session, f"/pair/{planted_view.index}", _context()).body
+    assert page.count("planted known-answer") == 1

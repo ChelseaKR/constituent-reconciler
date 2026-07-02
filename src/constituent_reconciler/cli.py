@@ -27,6 +27,7 @@ from constituent_reconciler.evaluate import (
     KAPPA_GATE,
     CalibrationReport,
     calibrate,
+    cohen_kappa,
     evaluate,
     extraction_metrics,
 )
@@ -342,7 +343,25 @@ def _cmd_export_comparable(args: argparse.Namespace) -> int:
     return 0
 
 
+def _calibration_summary(session: object) -> str:
+    """Summarize reviewer agreement for the planted pairs they decided."""
+
+    reviewer_verdicts, known_answers = session.calibration_results()  # type: ignore[attr-defined]
+    decided = len(reviewer_verdicts)
+    if decided == 0:
+        return "calibration: no planted pair was decided, so there is no agreement to report"
+    agreed = sum(v == a for v, a in zip(reviewer_verdicts, known_answers, strict=True))
+    line = f"calibration: {agreed} of {decided} decided planted pair(s) matched the known answer"
+    if decided >= 2:
+        kappa = cohen_kappa(reviewer_verdicts, known_answers)
+        line += f"; reviewer agreement (Cohen's kappa) {kappa:.2f}"
+    else:
+        line += "; kappa needs at least 2 decided planted pairs"
+    return line
+
+
 def _cmd_review(args: argparse.Namespace) -> int:
+    from constituent_reconciler.review.calibration import generate_calibration_pairs
     from constituent_reconciler.review.server import serve
     from constituent_reconciler.review.session import ReviewSession
 
@@ -358,6 +377,7 @@ def _cmd_review(args: argparse.Namespace) -> int:
     # The flag may turn two-person review on for any pack; it cannot turn off
     # a pack that requires it (the dv pack defaults it on), fail-closed.
     require_second = bool(args.require_second_reviewer) or recipe.require_second_reviewer
+    calibration = generate_calibration_pairs(recipe.review_calibration, recipe.fields)
     try:
         session = ReviewSession(
             result,
@@ -366,11 +386,17 @@ def _cmd_review(args: argparse.Namespace) -> int:
             reviewer=args.reviewer,
             privacy_mode=recipe.require_local_targets,
             require_second_reviewer=require_second,
+            calibration=calibration,
         )
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
     print(render_run_summary(result))
+    if calibration:
+        print(
+            f"calibration: {len(calibration)} planted known-answer pair(s) are mixed "
+            "into the queue; the reviewer is told, and they are never applied to records"
+        )
     try:
         serve(
             session,
@@ -389,6 +415,8 @@ def _cmd_review(args: argparse.Namespace) -> int:
     if counts.awaiting_second:
         line += f", {counts.awaiting_second} awaiting a second reviewer"
     print(line)
+    if calibration:
+        print(_calibration_summary(session))
     return 0
 
 
