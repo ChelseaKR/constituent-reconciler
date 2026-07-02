@@ -369,7 +369,9 @@ def run(
     pairs = _apply_overrides(pairs, frozenset(force_auto), frozenset(force_drop))
 
     clusters = decisions.build_clusters(records.keys(), pairs)
-    golden = decisions.golden_records(clusters, records, recipe.fields)
+    golden = decisions.golden_records(
+        clusters, records, recipe.fields, fill_policy=recipe.fill_policy
+    )
 
     return RunResult(
         records=records,
@@ -410,11 +412,13 @@ def _write_review_queue(result: RunResult, recipe: Recipe, out_dir: Path) -> Pat
     return review_path
 
 
-def _write_aggregate_summary(summary: AggregateSummary, out_dir: Path) -> Path:
+def _write_aggregate_summary(summary: AggregateSummary, out_dir: Path, *, fill_policy: str) -> Path:
     """Write the non-identifying, suppressed aggregate summary as JSON.
 
     This is the only artifact the DV pack considers shareable: counts with small
-    cells suppressed and no field values, ids, or member lists.
+    cells suppressed and no field values, ids, or member lists. ``fill_policy``
+    is run metadata (a policy name, not data), recorded so the report states
+    how golden records were merged.
     """
 
     import json
@@ -425,6 +429,7 @@ def _write_aggregate_summary(summary: AggregateSummary, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "schema_version": REPORT_SCHEMA_VERSION,
+        "fill_policy": fill_policy,
         "total_resolved": summary.total,
         "breakdowns": {b.name: b.cells for b in summary.breakdowns},
         "note": (
@@ -653,6 +658,10 @@ def export(
                 ),
                 payload=write_result.payload or {},
                 external_id=write_result.external_id,
+                # Field-level lineage: member ids only, never field values, so
+                # the log stays within the DV pack's minimization posture.
+                field_sources=record.field_sources,
+                fill_policy=recipe.fill_policy,
             )
             logged += 1
 
@@ -669,7 +678,9 @@ def export(
             exportable, threshold=recipe.suppression_threshold
         )
         if not dry_run:
-            aggregate_path = _write_aggregate_summary(aggregate, out_dir)
+            aggregate_path = _write_aggregate_summary(
+                aggregate, out_dir, fill_policy=recipe.fill_policy
+            )
 
     comparable, comparable_path = _maybe_export_comparable(
         recipe, exportable, out_dir=out_dir, dry_run=dry_run

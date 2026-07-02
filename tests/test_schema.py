@@ -48,3 +48,5 @@ def test_aggregate_summary_carries_report_schema_version(tmp_path: Path) -> None
     assert summary.aggregate_path is not None
     payload = json.loads(summary.aggregate_path.read_text(encoding="utf-8"))
     assert payload["schema_version"] == REPORT_SCHEMA_VERSION
+    # Run metadata added to the report schema: the named survivorship policy.
+    assert payload["fill_policy"] == recipe.fill_policy

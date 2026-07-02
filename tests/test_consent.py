@@ -15,6 +15,7 @@ def _golden(cluster_id: str, consent: Consent) -> GoldenRecord:
         cluster_id=cluster_id,
         members=(cluster_id,),
         fields={},
+        field_sources={},
         primary=cluster_id,
         consent=consent,
     )

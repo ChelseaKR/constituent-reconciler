@@ -166,8 +166,15 @@ class Record:
     source: str
     raw: dict[str, str]
     normalized: dict[str, str] = field(default_factory=dict)
+    consent_status: str = ""
     consent: Consent = field(default_factory=Consent)
     spans: dict[str, SourceSpan | TextSpan] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.consent_status and not self.consent.status:
+            object.__setattr__(self, "consent", Consent(status=self.consent_status))
+        elif self.consent.status and self.consent_status != self.consent.status:
+            object.__setattr__(self, "consent_status", self.consent.status)
 
     def has_consent(self, *, as_of: date | None = None) -> bool:
         """Whether this record's consent is currently active, unscoped.
@@ -206,10 +213,12 @@ class Cluster:
 class GoldenRecord:
     """The single merged record a cluster resolves to.
 
-    ``fields`` are the surviving canonical values, ``primary`` is the record id
-    chosen as the survivor, and ``consent`` is the survivor's ``Consent``
-    lifecycle, carried through unevaluated. The export gate
-    (``consent.partition_by_consent``) is what turns this into a granted or
+    ``fields`` are the surviving canonical values. ``field_sources`` is the
+    field-level lineage: for each non-empty merged field, the id of the member
+    record that supplied its value (fields that merged to empty have no entry).
+    ``primary`` is the record id chosen as the survivor, and ``consent`` is the
+    survivor's ``Consent`` lifecycle, carried through unevaluated. The export
+    gate (``consent.partition_by_consent``) is what turns this into a granted or
     withheld decision, because only it knows the actual write destination and
     the run's ``as_of`` date; a golden record on its own does not decide.
     """
@@ -217,6 +226,7 @@ class GoldenRecord:
     cluster_id: str
     members: tuple[str, ...]
     fields: dict[str, str]
+    field_sources: dict[str, str]
     primary: str
     consent: Consent = field(default_factory=Consent)
 

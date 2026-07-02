@@ -19,6 +19,7 @@ def _golden(cluster_id: str, fields: dict[str, str], consent: bool = True) -> Go
         cluster_id=cluster_id,
         members=(cluster_id,),
         fields=fields,
+        field_sources={name: cluster_id for name, value in fields.items() if value},
         primary=cluster_id,
         consent=Consent(status="granted") if consent else Consent(),
     )

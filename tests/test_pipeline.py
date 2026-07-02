@@ -6,6 +6,8 @@ from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
 
+import pytest
+
 from constituent_reconciler import pipeline
 from constituent_reconciler.config import HouseholdConfig, OutputConfig, load_recipe
 from constituent_reconciler.consent import partition_by_consent
@@ -64,6 +66,42 @@ def test_dv_policy_pack_withholds_revoked_record() -> None:
     assert n009.reason == "revoked"
 
 
+def test_every_field_source_names_a_member_carrying_the_value() -> None:
+    # Lineage property over the whole demo run: for every golden record, every
+    # non-empty field's field_sources entry names a member of that cluster whose
+    # normalized value is exactly the merged value; empty fields have no entry.
+    recipe = load_recipe(EXAMPLES / "recipe.toml")
+    result = pipeline.run(recipe)
+    assert any(len(g.members) > 1 for g in result.golden)  # the property is exercised on merges
+    for golden in result.golden:
+        for field_name in recipe.fields:
+            value = golden.fields[field_name]
+            if not value:
+                assert field_name not in golden.field_sources
+                continue
+            source = golden.field_sources[field_name]
+            assert source in golden.members
+            assert result.records[source].normalized.get(field_name) == value
+
+
+def test_default_fill_policy_is_named_and_unknown_policy_is_refused(tmp_path: Path) -> None:
+    # The demo recipe does not name a policy, so the default applies.
+    assert load_recipe(EXAMPLES / "recipe.toml").fill_policy == "survivor-then-lowest-id"
+    base = (
+        '[input]\nincoming = "incoming.csv"\n\n'
+        '[mapping]\nfirst_name = "First Name"\nlast_name = "Last Name"\n\n'
+    )
+    named = tmp_path / "recipe-named.toml"
+    named.write_text(base + '[policy]\nfill = "survivor-then-lowest-id"\n', encoding="utf-8")
+    assert load_recipe(named).fill_policy == "survivor-then-lowest-id"
+    # A typo (or a reserved, unimplemented policy) fails at load time,
+    # fail-closed, matching the recipe loader's strictness elsewhere.
+    unknown = tmp_path / "recipe-unknown.toml"
+    unknown.write_text(base + '[policy]\nfill = "most-recent-wins"\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="fill"):
+        load_recipe(unknown)
+
+
 def test_apply_approved_review_pair_merges_cluster() -> None:
     recipe = load_recipe(EXAMPLES / "recipe.toml")
     base = pipeline.run(recipe)
@@ -87,6 +125,20 @@ def test_export_writes_csv_review_queue_and_provenance(tmp_path: Path) -> None:
     assert summary.provenance_path is not None
     ok, _ = verify_log(summary.provenance_path)
     assert ok
+    # Each entry carries the fill policy and field-level lineage as member ids
+    # only: no field value may leak into the lineage map (DV minimization).
+    result_by_id = {golden.cluster_id: golden for golden in result.golden}
+    entries = [
+        json.loads(line)
+        for line in summary.provenance_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert entries
+    for entry in entries:
+        assert entry["fill_policy"] == "survivor-then-lowest-id"
+        golden = result_by_id[entry["record_id"]]
+        assert entry["field_sources"] == golden.field_sources
+        assert all(source in entry["members"] for source in entry["field_sources"].values())
 
 
 def test_comparable_export_off_by_default_produces_no_report(tmp_path: Path) -> None:

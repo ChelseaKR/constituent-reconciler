@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
@@ -101,6 +101,8 @@ class ProvenanceLog:
         consent: bool,
         payload: dict[str, str],
         external_id: str | None = None,
+        field_sources: Mapping[str, str] | None = None,
+        fill_policy: str = "",
     ) -> dict[str, object]:
         return self._append(
             action=action,
@@ -148,6 +150,10 @@ class ProvenanceLog:
             "members": list(members),
             "consent": consent,
             "external_id": external_id,
+            # Field-level lineage: canonical field name -> the member record id
+            # that supplied the written value. Ids only, never field values.
+            "field_sources": dict(field_sources or {}),
+            "fill_policy": fill_policy,
             "content_hash": digest,
             "prev_hash": self._prev_hash,
         }

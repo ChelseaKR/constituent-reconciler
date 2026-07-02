@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from constituent_reconciler import defaults
+from constituent_reconciler.decisions import DEFAULT_FILL_POLICY, FILL_POLICIES
 from constituent_reconciler.models import CANONICAL_FIELDS
 from constituent_reconciler.policy import policy_for
 from constituent_reconciler.suppression import ensure_non_identifying
@@ -122,6 +123,7 @@ class Recipe:
     comparable_export: bool = False
     comparable_breakdown_fields: tuple[str, ...] = ()
     comparable_period: str = ""
+    fill_policy: str = DEFAULT_FILL_POLICY
     prior: float = defaults.DEFAULT_PRIOR
     auto_threshold: float = defaults.DEFAULT_AUTO_THRESHOLD
     review_threshold: float = defaults.DEFAULT_REVIEW_THRESHOLD
@@ -177,6 +179,16 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
 
     pack = policy_pack if policy_pack is not None else str(policy_section.get("pack", "default"))
     policy = policy_for(pack)
+    # The survivorship fill policy is named explicitly in the recipe ([policy]
+    # key "fill", or "fill_policy") and validated here, so a typo raises at load
+    # time instead of silently changing how golden records are merged.
+    fill_value = policy_section.get("fill", policy_section.get("fill_policy"))
+    fill_policy = str(fill_value) if fill_value is not None else DEFAULT_FILL_POLICY
+    if fill_policy not in FILL_POLICIES:
+        raise ValueError(
+            f"recipe [policy] fill must be one of {', '.join(FILL_POLICIES)}; "
+            f"got {fill_policy!r}"
+        )
     # A recipe may turn consent enforcement on explicitly even under a permissive
     # pack; it may not turn off a requirement the pack imposes (fail-closed).
     require_consent = policy.require_consent or bool(consent_section.get("require", False))
@@ -241,6 +253,7 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
         comparable_export=bool(comparable_section.get("export", False)),
         comparable_breakdown_fields=comparable_breakdown_fields,
         comparable_period=str(comparable_section.get("period", "")),
+        fill_policy=fill_policy,
         prior=float(thresholds_section.get("prior", defaults.DEFAULT_PRIOR)),
         auto_threshold=float(thresholds_section.get("auto", defaults.DEFAULT_AUTO_THRESHOLD)),
         review_threshold=float(thresholds_section.get("review", defaults.DEFAULT_REVIEW_THRESHOLD)),
