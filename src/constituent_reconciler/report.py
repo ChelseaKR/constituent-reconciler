@@ -7,8 +7,12 @@ metric and whether it passed, not a single headline number.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from constituent_reconciler.evaluate import EvalReport, ExtractionReport
 from constituent_reconciler.models import RunResult
+from constituent_reconciler.quality import SourceQuality
+from constituent_reconciler.suppression import SUPPRESSED
 
 
 def render_run_summary(result: RunResult, *, withheld: int = 0) -> str:
@@ -24,6 +28,76 @@ def render_run_summary(result: RunResult, *, withheld: int = 0) -> str:
     ]
     if withheld:
         lines.append(f"withheld (no consent): {withheld}")
+    return "\n".join(lines)
+
+
+def _quality_pct(value: float | str) -> str:
+    return value if isinstance(value, str) else f"{value * 100:.1f}%"
+
+
+def _worst_field(quality: SourceQuality) -> str:
+    """Name the source's lowest-completeness field, e.g. ``phone 40.0% complete``.
+
+    When any completeness cell is suppressed, the true worst field may be one
+    of the hidden ones, so naming a published field would mislabel it; the
+    label says ``suppressed`` instead. A result measured over no fields
+    reports ``-``.
+    """
+
+    published = {
+        name: value
+        for name, value in quality.completeness.items()
+        if isinstance(value, float)
+    }
+    if not quality.completeness:
+        return "-"
+    if len(published) != len(quality.completeness):
+        return SUPPRESSED
+    worst = min(published, key=lambda name: published[name])
+    return f"{worst} {_quality_pct(published[worst])} complete"
+
+
+def _failure_total(quality: SourceQuality) -> str:
+    """Sum the per-field normalization-failure counts, suppression-aware."""
+
+    counts = quality.normalization_failures.values()
+    if any(isinstance(count, str) for count in counts):
+        return SUPPRESSED
+    return str(sum(count for count in counts if isinstance(count, int)))
+
+
+def render_source_quality(sources: Sequence[SourceQuality]) -> str:
+    """Render the per-source data-quality table as plain text.
+
+    One row per source: record count, the worst (least complete) field,
+    normalization failures, consent coverage, and duplicate density, so an
+    operator can name the weakest field of each intake channel from one
+    screen. Cells withheld by the active policy's small-cell rules print as
+    ``suppressed``.
+    """
+
+    header = ("source", "records", "worst field", "failures", "consent", "duplicates")
+    rows = [header]
+    for quality in sources:
+        rows.append(
+            (
+                quality.source,
+                str(quality.records),
+                _worst_field(quality),
+                _failure_total(quality),
+                _quality_pct(quality.consent_coverage),
+                _quality_pct(quality.duplicate_density),
+            )
+        )
+
+    widths = [max(len(row[i]) for row in rows) for i in range(len(header))]
+    lines = ["data quality by source:"]
+    if any(SUPPRESSED in row for row in rows[1:]):
+        lines[0] = "data quality by source (small cells suppressed under the active policy):"
+    for row in rows:
+        cells = [row[0].ljust(widths[0]), row[1].rjust(widths[1]), row[2].ljust(widths[2])]
+        cells += [row[i].rjust(widths[i]) for i in range(3, len(header))]
+        lines.append("  " + "  ".join(cells).rstrip())
     return "\n".join(lines)
 
 
