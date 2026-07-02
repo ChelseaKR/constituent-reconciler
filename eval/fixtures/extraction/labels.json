@@ -1,0 +1,27 @@
+{
+  "form-standard.pdf": [
+    { "field_name": "first_name", "value": "Alice" },
+    { "field_name": "last_name", "value": "Walker" },
+    { "field_name": "dob", "value": "1970-05-12" },
+    { "field_name": "email", "value": "alice@example.org" },
+    { "field_name": "phone", "value": "555-123-4567" }
+  ],
+  "form-alternate-order.pdf": [
+    { "field_name": "first_name", "value": "Beatriz" },
+    { "field_name": "last_name", "value": "Rivera" },
+    { "field_name": "dob", "value": "03/09/1988" },
+    { "field_name": "email", "value": "b.rivera@example.org" },
+    { "field_name": "phone", "value": "(415) 555-0100" }
+  ],
+  "form-unparseable.pdf": [
+    { "field_name": "first_name", "value": "Casey" },
+    { "field_name": "last_name", "value": "Nguyen" },
+    { "field_name": "phone", "value": "555-234-9876" }
+  ],
+  "form-worded-date.pdf": [
+    { "field_name": "first_name", "value": "Dana" },
+    { "field_name": "last_name", "value": "Okafor" },
+    { "field_name": "dob", "value": "March 9, 1988" },
+    { "field_name": "email", "value": "dana.okafor@example.org" }
+  ]
+}

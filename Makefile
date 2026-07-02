@@ -1,4 +1,4 @@
-.PHONY: install verify format-check lint type test security eval eval-large run docker bundle clean
+.PHONY: install verify format-check lint type test security eval eval-extraction eval-large run docker bundle clean
 
 # Reproduce the full local toolchain. CI mirrors `make verify` byte for byte.
 # `uv sync --frozen` refuses to run (and exits non-zero) if uv.lock is stale
@@ -36,6 +36,14 @@ eval:
 		--config examples/intake-demo/recipe.toml \
 		--truth examples/intake-demo/ground_truth.json \
 		--out eval/report.md
+
+# Regenerate the committed extraction eval report. Run after any change to the
+# extractor or to eval/fixtures/extraction. Exits nonzero below the ledger
+# targets (precision 0.95, recall 0.90).
+eval-extraction:
+	.venv/bin/reconcile eval-extraction \
+		--fixtures eval/fixtures/extraction \
+		--out eval/extraction-report.md
 
 # Regenerate the large synthetic-corpus eval report (FIX-11). Not part of
 # `verify` or CI: a 10^4-10^5 record corpus through Splink/DuckDB takes

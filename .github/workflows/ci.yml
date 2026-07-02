@@ -27,10 +27,11 @@ jobs:
         run: make install
       - name: Verify (ruff format --check, ruff check, mypy --strict, pytest)
         run: make verify
-      - name: Eval report is current
+      - name: Eval reports are current
         run: |
           make eval
-          git diff --exit-code eval/report.md
+          make eval-extraction
+          git diff --exit-code eval/report.md eval/extraction-report.md
 
   # Dependency-vulnerability gate (SEC-11, SEC-13, CQ-11), separate from
   # `verify` so it is its own required status check and its own log/timeout.
