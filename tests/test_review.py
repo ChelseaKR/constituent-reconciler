@@ -67,8 +67,8 @@ def test_session_exposes_the_review_pairs(tmp_path: Path) -> None:
     views = session.views()
     # The two known lookalike pairs are routed to review by the pipeline.
     keys = {frozenset((v.left_id, v.right_id)) for v in views}
-    assert frozenset(("E002", "N004")) in keys
-    assert frozenset(("E008", "N007")) in keys
+    assert frozenset(("existing:E002", "incoming:N004")) in keys
+    assert frozenset(("existing:E008", "incoming:N007")) in keys
 
 
 def test_record_writes_through_to_decisions_file(tmp_path: Path) -> None:
@@ -95,6 +95,39 @@ def test_session_resumes_from_existing_decisions(tmp_path: Path) -> None:
     resumed = ReviewSession(result, recipe.fields, tmp_path / "decisions.json")
     same = next(v for v in resumed.views() if v.left_id == view.left_id)
     assert resumed.verdict(same.index) == REJECTED
+
+
+def test_decisions_file_carries_schema_version(tmp_path: Path) -> None:
+    _, _, session = _session(tmp_path)
+    session.record(0, APPROVED)
+    payload = json.loads((tmp_path / "decisions.json").read_text(encoding="utf-8"))
+    assert payload["decisions_schema"] == 1
+
+
+def test_stale_decision_warns_instead_of_silently_dropping(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A decisions file that references ids absent from the current run (source
+    # rows changed between review and apply) names the dropped verdict on
+    # stderr rather than ignoring it without a trace.
+    decisions_path = tmp_path / "decisions.json"
+    decisions_path.write_text(
+        json.dumps(
+            {
+                "decisions_schema": 1,
+                "approved": [["existing:GONE1", "incoming:GONE2"]],
+                "rejected": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    recipe = load_recipe(EXAMPLES / "recipe.toml")
+    result = pipeline.run(recipe)
+    session = ReviewSession(result, recipe.fields, decisions_path)
+    stderr = capsys.readouterr().err
+    assert "existing:GONE1" in stderr
+    assert "not in this run's review queue" in stderr
+    assert session.counts().pending == session.total
 
 
 def test_next_undecided_skips_decided_pairs(tmp_path: Path) -> None:
