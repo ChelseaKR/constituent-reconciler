@@ -1,0 +1,26 @@
+{
+  "note": "Synthetic calibration labels for the LLM field-judge kappa gate. Each label pairs the extractor's confidence verdict on one field of one demo record ('predicted' is true when confidence cleared the threshold below) with a planted human annotation ('actual' is true when the field was correctly extracted). No real personal data; record ids reference the seeded demo fixtures. 18 of 20 labels agree, giving Cohen's kappa 0.80 against the 0.60 gate.",
+  "threshold": 0.6,
+  "labels": [
+    {"record_id": "N001", "field": "first_name", "predicted": true, "actual": true},
+    {"record_id": "N001", "field": "last_name", "predicted": true, "actual": true},
+    {"record_id": "N002", "field": "dob", "predicted": true, "actual": true},
+    {"record_id": "N003", "field": "first_name", "predicted": true, "actual": true},
+    {"record_id": "N003", "field": "last_name", "predicted": true, "actual": true},
+    {"record_id": "N004", "field": "dob", "predicted": true, "actual": true},
+    {"record_id": "N005", "field": "first_name", "predicted": true, "actual": true},
+    {"record_id": "N005", "field": "email", "predicted": true, "actual": true},
+    {"record_id": "N006", "field": "last_name", "predicted": true, "actual": true},
+    {"record_id": "N006", "field": "phone", "predicted": true, "actual": false},
+    {"record_id": "N007", "field": "phone", "predicted": false, "actual": false},
+    {"record_id": "N007", "field": "email", "predicted": false, "actual": false},
+    {"record_id": "N008", "field": "dob", "predicted": false, "actual": false},
+    {"record_id": "N008", "field": "phone", "predicted": false, "actual": false},
+    {"record_id": "N009", "field": "email", "predicted": false, "actual": false},
+    {"record_id": "N010", "field": "phone", "predicted": false, "actual": false},
+    {"record_id": "N010", "field": "dob", "predicted": false, "actual": true},
+    {"record_id": "N011", "field": "email", "predicted": false, "actual": false},
+    {"record_id": "N012", "field": "phone", "predicted": false, "actual": false},
+    {"record_id": "N012", "field": "email", "predicted": false, "actual": false}
+  ]
+}

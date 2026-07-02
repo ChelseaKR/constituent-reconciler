@@ -35,10 +35,12 @@ security:
 verify: format-check lint type test
 
 # Regenerate the committed eval report. Run after any change to matching.
+# The calibration flag arms the fail-closed kappa gate for the LLM field judge.
 eval:
 	.venv/bin/reconcile eval \
 		--config examples/intake-demo/recipe.toml \
 		--truth examples/intake-demo/ground_truth.json \
+		--calibration examples/intake-demo/calibration_labels.json \
 		--out eval/report.md
 
 # Regenerate the committed extraction eval report. Run after any change to the
