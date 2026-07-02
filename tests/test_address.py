@@ -40,6 +40,71 @@ def test_unit_designator_is_abbreviated() -> None:
     assert normalize_address_deterministic("12 Elm St Suite 200") == "12 ELM ST STE 200"
 
 
+# ---------------------------------------------------------------------------
+# Position rules: the standardization is position-aware, not a flat token map
+# ---------------------------------------------------------------------------
+
+
+def test_leading_st_is_saint_not_a_suffix() -> None:
+    # "ST" opening a street name is Saint; only the suffix position maps.
+    assert normalize_address_deterministic("123 St Charles Street") == "123 ST CHARLES ST"
+    assert normalize_address_deterministic("123 St Charles Avenue") == "123 ST CHARLES AVE"
+
+
+def test_directional_after_house_number_is_abbreviated() -> None:
+    assert normalize_address_deterministic("123 North Main Street") == "123 N MAIN ST"
+
+
+def test_trailing_directional_is_abbreviated() -> None:
+    assert normalize_address_deterministic("123 Main St North") == "123 MAIN ST N"
+    # The suffix position sits just before the trailing directional.
+    assert normalize_address_deterministic("123 Main Street North") == "123 MAIN ST N"
+    # A unit phrase after the trailing directional does not disturb either rule.
+    assert (
+        normalize_address_deterministic("123 Main Street North Apt 4")
+        == "123 MAIN ST N APT 4"
+    )
+
+
+def test_interior_directional_word_is_left_alone() -> None:
+    # "North" inside the street name is not in a directional position.
+    assert normalize_address_deterministic("123 Old North Road") == "123 OLD NORTH RD"
+
+
+def test_suffix_word_as_the_street_name_is_left_alone() -> None:
+    # "Avenue B" is a street named Avenue; there is no suffix to abbreviate.
+    assert normalize_address_deterministic("123 Avenue B") == "123 AVENUE B"
+
+
+def test_suffix_before_unit_phrase_is_abbreviated() -> None:
+    assert normalize_address_deterministic("12 Elm Street Apartment 4") == "12 ELM ST APT 4"
+    assert normalize_address_deterministic("12 Elm Street # 4") == "12 ELM ST # 4"
+
+
+def test_unit_designator_maps_only_before_a_unit_value() -> None:
+    assert normalize_address_deterministic("12 Elm St Unit 7") == "12 ELM ST UNIT 7"
+    # A designator word inside the street name has no unit value after it.
+    assert normalize_address_deterministic("55 Apartment Hill Road") == "55 APARTMENT HILL RD"
+
+
+def test_position_rules_are_idempotent_and_stable() -> None:
+    samples = [
+        "123 St Charles Street",
+        "123 Main St North",
+        "123 Avenue B",
+        "55 Apartment Hill Road",
+        "123 Main Street North Apt 4",
+    ]
+    for sample in samples:
+        once = normalize_address_deterministic(sample)
+        assert normalize_address_deterministic(once) == once
+
+
+def test_already_abbreviated_positional_forms_are_stable() -> None:
+    for written in ("123 ST CHARLES ST", "123 MAIN ST N", "123 N MAIN ST APT 4"):
+        assert normalize_address_deterministic(written) == written
+
+
 def test_two_writings_of_the_same_address_converge() -> None:
     long_form = normalize_address_deterministic("123 North Main Street")
     short_form = normalize_address_deterministic("123 N Main St")
@@ -92,6 +157,32 @@ def test_libpostal_backend_raises_clearly_when_unavailable() -> None:
             normalize_address("123 Main St", backend="libpostal")
     else:  # pragma: no cover - exercised only where libpostal is installed
         pytest.skip("libpostal is installed; the unavailable-path test does not apply")
+
+
+# ---------------------------------------------------------------------------
+# Real libpostal path (runs where the C library is installed; CI has a
+# scheduled job for it, and the tests skip everywhere else)
+# ---------------------------------------------------------------------------
+
+
+def test_libpostal_backend_returns_a_standardized_form() -> None:
+    pytest.importorskip("postal")
+    result = normalize_address("123 North Main Street", backend="libpostal")
+    assert result != ""
+    assert result == result.upper()
+
+
+def test_libpostal_backend_is_deterministic_across_calls() -> None:
+    pytest.importorskip("postal")
+    first = normalize_address("123 North Main Street", backend="libpostal")
+    for _ in range(3):
+        assert normalize_address("123 North Main Street", backend="libpostal") == first
+
+
+def test_libpostal_backend_blank_input_returns_empty() -> None:
+    pytest.importorskip("postal")
+    assert normalize_address("", backend="libpostal") == ""
+    assert normalize_address("   ", backend="libpostal") == ""
 
 
 # ---------------------------------------------------------------------------

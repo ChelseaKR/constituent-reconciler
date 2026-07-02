@@ -91,7 +91,8 @@ The smallest version that ships the differentiator.
   writings of the same address ("123 North Main Street" / "123 N Main St") reduce
   to the same matching key. Idempotent, offline, no model.
 * Labeled in the code and docs as CASS-style and **not USPS-certified**; the
-  standardization is position-insensitive, a documented simplification.
+  standardization shipped position-insensitive, a documented simplification
+  retired by the position-aware pass that landed with E6 (see the changelog).
 * libpostal is an optional backend (`address_backend = "libpostal"`), never
   required; selecting it without the library installed raises a clear error
   rather than silently falling back.
