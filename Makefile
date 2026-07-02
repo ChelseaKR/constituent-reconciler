@@ -16,8 +16,12 @@ lint:
 type:
 	.venv/bin/python -m mypy
 
+# Tests run under coverage; the report enforces the 85% line-coverage floor
+# on src/ (configured in pyproject.toml), so `make verify` — and therefore
+# CI — is a merge-blocking coverage gate.
 test:
-	.venv/bin/python -m pytest
+	.venv/bin/python -m coverage run -m pytest
+	.venv/bin/python -m coverage report
 
 # Dependency-vulnerability gate (SEC-11, SEC-13): pip-audit and osv-scanner
 # both block on any HIGH/CRITICAL finding with a fix available; no mute pattern.
@@ -83,4 +87,4 @@ bundle:
 	@echo "bundle written to $(BUNDLE)"
 
 clean:
-	rm -rf out out-dv dist .pytest_cache .mypy_cache .ruff_cache
+	rm -rf out out-dv dist .pytest_cache .mypy_cache .ruff_cache .coverage
