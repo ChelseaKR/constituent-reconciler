@@ -21,7 +21,15 @@ from constituent_reconciler.connectors.base import Connector, WriteResult
 from constituent_reconciler.connectors.civicrm import Transport
 from constituent_reconciler.connectors.crm_csv import CrmCsvConnector
 from constituent_reconciler.connectors.salesforce import Transport as SalesforceTransport
-from constituent_reconciler.models import GoldenRecord, Pair, Record, RunResult, SourceSpan
+from constituent_reconciler.extract.base import ExtractedField
+from constituent_reconciler.models import (
+    GoldenRecord,
+    Pair,
+    Record,
+    RunResult,
+    SourceSpan,
+    TextSpan,
+)
 from constituent_reconciler.normalize import normalize_record
 from constituent_reconciler.policy import PolicyViolation
 from constituent_reconciler.provenance import ProvenanceLog, TimestampAuthority
@@ -62,6 +70,21 @@ def read_records(
                 )
             )
     return records
+
+
+def _collect_mapped_fields(
+    page_fields: Iterable[ExtractedField],
+    mapping: dict[str, str],
+) -> tuple[dict[str, str], dict[str, SourceSpan | TextSpan]]:
+    """Keep the extracted fields the recipe maps, along with their spans."""
+    raw: dict[str, str] = {}
+    spans: dict[str, SourceSpan | TextSpan] = {}
+    for ef in page_fields:
+        if ef.field_name in mapping and ef.value:
+            raw[ef.field_name] = ef.value
+            if ef.span is not None:
+                spans[ef.field_name] = ef.span
+    return raw, spans
 
 
 def read_pdf_records(
@@ -105,13 +128,49 @@ def read_pdf_records(
             if refined:
                 page_fields = refined
 
-        raw: dict[str, str] = {}
-        spans: dict[str, SourceSpan] = {}
-        for ef in page_fields:
-            if ef.field_name in recipe.mapping and ef.value:
-                raw[ef.field_name] = ef.value
-                if ef.span is not None:
-                    spans[ef.field_name] = ef.span
+        raw, spans = _collect_mapped_fields(page_fields, recipe.mapping)
+
+        if not raw.get("first_name") and not raw.get("last_name"):
+            continue
+
+        unique_id = f"{id_prefix}{_start_index + len(records):04d}"
+        records.append(
+            Record(
+                unique_id=unique_id,
+                source=source,
+                raw=raw,
+                spans=spans,
+            )
+        )
+
+    return records
+
+
+def read_text_records(
+    path: Path,
+    source: str,
+    *,
+    recipe: Recipe,
+    id_prefix: str,
+    _start_index: int = 1,
+) -> list[Record]:
+    """Extract records from a .txt or .eml intake file.
+
+    Parsing is stdlib-only and fully offline; the cloud seam is never consulted
+    for text sources. A body that yields at least a first_name or last_name
+    becomes one Record whose spans are line offsets into the text body. A
+    body that produces nothing useful is skipped, same as an empty PDF page.
+    """
+    from constituent_reconciler.extract.text import extract_eml, extract_text_file
+
+    if path.suffix.lower() == ".eml":
+        extraction = extract_eml(path)
+    else:
+        extraction = extract_text_file(path)
+
+    records: list[Record] = []
+    for page in extraction.pages:
+        raw, spans = _collect_mapped_fields(page.fields, recipe.mapping)
 
         if not raw.get("first_name") and not raw.get("last_name"):
             continue
@@ -139,10 +198,11 @@ def _ingest_source(
 ) -> list[Record]:
     """Route a source path to the right reader based on file type.
 
-    A directory is walked; each .csv is read as a structured source and each
-    .pdf is run through the extractor. A single file is routed by extension.
-    Files with other extensions are silently skipped inside a directory;
-    passed as a direct argument they fall through to the CSV reader.
+    A directory is walked; each .csv is read as a structured source, each .pdf
+    is run through the PDF extractor, and each .txt or .eml is run through the
+    text extractor. A single file is routed by extension. Files with other
+    extensions are silently skipped inside a directory; passed as a direct
+    argument they fall through to the CSV reader.
     """
     if path.is_dir():
         records: list[Record] = []
@@ -167,9 +227,22 @@ def _ingest_source(
                     _start_index=_start_index + len(records),
                 )
                 records += chunk
+            elif suffix in (".txt", ".eml") and recipe.extract.backend != "none":
+                chunk = read_text_records(
+                    child,
+                    source,
+                    recipe=recipe,
+                    id_prefix=id_prefix,
+                    _start_index=_start_index + len(records),
+                )
+                records += chunk
         return records
     elif path.suffix.lower() == ".pdf" and recipe.extract.backend != "none":
         return read_pdf_records(
+            path, source, recipe=recipe, id_prefix=id_prefix, _start_index=_start_index
+        )
+    elif path.suffix.lower() in (".txt", ".eml") and recipe.extract.backend != "none":
+        return read_text_records(
             path, source, recipe=recipe, id_prefix=id_prefix, _start_index=_start_index
         )
     else:

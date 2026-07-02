@@ -11,66 +11,21 @@ package works without it installed.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
-from constituent_reconciler.extract.base import ExtractedField, ExtractionResult, PageResult
+from constituent_reconciler.extract.base import (
+    FIELD_PATTERNS,
+    ExtractedField,
+    ExtractionResult,
+    PageResult,
+    page_confidence,
+)
 from constituent_reconciler.models import SourceSpan  # noqa: TC001
 
-# Ordered patterns per field: first match wins. `[^\n]+` captures up to the next
-# newline so that multi-field forms don't bleed across label-value pairs.
-_FIELD_PATTERNS: dict[str, list[re.Pattern[str]]] = {
-    "first_name": [
-        re.compile(r"(?i)first\s+name\s*[:\-]\s*([^\n]+)"),
-        re.compile(r"(?i)given\s+name\s*[:\-]\s*([^\n]+)"),
-    ],
-    "last_name": [
-        re.compile(r"(?i)last\s+name\s*[:\-]\s*([^\n]+)"),
-        re.compile(r"(?i)surname\s*[:\-]\s*([^\n]+)"),
-    ],
-    "dob": [
-        re.compile(
-            r"(?i)(?:date\s+of\s+birth|dob|birth\s+date)\s*[:\-]\s*"
-            r"(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}|\d{4}[/\-\.]\d{2}[/\-\.]\d{2})"
-        ),
-    ],
-    "email": [
-        re.compile(r"(?i)e-?mail\s*[:\-]\s*([\w.+\-]+@[\w\-]+\.[a-zA-Z]{2,})"),
-        re.compile(r"([\w.+\-]+@[\w\-]+\.[a-zA-Z]{2,})"),
-    ],
-    "phone": [
-        re.compile(r"(?i)(?:phone|tel)\s*[:\-]\s*([\d\s\-\.\(\)]{7,})"),
-        re.compile(r"(\(?\d{3}\)?[\s\-\.]?\d{3}[\s\-\.]?\d{4})"),
-    ],
-}
-
-# Page confidence heuristics. A page with fewer than _MIN_WORDS words is
-# probably near-empty (a cover sheet, a blank page, or a header-only scan).
-# A page where the average word length exceeds _GARBLED_AVG_WORD_LEN characters
-# is probably garbled OCR output. Both score below 0.5.
-_MIN_WORDS = 5
-_GARBLED_AVG_WORD_LEN = 15
-
-
-def _page_confidence(text: str) -> float:
-    """Heuristic confidence for a page based on word count and plausibility.
-
-    Returns a score in [0, 1]. Near-empty pages and pages with very long
-    "words" (garbled OCR) score below 0.5, flagging them as low-confidence
-    candidates for the optional cloud seam.
-    """
-    stripped = text.strip()
-    if not stripped:
-        return 0.0
-    words = stripped.split()
-    if not words:
-        return 0.0
-    avg_word_len = sum(len(w) for w in words) / len(words)
-    if avg_word_len > _GARBLED_AVG_WORD_LEN:
-        return 0.2
-    if len(words) < _MIN_WORDS:
-        return len(words) / _MIN_WORDS * 0.5
-    return 1.0
+# Backward-compatible aliases: the patterns and the confidence heuristic moved
+# to extract.base so the text extractor applies identical rules.
+_FIELD_PATTERNS = FIELD_PATTERNS
+_page_confidence = page_confidence
 
 
 def _find_span(page: object, value: str, source_file: str, page_num: int) -> SourceSpan | None:

@@ -34,6 +34,24 @@ class SourceSpan:
         )
 
 
+@dataclass(frozen=True)
+class TextSpan:
+    """Location of an extracted value within a plain-text source (.txt or .eml body).
+
+    ``line`` is 1-indexed. ``col_start`` and ``col_end`` are 0-indexed character
+    offsets within that line, end exclusive. Values never cross a line boundary
+    because the extraction patterns stop at the first newline.
+    """
+
+    source_file: str
+    line: int
+    col_start: int
+    col_end: int
+
+    def __str__(self) -> str:
+        return f"{self.source_file}:L{self.line}:c{self.col_start}-{self.col_end}"
+
+
 # The canonical fields the matcher reasons over. Source columns are mapped onto
 # these by the recipe. A recipe activates only the fields it maps, so address is
 # available but does not affect a run that does not map it.
@@ -68,7 +86,8 @@ class Record:
     recipe mapping is applied at read time). ``normalized`` is filled in by the
     normalize step. ``consent_status`` is the raw consent token, lower-cased.
     ``spans`` maps each canonical field name to where it was found in a source
-    document; empty for records read from structured CSV.
+    document (a ``SourceSpan`` for PDFs, a ``TextSpan`` for text and email
+    bodies); empty for records read from structured CSV.
     """
 
     unique_id: str
@@ -76,7 +95,7 @@ class Record:
     raw: dict[str, str]
     normalized: dict[str, str] = field(default_factory=dict)
     consent_status: str = ""
-    spans: dict[str, SourceSpan] = field(default_factory=dict)
+    spans: dict[str, SourceSpan | TextSpan] = field(default_factory=dict)
 
     def has_consent(self) -> bool:
         return self.consent_status.strip().lower() in CONSENT_GRANTED
