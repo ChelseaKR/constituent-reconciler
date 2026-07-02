@@ -18,10 +18,11 @@ from constituent_reconciler import __version__, pipeline
 from constituent_reconciler.config import Recipe, load_recipe
 from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.consent import partition_by_consent
+from constituent_reconciler.destruction import destroy, parse_retention
 from constituent_reconciler.evaluate import evaluate
 from constituent_reconciler.pipeline import ExportSummary
 from constituent_reconciler.policy import PolicyViolation
-from constituent_reconciler.provenance import verify_log
+from constituent_reconciler.provenance import ProvenanceLog, verify_log
 from constituent_reconciler.report import render_eval_markdown, render_run_summary
 from constituent_reconciler.suppression import render_summary
 
@@ -154,6 +155,40 @@ def _cmd_review(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_destroy(args: argparse.Namespace) -> int:
+    out_dir = Path(args.out)
+    if not out_dir.is_dir():
+        print(f"destroy error: no such output directory: {out_dir}", file=sys.stderr)
+        return 2
+    try:
+        older_than = parse_retention(args.older_than)
+    except ValueError as error:
+        print(f"destroy error: {error}", file=sys.stderr)
+        return 2
+    log = ProvenanceLog(out_dir / "provenance.jsonl")
+    summary = destroy(
+        out_dir, older_than, policy=args.older_than, log=log, dry_run=args.dry_run
+    )
+    if args.dry_run:
+        for name in summary.candidates:
+            print(f"would destroy: {out_dir / name}")
+        print(
+            f"\ndry run: {len(summary.candidates)} artifact(s) eligible under "
+            f"--older-than {summary.policy}; nothing deleted, nothing logged"
+        )
+        return 0
+    for artifact in summary.destroyed:
+        print(f"destroyed: {out_dir / artifact.name} (sha256 {artifact.sha256}, "
+              f"{artifact.size} bytes)")
+    print(
+        f"\ndestroyed {len(summary.destroyed)} artifact(s) under "
+        f"--older-than {summary.policy}"
+    )
+    if summary.destroyed:
+        print(f"  certificates: {log.path}")
+    return 0
+
+
 def _cmd_verify(args: argparse.Namespace) -> int:
     ok, message = verify_log(Path(args.provenance))
     print(message)
@@ -230,6 +265,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="override the recipe's policy pack (e.g. dv); fail-closed on unknown",
     )
     review_parser.set_defaults(func=_cmd_review)
+
+    destroy_parser = sub.add_parser(
+        "destroy",
+        help="delete PII-bearing output artifacts per retention policy, with certificates",
+    )
+    destroy_parser.add_argument("--out", default="out", help="output directory")
+    destroy_parser.add_argument(
+        "--older-than",
+        required=True,
+        help=(
+            "retention window, e.g. 30d or 12h (0d means regardless of age); "
+            "required because no default window ships"
+        ),
+    )
+    destroy_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="list eligible artifacts without deleting or logging",
+    )
+    destroy_parser.set_defaults(func=_cmd_destroy)
 
     verify_parser = sub.add_parser("verify", help="check a provenance log's hash chain")
     verify_parser.add_argument("--provenance", required=True, help="path to provenance.jsonl")

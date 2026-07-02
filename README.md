@@ -292,6 +292,33 @@ Check it at any time:
 reconcile verify --provenance out/provenance.jsonl
 ```
 
+### Destroying artifacts on a retention schedule
+
+The out directory accumulates files that carry constituent field values:
+`resolved.csv`, `review_queue.csv`, `withheld.csv`, and the CRM import files.
+The HUD comparable-database guidance the DV pack is modeled on expects
+individual records to be routinely destroyed once they are no longer needed.
+`reconcile destroy` executes that destruction over a stated retention window:
+
+```sh
+reconcile destroy --out out --older-than 30d --dry-run   # list what would go
+reconcile destroy --out out --older-than 30d             # delete and certify
+```
+
+Only the known PII-bearing artifacts are eligible (an explicit list, not a
+glob), and the provenance log is never touched. Each deleted file is hashed
+with SHA-256 before deletion and one `destroyed` certificate per file is
+appended to `out/provenance.jsonl`, so the chain proves what was destroyed,
+when, and under which policy without retaining any content. Check it with
+`reconcile verify` as usual.
+
+Two limits are stated rather than hidden. No retention window ships as a
+default, because how long records may live is a decision for the adopting
+organization and its counsel; `--older-than` is therefore required (`0d`
+means regardless of age). And deleting a file is not forensic erasure: on
+journaling filesystems and SSDs the bytes can persist until overwritten, so
+full-disk encryption of the machine remains the compensating control.
+
 ### Running with Docker
 
 The tool runs as a one-command container, with PDF extraction included:
