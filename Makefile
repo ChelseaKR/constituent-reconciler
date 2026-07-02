@@ -1,4 +1,4 @@
-.PHONY: install verify format-check lint type test security eval eval-extraction eval-large run docker bundle clean
+.PHONY: install verify format-check lint type test security eval eval-extraction eval-large run docker build sbom bundle clean
 
 # Reproduce the full local toolchain. CI mirrors `make verify` byte for byte.
 # `uv sync --frozen` refuses to run (and exits non-zero) if uv.lock is stale
@@ -94,5 +94,16 @@ bundle:
 		| xargs $(SHA256) > SHA256SUMS
 	@echo "bundle written to $(BUNDLE)"
 
+# Build the wheel and sdist into dist/. The release workflow publishes exactly
+# what this produces.
+build:
+	uv build
+
+# Generate a CycloneDX SBOM naming this package and the locked dependency
+# environment. `build` and `sbom` outputs are release artifacts, generated in CI
+# and never committed.
+sbom:
+	.venv/bin/cyclonedx-py environment --pyproject pyproject.toml -o sbom.json .venv/bin/python
+
 clean:
-	rm -rf out out-dv dist .pytest_cache .mypy_cache .ruff_cache .coverage
+	rm -rf out out-dv dist sbom.json .pytest_cache .mypy_cache .ruff_cache .coverage

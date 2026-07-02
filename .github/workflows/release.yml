@@ -1,0 +1,54 @@
+name: release
+
+# Runs when a version tag is pushed. Re-runs the merge-blocking gates, builds
+# the wheel and sdist, generates a CycloneDX SBOM, signs every artifact and the
+# SBOM keylessly with Sigstore using this job's GitHub Actions OIDC identity,
+# and attaches all of it to a GitHub release. Verification instructions for
+# consumers are in SECURITY.md.
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+# Least-privilege default token; the release job widens only what it needs.
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub release and upload its assets
+      id-token: write # mint the OIDC token Sigstore exchanges for a signing cert
+    steps:
+      # Actions are pinned to a full commit SHA per the portfolio supply-chain
+      # standard; the trailing comment records the human-readable version.
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
+      - name: Install
+        run: make install
+      # A release must pass the same gates as CI; a tag is not an exemption.
+      - name: Verify (ruff, mypy --strict, pytest)
+        run: make verify
+      - name: Build wheel and sdist
+        run: make build
+      - name: Generate SBOM (CycloneDX)
+        run: make sbom
+      # Keyless signing: the sigstore CLI picks up the job's ambient OIDC
+      # token, exchanges it with Fulcio for a short-lived certificate bound to
+      # this workflow's identity, and logs the signature in Rekor. One
+      # <artifact>.sigstore.json bundle is written beside each input.
+      - name: Sign artifacts and SBOM with Sigstore
+        run: .venv/bin/sigstore sign dist/* sbom.json
+      - name: Create the GitHub release with signed artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --notes "See CHANGELOG.md for what changed. The wheel, sdist, and CycloneDX SBOM each carry a Sigstore bundle (<file>.sigstore.json) signed by this repository's release workflow over GitHub Actions OIDC. Verification instructions are in SECURITY.md." \
+            dist/* sbom.json sbom.json.sigstore.json

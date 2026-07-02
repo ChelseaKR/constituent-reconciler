@@ -25,6 +25,10 @@ out-dv/
 # Only the derived report (eval/large-corpus-report.md) is committed.
 eval/large-corpus/
 
+# Release artifacts (generated in CI by `make build` / `make sbom`)
+sbom.json
+*.sigstore.json
+
 # OS
 .DS_Store
 .coverage

@@ -37,6 +37,33 @@ lands) and writes to a case system. The concerns it takes seriously:
   reason, never field values, so the record of what was withheld does not itself
   leak the data.
 
+## Release integrity and supply chain
+
+Releases are built and signed in CI, not on a maintainer's machine.
+`.github/workflows/release.yml` runs on a version tag: it re-runs the
+merge-blocking gates, builds the wheel and sdist, generates a CycloneDX SBOM
+(`sbom.json`), and signs each artifact keylessly with
+[Sigstore](https://www.sigstore.dev/), using the workflow's GitHub Actions OIDC
+identity as the signing identity. Every release asset ships with a
+`<file>.sigstore.json` bundle.
+
+To verify an artifact from release `vX.Y.Z` with the
+[sigstore CLI](https://pypi.org/project/sigstore/):
+
+```sh
+sigstore verify github \
+  --bundle <artifact>.sigstore.json \
+  --cert-identity "https://github.com/ChelseaKR/constituent-reconciler/.github/workflows/release.yml@refs/tags/vX.Y.Z" \
+  --repository ChelseaKR/constituent-reconciler \
+  <artifact>
+```
+
+The rest of the supply-chain posture: every GitHub Action in
+`.github/workflows/` is pinned to a full commit SHA, GitHub secret scanning and
+push protection are enabled on the repository, and Dependabot
+(`.github/dependabot.yml`) keeps the pinned actions and the Python dependencies
+current.
+
 ## Out of scope for v0.x
 
 Network hardening, multi-tenant isolation, and authentication are out of scope

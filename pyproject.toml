@@ -44,6 +44,9 @@ dev = [
   "ruff>=0.15",
   "pip-audit>=2.7",
   "pdfplumber>=0.11",
+  # Supply-chain tooling, used by `make sbom` and the release workflow only.
+  "cyclonedx-bom>=7",
+  "sigstore>=4",
 ]
 
 [project.urls]

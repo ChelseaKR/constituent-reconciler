@@ -6,7 +6,7 @@ a self-assessment, not a registry submission or an endorsement. Each indicator i
 marked met, partial, or planned, with the honest reason. The note is regenerated
 on release alongside the responsible-tech audits.
 
-Last verified: 2026-06-27. Recheck cadence: per release, or on a DPG Standard
+Last verified: 2026-07-02. Recheck cadence: per release, or on a DPG Standard
 revision.
 
 ## 1. Relevance to Sustainable Development Goals
@@ -66,8 +66,11 @@ synthetic.
 and `pytest` as merge-blocking CI gates; a committed, regenerated eval report
 with Wilson confidence intervals; declared config, connector, and report schema
 versions (`reconcile schema`); conventional commits and a Keep a Changelog
-history. Supply-chain hardening (SBOM, signed releases, SHA-pinned actions) lands
-on the path to 1.0; the gaps are tracked, not hidden.
+history. Supply-chain hardening is in place: CI actions pinned to full commit
+SHAs, a tag-triggered release workflow that generates a CycloneDX SBOM and
+signs every artifact with Sigstore using GitHub Actions OIDC as the signing
+identity, secret scanning with push protection enabled on the repository, and
+Dependabot version updates. Verification instructions are in `SECURITY.md`.
 
 ## 9. Do no harm by design
 
@@ -83,7 +86,6 @@ omitted.
 ## Summary
 
 All nine indicators are met at the reference-implementation level. The honest
-qualifications: indicator 7 carries the not-legal-advice caveat every tool in
-this space must, and indicator 8's supply-chain items are partially landed and
-tracked toward 1.0. Nothing here is a substitute for an organization's own review
+qualification: indicator 7 carries the not-legal-advice caveat every tool in
+this space must. Nothing here is a substitute for an organization's own review
 or a formal DPG registry assessment.

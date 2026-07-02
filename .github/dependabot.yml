@@ -1,0 +1,12 @@
+# Keep the SHA-pinned actions and the Python dependencies current. Dependabot
+# updates the pinned commit SHAs in workflow files rather than loosening them.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
