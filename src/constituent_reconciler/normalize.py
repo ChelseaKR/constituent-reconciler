@@ -202,6 +202,7 @@ def normalize_record(
     fields: tuple[str, ...],
     *,
     address_backend: str = "deterministic",
+    failures: dict[str, dict[str, int]] | None = None,
 ) -> Record:
     """Return a copy of ``record`` with ``normalized`` filled for ``fields``.
 
@@ -215,6 +216,12 @@ def normalize_record(
     under their own keys in ``normalized`` rather than as separate canonical
     fields, since they only ever exist as a function of the base field and a
     recipe never maps them directly.
+
+    ``failures``, when given, is a mutable ``field -> {source: count}`` mapping
+    that is incremented whenever a nonempty raw value normalizes to ``""``: the
+    value existed but nothing parseable survived (an unparseable date, a name
+    that was all punctuation). The caller owns the mapping, so normalization
+    itself stays a pure function of the record.
     """
 
     normalized: dict[str, str] = {}
@@ -226,6 +233,9 @@ def normalize_record(
             normalizer = _FIELD_NORMALIZERS.get(field_name, normalize_name)
             normalized[field_name] = normalizer(raw_value)
 
+        if failures is not None and raw_value.strip() and not normalized[field_name]:
+            per_source = failures.setdefault(field_name, {})
+            per_source[record.source] = per_source.get(record.source, 0) + 1
         if field_name == "first_name":
             normalized["first_name_nickname_key"] = nicknames.canonical_key(
                 normalized["first_name"]

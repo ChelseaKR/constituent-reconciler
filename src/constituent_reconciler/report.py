@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from constituent_reconciler.evaluate import EvalReport, ExtractionReport
-from constituent_reconciler.models import RunResult
+from constituent_reconciler.models import IngestReport, RunResult
 from constituent_reconciler.quality import SourceQuality
 from constituent_reconciler.suppression import SUPPRESSED
 
@@ -28,6 +28,7 @@ def render_run_summary(result: RunResult, *, withheld: int = 0) -> str:
     ]
     if withheld:
         lines.append(f"withheld (no consent): {withheld}")
+    lines += _render_ingest(result.ingest)
     return "\n".join(lines)
 
 
@@ -97,6 +98,34 @@ def render_source_quality(sources: Sequence[SourceQuality]) -> str:
         cells += [row[i].rjust(widths[i]) for i in range(3, len(header))]
         lines.append("  " + "  ".join(cells).rstrip())
     return "\n".join(lines)
+
+
+def _render_ingest(ingest: IngestReport) -> list[str]:
+    """Render the ingest accounting: every file, page, and failure answered for.
+
+    Empty when there is nothing to report (a result built without ingest
+    accounting), so summaries for hand-built results stay unchanged.
+    """
+
+    if not ingest.files_read and not ingest.files_skipped:
+        return []
+    lines = ["", "ingest:", f"  files read:        {len(ingest.files_read)}"]
+    lines += [f"    {path}" for path in ingest.files_read]
+    if ingest.files_skipped:
+        lines.append(f"  files skipped:     {len(ingest.files_skipped)}")
+        lines += [f"    {skipped.path} ({skipped.reason})" for skipped in ingest.files_skipped]
+    if ingest.pages_extracted or ingest.pages_dropped:
+        lines.append(f"  pdf pages:         {ingest.pages_extracted} extracted, "
+                     f"{ingest.pages_dropped} dropped (no name found)")
+    if ingest.normalization_failures:
+        lines.append("  normalization failures (value present, nothing parseable):")
+        for field_name in sorted(ingest.normalization_failures):
+            per_source = ingest.normalization_failures[field_name]
+            counts = ", ".join(
+                f"{source}: {count}" for source, count in sorted(per_source.items())
+            )
+            lines.append(f"    {field_name}: {counts}")
+    return lines
 
 
 def _pct(value: float) -> str:
