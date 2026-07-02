@@ -7,6 +7,11 @@ entry breaks every entry after it, and `verify_log` detects it. The log answers
 "what was written, when, and under which consent" with evidence rather than
 assertion.
 
+A run may open with a ``run-start`` entry carrying the hash of that run's
+reproducibility manifest (see ``manifest.py``). The entry chains like any
+other, so the writes that follow it are bound to the recipe and inputs that
+produced them; ``verify_log`` reports the manifest hashes it finds.
+
 Time is supplied by a TimestampAuthority. The default is the local clock, which
 is honest but only as trustworthy as the machine. The interface exists so a
 production deployment can plug in an RFC 3161 trusted-timestamp authority for
@@ -24,6 +29,11 @@ from pathlib import Path
 from typing import Protocol
 
 GENESIS_HASH = "0" * 64
+
+# Action recorded when a run announces its reproducibility manifest. Entries
+# with this action carry the manifest hash as their content hash and no
+# record id, members, or consent.
+RUN_START_ACTION = "run-start"
 
 
 def content_hash(payload: dict[str, str]) -> str:
@@ -92,7 +102,43 @@ class ProvenanceLog:
         payload: dict[str, str],
         external_id: str | None = None,
     ) -> dict[str, object]:
-        digest = content_hash(payload)
+        return self._append(
+            action=action,
+            record_id=record_id,
+            members=members,
+            consent=consent,
+            digest=content_hash(payload),
+            external_id=external_id,
+        )
+
+    def append_run_start(self, manifest_hash: str) -> dict[str, object]:
+        """Record the manifest of the run whose write entries follow.
+
+        The entry carries the manifest hash as its content hash; it concerns no
+        record, so record_id is empty, members is empty, and consent is null.
+        Every write appended after it chains to it, binding those writes to the
+        recipe and inputs the manifest describes.
+        """
+
+        return self._append(
+            action=RUN_START_ACTION,
+            record_id="",
+            members=(),
+            consent=None,
+            digest=manifest_hash,
+            external_id=None,
+        )
+
+    def _append(
+        self,
+        *,
+        action: str,
+        record_id: str,
+        members: Sequence[str],
+        consent: bool | None,
+        digest: str,
+        external_id: str | None,
+    ) -> dict[str, object]:
         entry: dict[str, object] = {
             "seq": self._seq,
             "time": self.authority.stamp(digest),
@@ -119,13 +165,15 @@ def verify_log(path: Path) -> tuple[bool, str]:
 
     Returns ``(ok, message)``. A log is intact when every entry's recomputed
     hash matches what is stored and every entry's ``prev_hash`` equals the prior
-    entry's ``entry_hash``.
+    entry's ``entry_hash``. When the log contains ``run-start`` entries, the
+    message also states which manifest hash each chain segment belongs to.
     """
 
     if not path.exists():
         return False, "log does not exist"
     prev = GENESIS_HASH
     seq = 0
+    run_manifests: list[str] = []
     with path.open(encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
             line = line.strip()
@@ -139,6 +187,13 @@ def verify_log(path: Path) -> tuple[bool, str]:
                 return False, f"tampered entry at line {line_number}: hash mismatch"
             if entry.get("seq") != seq:
                 return False, f"out-of-order entry at line {line_number}"
+            if entry.get("action") == RUN_START_ACTION:
+                run_manifests.append(
+                    f"entries from seq {seq} under manifest {entry['content_hash']}"
+                )
             prev = str(entry["entry_hash"])
             seq += 1
-    return True, f"intact: {seq} entries"
+    message = f"intact: {seq} entries"
+    if run_manifests:
+        message += "; " + "; ".join(run_manifests)
+    return True, message
