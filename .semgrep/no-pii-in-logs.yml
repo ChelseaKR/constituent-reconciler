@@ -1,0 +1,30 @@
+rules:
+  - id: no-pii-in-logs
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A constituent record's raw or normalized field dict (which can carry
+      name, dob, email, phone, or address) is being passed whole, or
+      subscripted, into a print/logging call. The project's data-minimization
+      rule (docs/RESPONSIBLE-TECH-AUDITS.md § Privacy) is that artifacts and
+      logs carry ids, verdicts, and reasons only, never field values —
+      tests/test_consent.py and tests/test_provenance.py enforce this for the
+      committed artifacts, but nothing catches an ad hoc print/log statement.
+      If this is truly not PII (e.g. logging only `unique_id` or a count), use
+      a local variable or `# nosemgrep: no-pii-in-logs` with a one-line reason
+      instead of silencing the whole file.
+    metadata:
+      category: security
+      references:
+        - docs/RESPONSIBLE-TECH-AUDITS.md
+      control: OBS-11
+    patterns:
+      - pattern-either:
+          - pattern: print(..., $REC.raw, ...)
+          - pattern: print(..., $REC.normalized, ...)
+          - pattern: print(..., $REC.raw[$KEY], ...)
+          - pattern: print(..., $REC.normalized[$KEY], ...)
+          - pattern: logging.$METHOD(..., $REC.raw, ...)
+          - pattern: logging.$METHOD(..., $REC.normalized, ...)
+          - pattern: logging.$METHOD(..., $REC.raw[$KEY], ...)
+          - pattern: logging.$METHOD(..., $REC.normalized[$KEY], ...)

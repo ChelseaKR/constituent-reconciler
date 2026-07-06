@@ -26,47 +26,82 @@ import re
 # (the long form or a variant) maps to the standard short form. Both the long and
 # short forms are present so that an already-abbreviated input is left stable.
 _STREET_SUFFIXES: dict[str, str] = {
-    "STREET": "ST", "ST": "ST", "STR": "ST",
-    "AVENUE": "AVE", "AVE": "AVE", "AV": "AVE",
-    "BOULEVARD": "BLVD", "BLVD": "BLVD", "BOUL": "BLVD",
-    "DRIVE": "DR", "DR": "DR",
-    "ROAD": "RD", "RD": "RD",
-    "LANE": "LN", "LN": "LN",
-    "COURT": "CT", "CT": "CT",
-    "PLACE": "PL", "PL": "PL",
-    "CIRCLE": "CIR", "CIR": "CIR",
-    "TERRACE": "TER", "TER": "TER", "TERR": "TER",
-    "PARKWAY": "PKWY", "PKWY": "PKWY",
-    "HIGHWAY": "HWY", "HWY": "HWY",
-    "TRAIL": "TRL", "TRL": "TRL",
-    "SQUARE": "SQ", "SQ": "SQ",
-    "PLAZA": "PLZ", "PLZ": "PLZ",
+    "STREET": "ST",
+    "ST": "ST",
+    "STR": "ST",
+    "AVENUE": "AVE",
+    "AVE": "AVE",
+    "AV": "AVE",
+    "BOULEVARD": "BLVD",
+    "BLVD": "BLVD",
+    "BOUL": "BLVD",
+    "DRIVE": "DR",
+    "DR": "DR",
+    "ROAD": "RD",
+    "RD": "RD",
+    "LANE": "LN",
+    "LN": "LN",
+    "COURT": "CT",
+    "CT": "CT",
+    "PLACE": "PL",
+    "PL": "PL",
+    "CIRCLE": "CIR",
+    "CIR": "CIR",
+    "TERRACE": "TER",
+    "TER": "TER",
+    "TERR": "TER",
+    "PARKWAY": "PKWY",
+    "PKWY": "PKWY",
+    "HIGHWAY": "HWY",
+    "HWY": "HWY",
+    "TRAIL": "TRL",
+    "TRL": "TRL",
+    "SQUARE": "SQ",
+    "SQ": "SQ",
+    "PLAZA": "PLZ",
+    "PLZ": "PLZ",
     "WAY": "WAY",
     "LOOP": "LOOP",
-    "ALLEY": "ALY", "ALY": "ALY",
-    "CRESCENT": "CRES", "CRES": "CRES",
+    "ALLEY": "ALY",
+    "ALY": "ALY",
+    "CRESCENT": "CRES",
+    "CRES": "CRES",
 }
 
 # USPS Publication 28, Appendix C2 — directional abbreviations.
 _DIRECTIONALS: dict[str, str] = {
-    "NORTH": "N", "N": "N",
-    "SOUTH": "S", "S": "S",
-    "EAST": "E", "E": "E",
-    "WEST": "W", "W": "W",
-    "NORTHEAST": "NE", "NE": "NE",
-    "NORTHWEST": "NW", "NW": "NW",
-    "SOUTHEAST": "SE", "SE": "SE",
-    "SOUTHWEST": "SW", "SW": "SW",
+    "NORTH": "N",
+    "N": "N",
+    "SOUTH": "S",
+    "S": "S",
+    "EAST": "E",
+    "E": "E",
+    "WEST": "W",
+    "W": "W",
+    "NORTHEAST": "NE",
+    "NE": "NE",
+    "NORTHWEST": "NW",
+    "NW": "NW",
+    "SOUTHEAST": "SE",
+    "SE": "SE",
+    "SOUTHWEST": "SW",
+    "SW": "SW",
 }
 
 # USPS Publication 28, Appendix C2 — secondary unit designators.
 _UNIT_DESIGNATORS: dict[str, str] = {
-    "APARTMENT": "APT", "APT": "APT",
-    "SUITE": "STE", "STE": "STE",
-    "BUILDING": "BLDG", "BLDG": "BLDG",
-    "FLOOR": "FL", "FL": "FL",
-    "ROOM": "RM", "RM": "RM",
-    "DEPARTMENT": "DEPT", "DEPT": "DEPT",
+    "APARTMENT": "APT",
+    "APT": "APT",
+    "SUITE": "STE",
+    "STE": "STE",
+    "BUILDING": "BLDG",
+    "BLDG": "BLDG",
+    "FLOOR": "FL",
+    "FL": "FL",
+    "ROOM": "RM",
+    "RM": "RM",
+    "DEPARTMENT": "DEPT",
+    "DEPT": "DEPT",
     "UNIT": "UNIT",
 }
 
@@ -123,7 +158,7 @@ def normalize_address_libpostal(value: str) -> str:
         raise ImportError(
             "the libpostal address backend requires the 'postal' package and the "
             "libpostal C library. Install both per the libpostal docs, or set "
-            "address_backend = \"deterministic\" (the default) in the recipe."
+            'address_backend = "deterministic" (the default) in the recipe.'
         ) from exc
 
     text = value.strip()
@@ -148,6 +183,4 @@ def normalize_address(value: str, *, backend: str = "deterministic") -> str:
         return normalize_address_deterministic(value)
     if backend == "libpostal":
         return normalize_address_libpostal(value)
-    raise ValueError(
-        f"unknown address backend {backend!r}; use 'deterministic' or 'libpostal'"
-    )
+    raise ValueError(f"unknown address backend {backend!r}; use 'deterministic' or 'libpostal'")

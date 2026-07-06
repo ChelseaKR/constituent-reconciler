@@ -15,15 +15,112 @@ jobs:
     steps:
       # Actions are pinned to a full commit SHA per the portfolio supply-chain
       # standard; the trailing comment records the human-readable version.
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+      # v6/v8.3.0 are the node24 releases (GitHub switched the runner default
+      # off node20 in 2026; node20-only actions need an explicit opt-out).
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
       # Drive CI through the Makefile so it runs byte for byte the same path as
       # `make verify` does locally.
       - name: Install
         run: make install
-      - name: Verify (ruff, mypy --strict, pytest)
+      - name: Verify (ruff format --check, ruff check, mypy --strict, pytest)
         run: make verify
       - name: Eval report is current
         run: |
           make eval
           git diff --exit-code eval/report.md
+
+  # Dependency-vulnerability gate (SEC-11, SEC-13, CQ-11), separate from
+  # `verify` so it is its own required status check and its own log/timeout.
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
+      - name: Install
+        run: make install
+      # osv-scanner has no first-party step-style action with a pinnable SHA
+      # that fits this job (upstream ships it as reusable workflows with SARIF
+      # + code-scanning upload); install the pinned release binary directly
+      # and verify it against the published SHA256SUMS instead.
+      - name: Install osv-scanner (checksum-verified)
+        run: |
+          set -eu
+          curl -sSfL -o osv-scanner \
+            https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_linux_amd64
+          echo "15314940c10d26af9c6649f150b8a47c1262e8fc7e17b1d1029b0e479e8ed8a0  osv-scanner" | sha256sum -c -
+          chmod +x osv-scanner
+          sudo mv osv-scanner /usr/local/bin/osv-scanner
+      - name: pip-audit + osv-scanner (blocking, no mute pattern)
+        run: make security
+
+  # Secret scanning (SEC-17, SEC-18, CQ-12): full-history scan on every push
+  # and PR. Free for personal-account repos (no GITLEAKS_LICENSE needed); see
+  # https://github.com/gitleaks/gitleaks-action.
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # SAST (SEC-07): public Semgrep registry rulesets plus a repo-specific rule
+  # (.semgrep/no-pii-in-logs.yml) mirroring the data-minimization invariants
+  # tests/test_consent.py and tests/test_provenance.py already enforce for
+  # committed artifacts. Runs in the upstream image pinned by digest rather
+  # than a marketplace action (Semgrep ships no SHA-pinnable step action).
+  sast:
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep@sha256:59fbed6127ea7c5dde3ba6a85142733bb20ea9aaa36120c953904f1539aaf66e # 1.168.0
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Semgrep (blocking, zero unwaived findings)
+        run: |
+          semgrep scan --error \
+            --config p/security-audit --config p/secrets \
+            --config .semgrep/no-pii-in-logs.yml \
+            src tests
+
+  # Workflow SAST (CICD-19): lints .github/workflows/** for injection, missing
+  # permissions, unpinned actions, credential persistence, etc. Zero findings
+  # expected; verified locally before this job was added.
+  zizmor:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # to upload the SARIF report to Code Scanning
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: zizmorcore/zizmor-action@192e21d79ab29983730a13d1382995c2307fbcaa # v0.5.7
+
+  # Container scan (SEC-28): build the self-host image exactly as a user
+  # would (`make docker`) and block on any fixed CRITICAL/HIGH finding.
+  # NOTE: not locally exercised during this remediation pass — no Docker
+  # daemon was available in that environment; verify on the first real PR.
+  container-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Build image
+        run: make docker
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: constituent-reconciler
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"

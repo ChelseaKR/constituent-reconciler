@@ -30,7 +30,7 @@ metadata. The project is a single public repository under one maintainer.
 
 ## 4. Platform independence
 
-**Met.** Pure Python (3.11+) with one heavy dependency (Splink, itself open). No
+**Met.** Pure Python (3.12+) with one heavy dependency (Splink, itself open). No
 proprietary runtime, no mandatory cloud service. The optional connectors target
 open or widely available systems (CiviCRM is open source; Salesforce is
 optional). The cloud extraction seam is optional and off by default. A one-command

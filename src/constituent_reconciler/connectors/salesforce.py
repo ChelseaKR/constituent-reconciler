@@ -56,16 +56,17 @@ class UrllibTransport:
     def send(
         self, method: str, url: str, *, headers: dict[str, str], body: bytes | None
     ) -> tuple[int, bytes]:
-        request = urllib.request.Request(url, data=body, headers=headers, method=method)
+        # url is the operator's own recipe.toml `[output].instance_url`, not attacker
+        # input; S310 flags any urlopen call regardless of scheme provenance.
+        request = urllib.request.Request(url, data=body, headers=headers, method=method)  # noqa: S310
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            # nosemgrep: dynamic-urllib-use-detected (operator-configured url, see noqa above)
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:  # noqa: S310
                 return int(response.status), response.read()
         except urllib.error.HTTPError as error:
             return int(error.code), error.read()
         except urllib.error.URLError as error:  # pragma: no cover - network failure
-            raise ConnectorError(
-                f"could not reach Salesforce at {url}: {error.reason}"
-            ) from error
+            raise ConnectorError(f"could not reach Salesforce at {url}: {error.reason}") from error
 
 
 @dataclass(frozen=True)
@@ -128,9 +129,7 @@ class SalesforceConnector:
         # 204 No Content is an update with no body. 200/201 carry a JSON body with
         # an id and a "created" flag (true on insert, false on update).
         if status == 204 or not raw.strip():
-            return WriteResult(
-                record.cluster_id, "updated", record.cluster_id, payload=payload
-            )
+            return WriteResult(record.cluster_id, "updated", record.cluster_id, payload=payload)
         parsed = json.loads(raw)
         action = "created" if parsed.get("created") else "updated"
         external_id = str(parsed.get("id") or record.cluster_id)

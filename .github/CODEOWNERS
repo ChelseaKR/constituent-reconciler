@@ -1,0 +1,6 @@
+# Default owner for everything in the repo.
+* @ChelseaKR
+
+# Workflow changes get an explicit line so they are never silently unowned
+# even if the wildcard rule above is ever narrowed.
+/.github/workflows/ @ChelseaKR

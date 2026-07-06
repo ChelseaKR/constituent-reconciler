@@ -165,8 +165,7 @@ def render_overview(session: ReviewSession, *, apply_command: str) -> str:
 
     if total == 0:
         queue_html = (
-            "<p>There are no uncertain pairs to review. "
-            "Every match was decided automatically.</p>"
+            "<p>There are no uncertain pairs to review. Every match was decided automatically.</p>"
         )
         next_link = ""
     else:
@@ -204,8 +203,15 @@ def _cell(value: str, span: str) -> str:
     return f"{shown}{span_html}"
 
 
-def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -> str:
-    """The decision screen for one candidate pair."""
+def render_pair(
+    session: ReviewSession, view: PairView, *, apply_command: str, csrf_token: str = ""
+) -> str:
+    """The decision screen for one candidate pair.
+
+    ``csrf_token`` is the server's per-session token, embedded as a hidden form
+    field. The server refuses any POST that does not return it, so a page on
+    another site (which cannot read this one) cannot forge a verdict.
+    """
 
     counts = session.counts()
     decided = counts.approved + counts.rejected
@@ -243,8 +249,7 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
     prev_index = view.index - 1
     next_index = view.index + 1
     prev_link = (
-        f'<a class="btn secondary" data-nav="prev" href="/pair/{prev_index}">'
-        "&larr; Previous</a>"
+        f'<a class="btn secondary" data-nav="prev" href="/pair/{prev_index}">&larr; Previous</a>'
         if prev_index >= 0
         else ""
     )
@@ -256,6 +261,12 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
 
     pct = view.probability * 100
     rationale = escape(rationale_for(view).summary())
+    note_html = (
+        f'<div class="rationale" role="note">\n<h3>Why this pair is here</h3>\n'
+        f"<p>{escape(view.note)}</p>\n</div>\n"
+        if view.note
+        else ""
+    )
     body = (
         "<header>\n<h1>Review queue</h1>\n"
         f'<p class="progress" aria-live="polite">Pair {view.index + 1} of {total} '
@@ -266,6 +277,7 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
         f"<p>The matcher scored these two records at <strong>{pct:.1f}%</strong> "
         "likely to be the same person, which is below the automatic-merge line, "
         "so a person decides.</p>\n"
+        f"{note_html}"
         '<div class="rationale" role="note">\n'
         "<h3>What matches and what differs</h3>\n"
         f"<p>{rationale}</p>\n</div>\n"
@@ -273,12 +285,13 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
         '<table class="compare">\n<caption class="note">Record '
         f"{escape(view.left_id)} (from {escape(view.left_source)}) compared with "
         f"{escape(view.right_id)} (from {escape(view.right_source)}).</caption>\n"
-        "<thead><tr><th scope=\"col\">Field</th>"
+        '<thead><tr><th scope="col">Field</th>'
         f'<th scope="col">{escape(view.left_id)} ({escape(view.left_source)})</th>'
         f'<th scope="col">{escape(view.right_id)} ({escape(view.right_source)})</th>'
         '<th scope="col">Agreement</th></tr></thead>\n'
         "<tbody>\n" + "\n".join(field_rows) + "\n</tbody>\n</table>\n"
         f'<form method="post" action="/pair/{view.index}">\n'
+        f'<input type="hidden" name="token" value="{escape(csrf_token)}">\n'
         '<div class="actions">\n'
         '<button type="submit" name="verdict" value="approve" accesskey="a">'
         "Approve merge <kbd>A</kbd></button>\n"

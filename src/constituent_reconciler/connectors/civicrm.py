@@ -59,9 +59,12 @@ class UrllibTransport:
         self.timeout = timeout
 
     def post(self, url: str, *, headers: dict[str, str], body: bytes) -> tuple[int, bytes]:
-        request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        # url is the operator's own recipe.toml `[output].url`, not attacker input;
+        # S310 flags any urlopen call regardless of scheme provenance.
+        request = urllib.request.Request(url, data=body, headers=headers, method="POST")  # noqa: S310
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            # nosemgrep: dynamic-urllib-use-detected (operator-configured url, see noqa above)
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:  # noqa: S310
                 return int(response.status), response.read()
         except urllib.error.HTTPError as error:
             return int(error.code), error.read()
@@ -90,9 +93,7 @@ class CivicrmConnector:
 
     def _headers(self) -> dict[str, str]:
         if not self.config.api_key:
-            raise ConnectorError(
-                "CiviCRM API key is not set; configure the auth env var to write"
-            )
+            raise ConnectorError("CiviCRM API key is not set; configure the auth env var to write")
         scheme = f"{self.config.auth_scheme} " if self.config.auth_scheme else ""
         return {
             self.config.auth_header: f"{scheme}{self.config.api_key}",

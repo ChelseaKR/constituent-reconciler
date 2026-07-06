@@ -56,7 +56,7 @@ def _name_comparison(column: str) -> dict[str, Any]:
         "comparison_levels": [
             {
                 "sql_condition": f'"{column}_l" IS NULL OR "{column}_r" IS NULL '
-                f'OR "{column}_l" = \'\' OR "{column}_r" = \'\'',
+                f"OR \"{column}_l\" = '' OR \"{column}_r\" = ''",
                 "label_for_charts": "null or empty",
                 "is_null_level": True,
             },
@@ -97,7 +97,7 @@ def _address_comparison(column: str) -> dict[str, Any]:
         "comparison_levels": [
             {
                 "sql_condition": f'"{column}_l" IS NULL OR "{column}_r" IS NULL '
-                f'OR "{column}_l" = \'\' OR "{column}_r" = \'\'',
+                f"OR \"{column}_l\" = '' OR \"{column}_r\" = ''",
                 "label_for_charts": "null or empty",
                 "is_null_level": True,
             },
@@ -132,7 +132,7 @@ def _exact_comparison(column: str, m_yes: float, u_yes: float) -> dict[str, Any]
         "comparison_levels": [
             {
                 "sql_condition": f'"{column}_l" IS NULL OR "{column}_r" IS NULL '
-                f'OR "{column}_l" = \'\' OR "{column}_r" = \'\'',
+                f"OR \"{column}_l\" = '' OR \"{column}_r\" = ''",
                 "label_for_charts": "null or empty",
                 "is_null_level": True,
             },

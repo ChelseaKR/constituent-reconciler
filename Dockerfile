@@ -15,7 +15,10 @@
 # backend is not included because it needs a system C library; the default
 # deterministic address backend works without it.
 
-FROM python:3.11-slim
+# Pinned by digest, not just tag, so a build is reproducible and Renovate has
+# something concrete to bump (renovate.json's digest-pinning helper covers
+# Docker references the same way it covers GitHub Actions).
+FROM python:3.12-slim@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf
 
 # Avoid interactive prompts and keep the image lean.
 ENV PYTHONUNBUFFERED=1 \

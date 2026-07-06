@@ -33,6 +33,7 @@ class SourceSpan:
             f":x={self.x0:.0f}-{self.x1:.0f},y={self.top:.0f}-{self.bottom:.0f}"
         )
 
+
 # The canonical fields the matcher reasons over. Source columns are mapped onto
 # these by the recipe. A recipe activates only the fields it maps, so address is
 # available but does not affect a run that does not map it.
@@ -83,12 +84,18 @@ class Record:
 
 @dataclass(frozen=True)
 class Pair:
-    """A scored candidate pair of record ids, with the band it was assigned."""
+    """A scored candidate pair of record ids, with the band it was assigned.
+
+    ``note`` explains a routing decision in reviewer language; it is set when a
+    pair is re-routed to review because a human rejection elsewhere in its
+    cluster makes the merge unsafe, and is empty otherwise.
+    """
 
     left: str
     right: str
     probability: float
     band: Band
+    note: str = ""
 
     def key(self) -> frozenset[str]:
         return frozenset((self.left, self.right))

@@ -7,7 +7,7 @@ name = "constituent-reconciler"
 version = "0.7.0"
 description = "Offline-first pipeline that resolves and deduplicates nonprofit constituent records with a human review gate."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { file = "LICENSE" }
 authors = [{ name = "Chelsea Kelly-Reif" }]
 keywords = [
@@ -22,7 +22,7 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
   "License :: OSI Approved :: Apache Software License",
-  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
   "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 dependencies = [
@@ -34,7 +34,16 @@ reconcile = "constituent_reconciler.cli:main"
 
 [project.optional-dependencies]
 extract = ["pdfplumber>=0.11"]
-dev = ["pytest>=8", "mypy>=1.8", "ruff>=0.5", "pdfplumber>=0.11"]
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "pytest-cov>=5",
+  "mypy>=1.18",
+  "ruff>=0.15",
+  "pip-audit>=2.7",
+  "pdfplumber>=0.11",
+]
 
 [project.urls]
 Homepage = "https://github.com/ChelseaKR/constituent-reconciler"
@@ -48,10 +57,22 @@ line-length = 100
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "W"]
+select = ["E", "F", "I", "UP", "B", "W", "S", "C90"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+# `assert` is the pytest idiom, not a runtime assertion to strip (S101); tests
+# also deliberately construct fake credentials (S105/S106), a
+# bind-all-interfaces call to assert it is refused (S104), and urlopen calls
+# against the in-test loopback server (S310) — all expected-in-tests patterns,
+# not findings. Real code in src/ still gets the full S set with per-line
+# noqas where a specific call is a reviewed false positive.
+"tests/*" = ["S101", "S104", "S105", "S106", "S110", "S310"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 files = ["src", "tests"]
 
@@ -69,4 +90,8 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q --strict-markers --strict-config --import-mode=importlib --cov=constituent_reconciler --cov-branch --cov-report=term-missing --cov-fail-under=85"
+
+[tool.coverage.run]
+branch = true
+source = ["constituent_reconciler"]

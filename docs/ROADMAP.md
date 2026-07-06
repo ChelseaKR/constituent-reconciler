@@ -192,7 +192,7 @@ shared standard.
 
 | Attribute | Target | Gate |
 |-----------|--------|------|
-| Test coverage (logic) | At least 85% line coverage on `src/`; 86% at v0.7, measured with `coverage run -m pytest` | AUTO |
+| Test coverage (logic) | At least 85% branch coverage on `src/`; 85.7% measured 2026-07-05 | AUTO |
 | False-merge rate (eval) | 0% among auto-merged pairs on the committed fixtures, fail-closed; CI runs the gate at 0.0 | AUTO |
 | Matching pairwise precision and recall | Auto-merge precision 100% (a false merge fails the gate); auto+review coverage recall at least 95%, reported with Wilson CIs | REVIEW |
 | Extraction field precision and recall | At least 0.95 precision and 0.90 recall on a labeled extraction fixture; target only, the fixture and its measurement are not landed | REVIEW |
@@ -204,14 +204,49 @@ shared standard.
 
 Enforcement today: the false-merge gate and the DV policy-pack invariants (PII
 non-egress and consent-gated write) run as merge-blocking checks in CI now, and
-CI also fails if the committed eval report drifts. The coverage floor, the kappa
-drift gate, the i18n parity check, and the supply-chain items are committed
-targets not yet wired as automatic CI gates; each lands with the phase named
-beside it (the kappa gate with R10, the supply-chain items with R3, EN/ES parity
-with R1). The matching and extraction precision and recall figures are REVIEW
-metrics a person reads from the eval report rather than pass-or-fail gates. The
-coverage figure is measured on demand with `coverage run -m pytest`; `coverage`
-is not a committed dependency.
+CI also fails if the committed eval report drifts. The coverage floor is now a
+merge-blocking `pytest` gate too (`--cov-fail-under=85` in `pyproject.toml`,
+`pytest-cov` a committed dev dependency, 2026-07-05) — the false-merge rate
+stays the primary correctness metric because a wrong merge is the expensive
+error, but a coverage regression now fails the build as well. The secret-scan
+and dependency-vulnerability items are also merge-blocking CI jobs now
+(`secrets`, `security` in `ci.yml`); SAST, container scanning, and SBOM/signing
+remain committed targets not yet wired (see the remediation plan's P1-2,
+P1-4, P1-7). The kappa drift gate and the i18n parity check land with the
+phases named beside them (the kappa gate with R10, EN/ES parity with R1). The
+matching and extraction precision and recall figures are REVIEW metrics a
+person reads from the eval report rather than pass-or-fail gates.
+
+## AI Evaluation Standard applicability
+
+`AI-Evaluation-Standard: N/A — no model inference in any user-facing or
+decision path (BedrockSeam is an unimplemented stub; NoOpSeam default).
+Reviewed 2026-07-05.` `BedrockSeam.refine()` raises `NotImplementedError`
+(`src/constituent_reconciler/extract/seam.py`), and every policy pack ships
+`NoOpSeam` by default; the DV and HIPAA packs fuse the seam off entirely. The
+day `BedrockSeam.refine()` gains a real implementation, this line flips to
+Applies and the AI-Evaluation standard's controls (eval harness, calibration
+gate, model card) become binding before that PR merges.
+
+## Observability
+
+Tier C (library/CLI): `reconcile` is a local command-line pipeline and a
+loopback-only review server, not a hosted service, so there is no request-rate,
+latency-SLO, or distributed-tracing surface for OTel/RUM tiers A or B to apply
+to. What Tier C asks for:
+
+* **Logging posture:** opt-in, human-readable stdout/stderr from the CLI (run
+  report, per-stage counts); no structured JSON log sink is shipped or planned
+  while the tool stays local-only. The review server explicitly suppresses
+  per-request access logging (`review/server.py`).
+* **No secrets or PII in logs:** enforced by construction, not just convention —
+  `decisions.json` carries ids and verdicts only, `withheld` records are logged
+  by id and reason only, and provenance entries store BLAKE2b hashes rather than
+  raw field values, each backed by a merge-blocking test
+  (`tests/test_consent.py`, `tests/test_provenance.py`, `tests/test_review.py`).
+* **Out of scope:** OpenTelemetry traces/metrics, RUM, and log aggregation — all
+  presuppose a hosted, multi-request service this tool is not. Revisit if a
+  hosted review-server mode is ever built.
 
 ## Out of scope
 

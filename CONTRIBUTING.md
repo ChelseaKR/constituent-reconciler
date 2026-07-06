@@ -6,12 +6,22 @@ to small nonprofits, so correctness and honesty matter more than feature count.
 ## Setup
 
 ```sh
-make install      # creates .venv (Python 3.11) and installs with dev extras
+make install      # creates .venv (Python 3.12) via `uv sync --frozen`, dev+extract
 make verify       # ruff, mypy --strict, pytest: the full local gate
 ```
 
 `make verify` reproduces the merge-blocking checks. If it is green locally it
 should be green in CI.
+
+Install the pre-commit hooks once per clone (secret scan + ruff, fast local
+feedback before CI runs the equivalent checks):
+
+```sh
+brew install gitleaks   # or your platform's gitleaks 8.30.1+; pre-commit
+                         # runs the already-installed binary, not a Go build
+pip install pre-commit  # or: uv tool install pre-commit
+pre-commit install
+```
 
 ## Ground rules
 
