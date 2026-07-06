@@ -1,0 +1,31 @@
+# Local, fast pre-commit gates. CI re-runs the equivalent checks (see
+# .github/workflows/ci.yml) so a skipped or bypassed local hook is never the
+# only enforcement — these exist to give feedback before a push, not instead
+# of the CI gate.
+#
+# Install once per clone: `pre-commit install`. The gitleaks hook uses the
+# `-system` variant (language: system) rather than the default golang variant
+# so it runs the already-installed `gitleaks` binary instead of requiring a Go
+# toolchain to build one; install gitleaks 8.30.1+ first (e.g. `brew install
+# gitleaks` on macOS) — see CONTRIBUTING.md.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks-system
+        name: gitleaks (secret scan, staged changes)
+        # Upstream's gitleaks-system hook definition omits `pass_filenames:
+        # false` (unlike the golang/docker variants); without this override
+        # pre-commit appends every staged filename as extra positional args,
+        # which gitleaks' `git` subcommand rejects (it takes at most one).
+        pass_filenames: false
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.20
+    hooks:
+      - id: ruff-format
+        name: ruff format --check
+        args: [--check]
+      - id: ruff
+        name: ruff check
+        args: [--fix, --exit-non-zero-on-fix]

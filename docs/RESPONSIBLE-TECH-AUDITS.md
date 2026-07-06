@@ -10,8 +10,13 @@ This tool handles some of the most sensitive data a nonprofit holds. The audit
 is not a launch afterthought; its checks are wired into CI from the first phase,
 and the privacy invariants below are merge-blocking tests, not prose.
 
-Status: v0.5. The privacy section's DV-pack invariants are implemented and
+Status: v0.7. The privacy section's DV-pack invariants are implemented and
 merge-blocking; sections marked TODO are scoped but not yet measured.
+
+Last verified: 2026-07-05 · Recheck cadence: per release (the "regenerated on
+release" promise above broke for v0.6 and v0.7 — see the 2026-07-05
+remediation log in `CHANGELOG.md` — this stamp exists so staleness is visible
+going forward instead of silent).
 
 ## Ethics
 
@@ -104,9 +109,55 @@ the screen-reader walkthrough, add the ES copy, and commit the ACR.
 
 ## Security
 
-OWASP ASVS-aligned posture: SBOM, Sigstore, SHA-pinned actions, OIDC, secret
-scanning. Untrusted input (uploaded PDFs and scans) is a primary threat surface
-and is parsed in a hardened path. TODO: commit the threat model.
+**ASVS: L2** (handles PII: DV-survivor constituent records; matches the
+standard's PII-handling floor). OWASP ASVS-aligned posture: SBOM, Sigstore,
+SHA-pinned actions, OIDC, secret scanning. Untrusted input (uploaded PDFs) is a
+primary threat surface; parsing currently runs in-process, and a sandboxed,
+resource-limited extraction path is planned. TODO: commit the threat model.
+
+Declarations (2026-07-05), each Applies/gap tracked in the README standards
+table rather than left blank:
+
+* **Secret scanning:** Applies — enforced. `.pre-commit-config.yaml` runs
+  gitleaks pre-commit; `ci.yml`'s `secrets` job runs gitleaks on every push and
+  PR; a scheduled weekly workflow runs TruffleHog full-history (verified
+  credentials only).
+* **Dependency-vulnerability scanning:** Applies — enforced. `uv.lock` is
+  committed; `make security` runs `pip-audit` and
+  `osv-scanner --lockfile uv.lock`, invoked locally on demand and as its own
+  blocking CI job (`security` in `ci.yml`, separate from `verify` so it is its
+  own required check), on any fixed HIGH/CRITICAL finding, no mute pattern.
+* **SAST:** Applies — enforced. A `sast` CI job runs Semgrep
+  (`p/security-audit`, `p/secrets`, and a repo-specific `no-pii-in-logs` rule
+  at `.semgrep/no-pii-in-logs.yml` mirroring the consent/provenance
+  data-minimization tests) blocking on any finding; a `codeql` workflow
+  (`.github/workflows/codeql.yml`) runs CodeQL for both the `python` and
+  `actions` languages on push, PR, and a weekly schedule. A `zizmor` job
+  additionally lints the workflow files themselves (CICD-19).
+* **Container scan:** Applies (Dockerfile ships a self-host image) — gap,
+  tracked locally pending a filed issue (no Trivy/Grype job in CI yet; see
+  P1-4). The base image is pinned to a mutable `python:3.12-slim` tag today,
+  not yet a digest.
+* **SBOM:** Applies (release-producing repo) — gap, tracked locally pending a
+  filed issue (no SBOM generation on release yet; see P1-7).
+* **VEX:** N/A today — no SBOM yet to accompany a VEX statement; revisit with
+  P1-7.
+* **Secret management:** N/A for this repo's own operation — it holds no
+  service secrets itself; CRM API keys/tokens are supplied by the *operator*
+  through their own environment (`CIVICRM_API_KEY`, `SF_TOKEN`) and are never
+  read from or written to a file this repo commits.
+
+## Standards applicability: AI Evaluation and Internationalization
+
+Two portfolio standards outside the A–F sections above, declared here per
+RTF-07 rather than left silent:
+
+* **AI-Evaluation-Standard: N/A** — no model inference in any user-facing or
+  decision path today (`BedrockSeam.refine()` is an unimplemented stub; every
+  policy pack defaults to `NoOpSeam`). Full declaration and the flip-to-Applies
+  trigger: `docs/ROADMAP.md` § "AI Evaluation Standard applicability".
+* **Internationalization-Standard: Applies — deferred** to the 1.0 milestone.
+  Full declaration, current state, and the catalog plan: `docs/I18N.md`.
 
 ## Legal note
 

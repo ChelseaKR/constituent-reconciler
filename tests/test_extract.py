@@ -193,9 +193,7 @@ def test_review_queue_includes_span_columns_when_records_have_spans(
     )
     recipe = replace(recipe, extract=ExtractConfig(backend="pdfplumber"))
 
-    span = SourceSpan(
-        source_file="form.pdf", page=1, x0=72.0, top=300.0, x1=200.0, bottom=312.0
-    )
+    span = SourceSpan(source_file="form.pdf", page=1, x0=72.0, top=300.0, x1=200.0, bottom=312.0)
     left = Record(
         unique_id="N0001",
         source="incoming",

@@ -1,0 +1,25 @@
+name: trufflehog-scheduled
+
+# Weekly full-history secret scan, independent of the per-push/PR gitleaks job
+# in ci.yml (SEC-19). Verified-credentials only (--results=verified) so this
+# stays a signal worth acting on, not noise from high-entropy false positives.
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Monday 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trufflehog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: trufflesecurity/trufflehog@00155c9dc586f34d189adc83d3ac2698c2ec551f # v3.95.8
+        with:
+          version: 3.95.8
+          extra_args: --results=verified

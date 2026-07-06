@@ -36,9 +36,7 @@ def test_directional_is_abbreviated() -> None:
 
 
 def test_unit_designator_is_abbreviated() -> None:
-    assert (
-        normalize_address_deterministic("12 Elm St Apartment 4") == "12 ELM ST APT 4"
-    )
+    assert normalize_address_deterministic("12 Elm St Apartment 4") == "12 ELM ST APT 4"
     assert normalize_address_deterministic("12 Elm St Suite 200") == "12 ELM ST STE 200"
 
 

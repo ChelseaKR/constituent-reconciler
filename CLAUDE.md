@@ -60,7 +60,7 @@ README speaks only to nonprofit practitioners.
 * **Be honest about CASS.** Ship a CASS-style standardizer and say in the code
   and docs that it is not USPS-certified. Overclaiming certification is a
   credibility failure with the exact technical audience the repo wants.
-* Python 3.11+. The matcher (Splink) is the one heavy dependency; keep
+* Python 3.12+. The matcher (Splink) is the one heavy dependency; keep
   everything around it on the standard library. v0.1 uses stdlib `dataclasses`
   for records, `tomllib` for the recipe, `argparse` for the CLI, and stdlib
   `csv`. pandas appears only inside the Splink wrapper, nowhere else. libpostal

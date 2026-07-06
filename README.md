@@ -2,11 +2,10 @@
 
 An offline-first pipeline that turns a stack of intake PDFs and a spreadsheet
 into verified, deduplicated constituent records and writes them into the case
-system a nonprofit already runs. A non-technical reviewer approves, corrects,
-or rejects every uncertain match before anything is written. Nothing merges
-silently.
+system a nonprofit already runs. A non-technical reviewer approves or rejects
+every uncertain match before anything is written. Nothing merges silently.
 
-> **Status: v0.7, early but working.** The pipeline runs and is tested:
+> **Status: Beta (v0.7), early but working.** The pipeline runs and is tested:
 > CSV or PDF in, deduplicated records out, with source-span pointers in the
 > review queue, CASS-style address normalization, a committed eval
 > ([eval/report.md](eval/report.md)), a local WCAG 2.2 AA web review UI, CiviCRM
@@ -55,23 +54,26 @@ with a review queue a volunteer can run, is what this project builds.
 
 The pipeline runs as a sequence of logged, deterministic-by-default steps:
 
-1. **Ingest** a folder or inbox of PDFs, scans, CSVs, and email bodies.
+1. **Ingest** a folder of CSVs and digitally created PDFs. Scanned documents
+   (OCR) and email bodies are planned and not yet implemented; the roadmap
+   tracks both.
 2. **Extract** field and value pairs with a source-span pointer and a
    confidence score. Extraction runs offline by default; an optional Bedrock
    (Claude) seam handles only low-confidence pages, and only when the active
    policy allows it.
-3. **Normalize** names and dates, and standardize addresses with libpostal
-   plus a deterministic ruleset.
+3. **Normalize** names and dates, and standardize addresses with a
+   deterministic CASS-style ruleset (libpostal optional).
 4. **Resolve** each candidate against existing constituents using a pre-tuned
    probabilistic matcher with sane defaults, so the operator does not have to
    supply labeled pairs. The output is match, non-match, or possible-match.
-5. **Review.** Anything below threshold, any possible-match, and any failed
-   address routes to a review queue. A non-technical reviewer sees the source
-   span beside the candidate duplicate and chooses approve, correct, or reject.
-   The confidence gate is fail-closed: when in doubt, a human looks.
+5. **Review.** Anything below the auto-merge threshold and any possible-match
+   routes to a review queue. A non-technical reviewer sees the source span
+   beside the candidate duplicate and chooses approve or reject; a correct
+   verdict for fixing field values is planned. The confidence gate is
+   fail-closed: when in doubt, a human looks.
 6. **Write** only approved and consented records, through a connector for the
-   target system (CiviCRM first; Salesforce, Airtable, Sheets, CSV and webhook
-   to follow).
+   target system (CSV, CiviCRM, and Salesforce today; Airtable, Sheets, and
+   webhook to follow).
 7. **Log** every write to an append-only provenance record with content
    hashing (BLAKE2b) and an RFC 3161 timestamp, so an org can show what was
    written, when, and under which consent.
@@ -111,7 +113,7 @@ needs its own review against its own obligations.
 
 ## Usage
 
-Install (Python 3.11+):
+Install (Python 3.12+):
 
 ```sh
 make install
@@ -120,8 +122,12 @@ make install
 For PDF extraction, install the optional extract extra:
 
 ```sh
-pip install 'constituent-reconciler[extract]'
+pip install -e ".[extract]"
 ```
+
+(Not yet published to PyPI — `pip install` above is a local editable install, not
+a registry install. See [docs/ROADMAP.md](docs/ROADMAP.md) for the Trusted
+Publishing plan.)
 
 Run the bundled demo, which resolves an incoming intake batch against an existing
 record set:
@@ -140,7 +146,7 @@ resolved records:    21 (6 formed by merging)
 
 It writes `out/resolved.csv` (the deduplicated records) and
 `out/review_queue.csv` (the uncertain pairs, with the two source values side by
-side for a human to approve, correct, or reject). Review the uncertain pairs in a
+side for a human to approve or reject). Review the uncertain pairs in a
 browser (see below) or edit the CSV by hand, then carry decisions back in with
 `reconcile apply --decisions decisions.json`, which treats approved pairs as
 merges and re-resolves.
@@ -332,12 +338,31 @@ versions the build commits to (see `docs/decisions/0006-schema-stability.md`).
 
 ## Standards
 
-This project holds itself to a consistent engineering bar: `ruff`,
-`mypy --strict`, and `pytest` as merge-blocking gates; a committed, regenerated
-eval report; OWASP ASVS-aligned supply-chain practices (SBOM, signed releases,
-pinned actions) as they land; WCAG 2.2 AA for any user interface; and English
-and Spanish at parity for public-facing copy. Project-specific values are
-recorded in [docs/ROADMAP.md](docs/ROADMAP.md) and findings in
+This project is held to the portfolio-wide engineering standards maintained
+alongside this repo's siblings. That standards set is not yet published as its
+own taggable repository, so it cannot be vendored in here as a pinned
+submodule yet (a portfolio-level gap, not this repo's to fix — tracked as a
+gap here rather than silently assumed done). Applies/N-A is declared per
+standard below, not silently omitted; every "Applies — gap" row is tracked
+locally (this table plus the linked doc) pending a filed issue. Last reviewed:
+2026-07-05.
+
+| Standard | Applies? | Status | Details |
+|---|---|---|---|
+| Quality & Metrics | Applies | Enforced — suite green (152/152), ≥85% branch coverage a merge-blocking `pytest` gate | [docs/ROADMAP.md](docs/ROADMAP.md) metrics ledger |
+| Code Quality | Applies | Enforced — `ruff` (incl. `S`, `C90`), `ruff format`, `mypy --strict`, `pytest --strict-markers`, `uv.lock` committed, `uv sync --frozen` | `pyproject.toml`, `Makefile` |
+| Security & Supply-Chain | Applies — ASVS L2 (handles DV-survivor PII) | Partial — secret scan, dependency-vuln scan, and SAST (Semgrep + CodeQL + zizmor) enforced; container scan and SBOM/signing are gaps | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Security |
+| CI/CD | Applies | Partial — SHA-pinned actions, least-privilege tokens, `make verify` parity, `secrets`+`security` jobs, CODEOWNERS, and a solo-maintainer review waiver (ADR 0008) all in place; the matching branch ruleset is a committed artifact (`docs/rulesets/main.json`) but not yet applied to the live repo (a repository-settings action) | `.github/workflows/ci.yml`, [docs/decisions/0008-solo-maintainer-review-waiver.md](docs/decisions/0008-solo-maintainer-review-waiver.md), [docs/rulesets/](docs/rulesets/) |
+| Release & Versioning | Applies (release-producing: 0.1.0-0.7.0) | Gap — no git tags exist yet despite cut versions; no release workflow | [CHANGELOG.md](CHANGELOG.md) |
+| Accessibility | Applies (`reconcile review` web UI) | Partial — structural WCAG 2.2 AA design in place; axe/pa11y automated gate and screen-reader walkthrough not yet run | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Accessibility |
+| Observability | Applies — Tier C (library/CLI) | Declared — no hosted-service surface; no-PII-in-logs enforced by tests | [docs/ROADMAP.md](docs/ROADMAP.md) § Observability |
+| Internationalization | Applies — deferred to 1.0 | Declared — EN/ES parity is a real commitment, not yet built (no catalog infra) | [docs/I18N.md](docs/I18N.md) |
+| AI Evaluation | N/A today | Declared — no model inference in any decision path (`BedrockSeam` unimplemented, `NoOpSeam` default); flips to Applies the day that seam ships | [docs/ROADMAP.md](docs/ROADMAP.md) § AI Evaluation Standard applicability |
+| Documentation | Applies | Partial — this table, ADRs, CITATION.cff, CHANGELOG all present; ADRs live at `docs/decisions/` not the standard's `docs/adr/` path; STANDARDS/ not yet vendored | [docs/decisions/](docs/decisions/) |
+| Responsible Tech | Applies (core to this repo's identity) | Partial — strongest section of this repo: DV/VAWA/FVPSA invariants are merge-blocking tests; threat model and dated bias/ethics sign-off still open | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) |
+
+Project-specific target values are recorded in
+[docs/ROADMAP.md](docs/ROADMAP.md) and findings in
 [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md).
 
 ## For Claude Code
