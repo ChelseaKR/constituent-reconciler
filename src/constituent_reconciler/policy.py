@@ -104,6 +104,4 @@ def policy_for(pack: str) -> Policy:
         return _PACKS[pack]
     except KeyError:
         known = ", ".join(sorted(_PACKS))
-        raise PolicyViolation(
-            f"unknown policy pack {pack!r}; known packs: {known}"
-        ) from None
+        raise PolicyViolation(f"unknown policy pack {pack!r}; known packs: {known}") from None

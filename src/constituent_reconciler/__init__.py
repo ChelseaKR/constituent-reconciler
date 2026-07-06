@@ -8,7 +8,12 @@ v1.0.
 
 from __future__ import annotations
 
-__version__ = "0.7.0"
+from importlib.metadata import version as _version
+
+# pyproject.toml is the single source of truth for the version (REL-02); this
+# reads the installed distribution's metadata rather than duplicating the
+# string by hand, so the two can no longer drift apart.
+__version__ = _version("constituent-reconciler")
 
 from constituent_reconciler.models import (
     Band,

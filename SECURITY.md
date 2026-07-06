@@ -2,10 +2,17 @@
 
 ## Reporting
 
-Report a vulnerability or a data-exposure concern privately by email to the
-maintainer rather than opening a public issue. Include what you found, how to
-reproduce it, and the impact you see. You can expect an acknowledgement within a
-few days.
+Preferred: use [GitHub private vulnerability reporting](https://github.com/ChelseaKR/constituent-reconciler/security/advisories/new)
+for this repository (Security tab -> Report a vulnerability). If that is not
+available to you, report privately by email to
+[ckellyreif@gmail.com](mailto:ckellyreif@gmail.com) rather than opening a
+public issue. Include what you found, how to reproduce it, and the impact you
+see.
+
+**Acknowledgement SLA:** within 3 business days. If a report is confirmed as a
+real vulnerability, expect a fix or mitigation plan communicated within 14
+calendar days given the solo-maintainer scale of this project; critical,
+actively-exploitable findings are prioritized ahead of that window.
 
 Please do not post intake data, exports, or any real personal data in a report.
 A minimal synthetic reproduction is enough.

@@ -53,8 +53,7 @@ def read_records(
         reader = csv.DictReader(handle)
         for index, row in enumerate(reader, start=1):
             raw = {
-                canonical: (row.get(column) or "").strip()
-                for canonical, column in mapping.items()
+                canonical: (row.get(column) or "").strip() for canonical, column in mapping.items()
             }
             if id_column and (row.get(id_column) or "").strip():
                 unique_id = row[id_column].strip()
@@ -240,9 +239,7 @@ def run(
         for r in raw_records
     }
 
-    scored = matching.score_pairs(
-        records.values(), recipe.fields, prior=recipe.prior
-    )
+    scored = matching.score_pairs(records.values(), recipe.fields, prior=recipe.prior)
     pairs = decisions.band_pairs(
         scored,
         auto_threshold=recipe.auto_threshold,
@@ -274,9 +271,7 @@ def _write_review_queue(result: RunResult, recipe: Recipe, out_dir: Path) -> Pat
             for f in recipe.fields:
                 header += [f"{f}_left_span", f"{f}_right_span"]
         writer.writerow(header)
-        for pair in sorted(
-            result.review_pairs, key=lambda p: (-p.probability, p.left, p.right)
-        ):
+        for pair in sorted(result.review_pairs, key=lambda p: (-p.probability, p.left, p.right)):
             left = result.records[pair.left]
             right = result.records[pair.right]
             row = [pair.left, pair.right, f"{pair.probability:.4f}", left.source, right.source]
@@ -441,9 +436,7 @@ def export(
     )
     by_id = {record.cluster_id: record for record in exportable}
 
-    connector = build_connector(
-        recipe, out_dir, transport=transport, sf_transport=sf_transport
-    )
+    connector = build_connector(recipe, out_dir, transport=transport, sf_transport=sf_transport)
     write_results = connector.write_all(exportable, recipe.fields, dry_run=dry_run)
 
     provenance_path = out_dir / "provenance.jsonl"

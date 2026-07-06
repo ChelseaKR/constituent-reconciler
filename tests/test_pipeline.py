@@ -147,9 +147,7 @@ def test_export_via_civicrm_creates_and_logs_provenance(tmp_path: Path) -> None:
             output=OutputConfig(connector="civicrm", endpoint="https://x.example/api4"),
         )
         result = pipeline.run(recipe)
-        summary = pipeline.export(
-            result, recipe, out_dir=tmp_path, transport=_RoutingTransport()
-        )
+        summary = pipeline.export(result, recipe, out_dir=tmp_path, transport=_RoutingTransport())
         # Default policy exports all 21 resolved records; none pre-exist, so all create.
         assert summary.counts().get("created") == 21
         assert summary.provenance_path is not None

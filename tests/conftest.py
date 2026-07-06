@@ -71,10 +71,7 @@ def _make_pdf(lines: list[str]) -> bytes:
         xref += f"{off:010d} 00000 n \n"
     w(xref.encode("latin-1"))
 
-    trailer = (
-        f"trailer\n<< /Size {n_obj} /Root 1 0 R >>\n"
-        f"startxref\n{xref_start}\n%%EOF\n"
-    )
+    trailer = f"trailer\n<< /Size {n_obj} /Root 1 0 R >>\nstartxref\n{xref_start}\n%%EOF\n"
     w(trailer.encode("latin-1"))
 
     return b"".join(parts)

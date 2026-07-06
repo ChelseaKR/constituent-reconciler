@@ -45,11 +45,15 @@ def _session(
 ) -> tuple[RunResult, Recipe, ReviewSession]:
     recipe = load_recipe(EXAMPLES / recipe_name)
     result = pipeline.run(recipe)
-    return result, recipe, ReviewSession(
+    return (
         result,
-        recipe.fields,
-        tmp_path / "decisions.json",
-        privacy_mode=privacy,
+        recipe,
+        ReviewSession(
+            result,
+            recipe.fields,
+            tmp_path / "decisions.json",
+            privacy_mode=privacy,
+        ),
     )
 
 

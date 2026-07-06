@@ -33,6 +33,7 @@ class SourceSpan:
             f":x={self.x0:.0f}-{self.x1:.0f},y={self.top:.0f}-{self.bottom:.0f}"
         )
 
+
 # The canonical fields the matcher reasons over. Source columns are mapped onto
 # these by the recipe. A recipe activates only the fields it maps, so address is
 # available but does not affect a run that does not map it.

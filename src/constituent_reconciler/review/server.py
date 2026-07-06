@@ -174,8 +174,8 @@ def serve(
     if open_browser:
         try:
             webbrowser.open(url)
-        except Exception:  # pragma: no cover - environment without a browser
-            pass
+        except Exception as error:  # pragma: no cover - environment without a browser
+            print(f"  (could not open a browser automatically: {error})")
     try:
         server.serve_forever()
     except KeyboardInterrupt:  # pragma: no cover - interactive stop

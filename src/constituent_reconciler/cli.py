@@ -62,9 +62,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     _, withheld = partition_by_consent(result.golden, require_consent=recipe.require_consent)
     print(render_run_summary(result, withheld=len(withheld)))
     try:
-        summary = pipeline.export(
-            result, recipe, out_dir=Path(args.out), dry_run=args.dry_run
-        )
+        summary = pipeline.export(result, recipe, out_dir=Path(args.out), dry_run=args.dry_run)
     except PolicyViolation as error:
         print(f"\npolicy error: {error}", file=sys.stderr)
         return 2
