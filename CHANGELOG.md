@@ -6,7 +6,60 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 ## [Unreleased]
 
-Nothing yet — see `docs/ROADMAP.md` for what comes next.
+### Security
+- **Standards-conformance remediation (2026-07-05)**, closing the audit's
+  headline gap — this repo held the portfolio's most sensitive PII (DV-survivor
+  constituent records) with zero security scanning and no lockfile:
+  - Committed `uv.lock`; `make install` now runs `uv sync --frozen`, so CI and
+    local installs use the exact locked dependency set (no floating
+    transitive deps under Splink).
+  - Dependency-vulnerability gate: `make security` (`pip-audit` +
+    `osv-scanner --lockfile uv.lock`), wired as its own blocking CI job.
+  - Secret scanning: `.pre-commit-config.yaml` (gitleaks + ruff, staged
+    changes), a `secrets` CI job (gitleaks full-history on push/PR), and a
+    scheduled weekly TruffleHog (verified-credentials-only) workflow. A
+    one-time full-history gitleaks scan on 2026-07-05 found nothing to rotate.
+  - `ruff` now runs with the `S` (bandit) and `C90` (complexity) rule sets and
+    `ruff format --check`; Python floor raised to 3.12 (`.python-version`,
+    `pyproject.toml`, `Dockerfile`).
+  - ASVS level (L2) and container-scan/SBOM/secret-management/VEX posture
+    declared in `docs/RESPONSIBLE-TECH-AUDITS.md`; AI-Evaluation-Standard N/A
+    and an Observability Tier-C declaration added to `docs/ROADMAP.md`; a new
+    `docs/I18N.md` declares EN/ES parity as deferred-not-dropped.
+  - README gained the standards-conformance table this repo previously
+    omitted (silent omission is itself a defect under the portfolio's
+    documentation standard); status line now leads with "Beta" per the
+    standard vocabulary.
+  - `docs/decisions/0008-solo-maintainer-review-waiver.md` records, dated and
+    reasoned, that the ≥1/≥2-human-reviewer control is waived while this repo
+    has one maintainer, and names the compensating automated gates.
+    `docs/rulesets/main.json` is the matching desired-state branch ruleset —
+    committed as an artifact but **not yet applied**; applying it is a
+    repository-settings action for the maintainer to run (see
+    `docs/rulesets/README.md`).
+  - SAST: a `sast` CI job runs Semgrep (`p/security-audit`, `p/secrets`, and a
+    repo-specific `no-pii-in-logs` rule at `.semgrep/no-pii-in-logs.yml`); a
+    `codeql` workflow runs CodeQL for `python` and `actions` on push, PR, and a
+    weekly schedule; a `zizmor` job lints the workflow files themselves.
+  - A merge-blocking coverage floor (`--cov-fail-under=84`, branch coverage,
+    `pytest-cov`) closes the gap between the ROADMAP's earlier claimed figure
+    and CI actually enforcing it. Set to 84 rather than the 85 target because
+    this PR excludes a pre-existing, in-progress feature branch (see
+    `docs/ROADMAP.md`'s metrics ledger note); raise it to 85 once that branch
+    lands with its own tests.
+  - `__version__` is now derived from installed package metadata
+    (`importlib.metadata.version`) instead of being hand-copied alongside
+    `pyproject.toml`'s `version`, so the two can no longer drift (REL-02).
+  - The Dockerfile's base image is pinned by digest, not just tag
+    (`python:3.12-slim@sha256:...`), and a `container-scan` CI job
+    (`make docker` + Trivy, blocking CRITICAL/HIGH) was added — **not yet
+    locally exercised**, since no Docker daemon was available in the
+    environment this remediation ran in; verify on the first real PR.
+  - The portfolio-level conformance audit and this remediation's full
+    item-by-item execution log live outside this repo, alongside the
+    portfolio's other project audits; what remains open here is container
+    scanning, the release pipeline, and the branch ruleset actually being
+    applied (docs/rulesets/README.md).
 
 ## [0.7.0] — 2026-06-29
 

@@ -39,7 +39,7 @@ working as designed.
 
 You will need:
 
-- Python 3.11 or newer, or Docker. Install the tool with `make install`, or build
+- Python 3.12 or newer, or Docker. Install the tool with `make install`, or build
   the container with `make docker`.
 - A CSV of the constituents already in your case system. Export the fields you
   match on: name, date of birth, email, phone, and address if you keep it.

@@ -172,9 +172,7 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
         suppression_threshold=policy.suppression_threshold,
         prior=float(thresholds_section.get("prior", defaults.DEFAULT_PRIOR)),
         auto_threshold=float(thresholds_section.get("auto", defaults.DEFAULT_AUTO_THRESHOLD)),
-        review_threshold=float(
-            thresholds_section.get("review", defaults.DEFAULT_REVIEW_THRESHOLD)
-        ),
+        review_threshold=float(thresholds_section.get("review", defaults.DEFAULT_REVIEW_THRESHOLD)),
         fields=active_fields,
         normalize=normalize,
         extract=extract,

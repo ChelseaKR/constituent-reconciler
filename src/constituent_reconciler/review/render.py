@@ -165,8 +165,7 @@ def render_overview(session: ReviewSession, *, apply_command: str) -> str:
 
     if total == 0:
         queue_html = (
-            "<p>There are no uncertain pairs to review. "
-            "Every match was decided automatically.</p>"
+            "<p>There are no uncertain pairs to review. Every match was decided automatically.</p>"
         )
         next_link = ""
     else:
@@ -243,8 +242,7 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
     prev_index = view.index - 1
     next_index = view.index + 1
     prev_link = (
-        f'<a class="btn secondary" data-nav="prev" href="/pair/{prev_index}">'
-        "&larr; Previous</a>"
+        f'<a class="btn secondary" data-nav="prev" href="/pair/{prev_index}">&larr; Previous</a>'
         if prev_index >= 0
         else ""
     )
@@ -273,7 +271,7 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
         '<table class="compare">\n<caption class="note">Record '
         f"{escape(view.left_id)} (from {escape(view.left_source)}) compared with "
         f"{escape(view.right_id)} (from {escape(view.right_source)}).</caption>\n"
-        "<thead><tr><th scope=\"col\">Field</th>"
+        '<thead><tr><th scope="col">Field</th>'
         f'<th scope="col">{escape(view.left_id)} ({escape(view.left_source)})</th>'
         f'<th scope="col">{escape(view.right_id)} ({escape(view.right_source)})</th>'
         '<th scope="col">Agreement</th></tr></thead>\n'

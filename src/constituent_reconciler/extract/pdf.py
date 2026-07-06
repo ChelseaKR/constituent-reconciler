@@ -73,9 +73,7 @@ def _page_confidence(text: str) -> float:
     return 1.0
 
 
-def _find_span(
-    page: object, value: str, source_file: str, page_num: int
-) -> SourceSpan | None:
+def _find_span(page: object, value: str, source_file: str, page_num: int) -> SourceSpan | None:
     """Find a value's bounding box in the page word list.
 
     Returns None on any error or if the value is not found. Callers treat a

@@ -43,12 +43,18 @@ def _record(uid: str, source: str, normalized: dict[str, str], consent: str) -> 
 
 def test_golden_prefers_existing_consented_survivor_and_fills_blanks() -> None:
     bob = {
-        "first_name": "bob", "last_name": "smith", "dob": "",
-        "email": "", "phone": "5305550143",
+        "first_name": "bob",
+        "last_name": "smith",
+        "dob": "",
+        "email": "",
+        "phone": "5305550143",
     }
     robert = {
-        "first_name": "robert", "last_name": "smith", "dob": "1965-07-19",
-        "email": "", "phone": "",
+        "first_name": "robert",
+        "last_name": "smith",
+        "dob": "1965-07-19",
+        "email": "",
+        "phone": "",
     }
     records = {
         "N1": _record("N1", "incoming", bob, "granted"),

@@ -81,9 +81,7 @@ def test_dv_pack_withholds_non_consented_records_without_field_values(tmp_path: 
     withheld_text = summary.withheld_path.read_text(encoding="utf-8")
     # The withheld record is recorded by id and reason only; no field value of a
     # non-consented person appears in the artifact.
-    assert "N009" in withheld_text or any(
-        "N009" in r.members for r in summary.withheld
-    )
+    assert "N009" in withheld_text or any("N009" in r.members for r in summary.withheld)
     assert "no-consent" in withheld_text
 
 
