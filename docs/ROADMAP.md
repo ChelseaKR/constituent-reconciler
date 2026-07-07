@@ -192,7 +192,7 @@ shared standard.
 
 | Attribute | Target | Gate |
 |-----------|--------|------|
-| Test coverage (logic) | At least 85% branch coverage on `src/`; gate temporarily set to 84% (84.63% measured 2026-07-05 for this PR's scope — see note below) | AUTO |
+| Test coverage (logic) | At least 85% branch coverage on `src/`; 85.7% measured 2026-07-05 | AUTO |
 | False-merge rate (eval) | 0% among auto-merged pairs on the committed fixtures, fail-closed; CI runs the gate at 0.0 | AUTO |
 | Matching pairwise precision and recall | Auto-merge precision 100% (a false merge fails the gate); auto+review coverage recall at least 95%, reported with Wilson CIs | REVIEW |
 | Extraction field precision and recall | At least 0.95 precision and 0.90 recall on a labeled extraction fixture; target only, the fixture and its measurement are not landed | REVIEW |
@@ -205,16 +205,10 @@ shared standard.
 Enforcement today: the false-merge gate and the DV policy-pack invariants (PII
 non-egress and consent-gated write) run as merge-blocking checks in CI now, and
 CI also fails if the committed eval report drifts. The coverage floor is now a
-merge-blocking `pytest` gate too (`--cov-fail-under=84` in `pyproject.toml`,
-`pytest-cov` a committed dev dependency, 2026-07-05) — set to 84, not the 85
-target, because this PR intentionally excludes an in-progress, pre-existing
-feature branch (cannot-link constraints, review-server web-boundary checks,
-strict recipe validation) that was sitting uncommitted in the working tree
-alongside this remediation work; that branch's own tests are what push
-measured coverage to 85%+. Raise the floor back to 85 when that branch lands.
-The false-merge rate stays the primary correctness metric because a wrong
-merge is the expensive error, but a coverage regression now fails the build as
-well. The secret-scan
+merge-blocking `pytest` gate too (`--cov-fail-under=85` in `pyproject.toml`,
+`pytest-cov` a committed dev dependency, 2026-07-05) — the false-merge rate
+stays the primary correctness metric because a wrong merge is the expensive
+error, but a coverage regression now fails the build as well. The secret-scan
 and dependency-vulnerability items are also merge-blocking CI jobs now
 (`secrets`, `security` in `ci.yml`); SAST, container scanning, and SBOM/signing
 remain committed targets not yet wired (see the remediation plan's P1-2,

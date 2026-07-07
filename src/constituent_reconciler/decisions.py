@@ -89,6 +89,59 @@ def build_clusters(record_ids: Iterable[str], pairs: Iterable[Pair]) -> list[Clu
     return clusters
 
 
+# The reviewer-facing explanation attached to pairs re-routed by a cannot-link
+# constraint. It says what happened and what the reviewer should do.
+CANNOT_LINK_NOTE = (
+    "A reviewer decided two records in this group are different people, "
+    "so nothing in the group merges automatically. Decide each pair yourself."
+)
+
+
+def enforce_cannot_links(
+    record_ids: Iterable[str],
+    pairs: Iterable[Pair],
+    *,
+    cannot_link: frozenset[frozenset[str]],
+) -> tuple[list[Cluster], list[Pair]]:
+    """Honor human rejections as constraints on the whole clustering.
+
+    A rejected pair is a cannot-link constraint, not just a dropped edge: if
+    AUTO edges would transitively place two human-separated records in one
+    cluster, that cluster must not merge. Any cluster containing a rejected
+    pair among its members is refused, fail-closed: its members become
+    singletons and its AUTO edges are re-banded to REVIEW with a note, so a
+    person decides every link in the group. Without this check the transitive
+    closure would silently override an explicit human decision, which the
+    project's no-silent-merge rule forbids.
+    """
+
+    ids = list(record_ids)
+    adjusted = list(pairs)
+    clusters = build_clusters(ids, adjusted)
+    if not cannot_link:
+        return clusters, adjusted
+
+    violating: set[str] = set()
+    for cluster in clusters:
+        members = set(cluster.members)
+        if len(members) < 2:
+            continue
+        if any(constraint <= members for constraint in cannot_link):
+            violating.update(members)
+    if not violating:
+        return clusters, adjusted
+
+    rerouted: list[Pair] = []
+    for pair in adjusted:
+        if pair.band is Band.AUTO and pair.left in violating and pair.right in violating:
+            rerouted.append(
+                Pair(pair.left, pair.right, pair.probability, Band.REVIEW, CANNOT_LINK_NOTE)
+            )
+        else:
+            rerouted.append(pair)
+    return build_clusters(ids, rerouted), rerouted
+
+
 def _choose_primary(members: tuple[str, ...], records: Mapping[str, Record]) -> str:
     """Pick the survivor: a consented existing record if possible, else stable.
 

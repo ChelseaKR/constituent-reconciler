@@ -194,11 +194,13 @@ def _apply_overrides(
     adjusted: list[Pair] = []
     for pair in pairs:
         band = pair.band
-        if pair.key() in force_auto:
-            band = Band.AUTO
-        elif pair.key() in force_drop:
+        # A rejection outranks an approval on the same pair: when a decisions
+        # file contradicts itself, the record-separating verdict wins, fail-closed.
+        if pair.key() in force_drop:
             band = Band.DROP
-        adjusted.append(Pair(pair.left, pair.right, pair.probability, band))
+        elif pair.key() in force_auto:
+            band = Band.AUTO
+        adjusted.append(Pair(pair.left, pair.right, pair.probability, band, pair.note))
     return adjusted
 
 
@@ -245,9 +247,12 @@ def run(
         auto_threshold=recipe.auto_threshold,
         review_threshold=recipe.review_threshold,
     )
-    pairs = _apply_overrides(pairs, frozenset(force_auto), frozenset(force_drop))
+    rejected = frozenset(force_drop)
+    pairs = _apply_overrides(pairs, frozenset(force_auto), rejected)
 
-    clusters = decisions.build_clusters(records.keys(), pairs)
+    # A human rejection binds the whole clustering, not just the edge the
+    # reviewer saw: no cluster may transitively rejoin a rejected pair.
+    clusters, pairs = decisions.enforce_cannot_links(records.keys(), pairs, cannot_link=rejected)
     golden = decisions.golden_records(clusters, records, recipe.fields)
 
     return RunResult(
@@ -262,6 +267,7 @@ def _write_review_queue(result: RunResult, recipe: Recipe, out_dir: Path) -> Pat
     review_path = out_dir / "review_queue.csv"
     out_dir.mkdir(parents=True, exist_ok=True)
     has_spans = any(record.spans for record in result.records.values())
+    has_notes = any(pair.note for pair in result.review_pairs)
     with review_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         header = ["left", "right", "probability", "left_source", "right_source"]
@@ -270,6 +276,8 @@ def _write_review_queue(result: RunResult, recipe: Recipe, out_dir: Path) -> Pat
         if has_spans:
             for f in recipe.fields:
                 header += [f"{f}_left_span", f"{f}_right_span"]
+        if has_notes:
+            header += ["note"]
         writer.writerow(header)
         for pair in sorted(result.review_pairs, key=lambda p: (-p.probability, p.left, p.right)):
             left = result.records[pair.left]
@@ -285,6 +293,8 @@ def _write_review_queue(result: RunResult, recipe: Recipe, out_dir: Path) -> Pat
                         str(left_span) if left_span else "",
                         str(right_span) if right_span else "",
                     ]
+            if has_notes:
+                row += [pair.note]
             writer.writerow(row)
     return review_path
 

@@ -349,7 +349,7 @@ locally (this table plus the linked doc) pending a filed issue. Last reviewed:
 
 | Standard | Applies? | Status | Details |
 |---|---|---|---|
-| Quality & Metrics | Applies | Enforced — suite green (130/130), ≥84% branch coverage a merge-blocking `pytest` gate (target 85%; see ROADMAP note) | [docs/ROADMAP.md](docs/ROADMAP.md) metrics ledger |
+| Quality & Metrics | Applies | Enforced — suite green (152/152), ≥85% branch coverage a merge-blocking `pytest` gate | [docs/ROADMAP.md](docs/ROADMAP.md) metrics ledger |
 | Code Quality | Applies | Enforced — `ruff` (incl. `S`, `C90`), `ruff format`, `mypy --strict`, `pytest --strict-markers`, `uv.lock` committed, `uv sync --frozen` | `pyproject.toml`, `Makefile` |
 | Security & Supply-Chain | Applies — ASVS L2 (handles DV-survivor PII) | Partial — secret scan, dependency-vuln scan, and SAST (Semgrep + CodeQL + zizmor) enforced; container scan and SBOM/signing are gaps | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Security |
 | CI/CD | Applies | Partial — SHA-pinned actions, least-privilege tokens, `make verify` parity, `secrets`+`security` jobs, CODEOWNERS, and a solo-maintainer review waiver (ADR 0008) all in place; the matching branch ruleset is a committed artifact (`docs/rulesets/main.json`) but not yet applied to the live repo (a repository-settings action) | `.github/workflows/ci.yml`, [docs/decisions/0008-solo-maintainer-review-waiver.md](docs/decisions/0008-solo-maintainer-review-waiver.md), [docs/rulesets/](docs/rulesets/) |
