@@ -34,6 +34,7 @@ reconcile = "constituent_reconciler.cli:main"
 
 [project.optional-dependencies]
 extract = ["pdfplumber>=0.11"]
+ocr = ["pytesseract>=0.3.10"]
 
 [dependency-groups]
 dev = [
@@ -85,6 +86,7 @@ module = [
   "boto3.*",
   "botocore.*",
   "postal.*",
+  "pytesseract.*",
 ]
 ignore_missing_imports = true
 

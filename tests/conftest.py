@@ -105,6 +105,23 @@ def low_confidence_pdf(tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
+def scanned_pdf(tmp_path: Path) -> Path:
+    """A single-page PDF with no text operators at all -- i.e. no text layer.
+
+    Stands in for an image-only scan: pdfplumber's ``extract_text()`` returns
+    "" for it just as it would for a real scanned page with no OCR baked in by
+    the scanner, which is exactly the condition the OCR backend (``extract/
+    ocr.py``) watches for. The page still rasterizes fine via pdfplumber's
+    renderer, so `page.to_image()` works; tests supply the Tesseract output
+    rather than depending on OCR actually reading anything from a blank page.
+    """
+    pdf_bytes = _make_pdf([])
+    path = tmp_path / "scanned-form.pdf"
+    path.write_bytes(pdf_bytes)
+    return path
+
+
+@pytest.fixture()
 def intake_pdf_folder(tmp_path: Path) -> Path:
     """A folder with one intake-form PDF and one CSV, for folder-ingest tests."""
     folder = tmp_path / "intake-docs"

@@ -6,6 +6,16 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 ## [Unreleased]
 
+### Added
+- **Local OCR backend for scanned intake (EXP-04)**: `extract/ocr.py` adds a
+  `PdfplumberOcrExtractor`, selected by `[extract] backend = "pdfplumber+ocr"`,
+  that OCRs (via Tesseract, the new optional `ocr` extra) any PDF page with no
+  embedded text layer instead of yielding an empty record. Reuses the existing
+  label-adjacent field patterns and confidence gate; OCR word boxes become
+  `SourceSpan`s so the review queue's source-location columns work the same
+  for scanned and digitally-created pages. Closes the gap FIX-12 documented
+  between the README's ingest claim and what the code did.
+
 ### Security
 - **Standards-conformance remediation (2026-07-05)**, closing the audit's
   headline gap — this repo held the portfolio's most sensitive PII (DV-survivor

@@ -37,6 +37,10 @@ class ExtractConfig:
     ``backend`` selects which extractor runs:
       - ``"none"`` (default): no extraction; only CSV sources are read.
       - ``"pdfplumber"``: offline extraction for digitally-created PDFs.
+      - ``"pdfplumber+ocr"``: offline extraction that also OCRs (via
+        Tesseract, the optional ``ocr`` extra) any page with no embedded text
+        layer, so an image-only scanned page yields fields instead of an
+        empty record.
       - ``"bedrock"``: route low-confidence pages to Claude on Bedrock (cloud
         call; forbidden under DV and HIPAA packs regardless of this setting).
 
