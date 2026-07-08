@@ -17,7 +17,13 @@ from html import escape
 
 from constituent_reconciler.review.session import (
     APPROVED,
+    CONFLICT_NOTE,
     REJECTED,
+    ClusterEdgeView,
+    ClusterGroupView,
+    ClusterMemberView,
+    ClusterPreview,
+    GoldenFieldView,
     PairView,
     ReviewSession,
     field_label,
@@ -86,6 +92,12 @@ kbd {
   padding: 0 0.35rem; font-size: 0.85rem; background: #f2f4f7;
 }
 .note { color: #333; font-size: 0.9rem; }
+.cluster-preview h3 { margin: 0 0 0.4rem; font-size: 1.05rem; }
+.cluster-preview h4 { margin: 0.8rem 0 0.2rem; font-size: 0.95rem; }
+.cluster-preview .groups { display: flex; flex-wrap: wrap; gap: 1.2rem; }
+.cluster-preview .group { flex: 1 1 16rem; min-width: 14rem; }
+.cluster-preview ul { margin: 0.2rem 0; padding-left: 1.2rem; }
+.cluster-preview li { margin: 0.15rem 0; }
 """
 
 _SCRIPT = """
@@ -203,6 +215,113 @@ def _cell(value: str, span: str) -> str:
     return f"{shown}{span_html}"
 
 
+_EDGE_LABELS: dict[str, tuple[str, str]] = {
+    "auto": ("match", "auto-merged"),
+    "approved": ("match", "approved"),
+    "rejected": ("differ", "rejected"),
+    "pending": ("neutral", "pending review"),
+    "scored-apart": ("neutral", "scored as a different person"),
+}
+
+
+def _member_row(member: ClusterMemberView) -> str:
+    tag = ' <span class="tag match">survivor</span>' if member.is_primary else ""
+    return f"<li>{escape(member.record_id)} (from {escape(member.source)}){tag}</li>"
+
+
+def _edge_row(edge: ClusterEdgeView) -> str:
+    cls, text = _EDGE_LABELS.get(edge.status, ("neutral", edge.status))
+    pct = edge.probability * 100
+    link = (
+        f' (<a href="/pair/{edge.pair_index}">review this pair</a>)'
+        if edge.pair_index is not None and edge.status == "pending"
+        else ""
+    )
+    return (
+        f"<li>{escape(edge.left)} &amp; {escape(edge.right)}: "
+        f'<span class="tag {cls}">{escape(text)}</span> ({pct:.1f}%){link}</li>'
+    )
+
+
+def _golden_table(fields: tuple[GoldenFieldView, ...]) -> str:
+    if not fields:
+        return ""
+    rows: list[str] = []
+    for gf in fields:
+        value = escape(gf.value) if gf.value else "<em>(blank)</em>"
+        source = f' <span class="span">from {escape(gf.source_id)}</span>' if gf.source_id else ""
+        rows.append(
+            f'<tr><th scope="row">{escape(field_label(gf.field))}</th><td>{value}{source}</td></tr>'
+        )
+    return (
+        '<table class="compare">\n<caption class="note">The golden record this '
+        "cluster would produce, and which record supplied each value.</caption>\n"
+        '<thead><tr><th scope="col">Field</th><th scope="col">Value</th></tr></thead>\n'
+        "<tbody>\n" + "\n".join(rows) + "\n</tbody>\n</table>\n"
+    )
+
+
+def _cluster_group_html(group: ClusterGroupView, heading: str) -> str:
+    members_html = (
+        "<ul>\n" + "\n".join(_member_row(member) for member in group.members) + "\n</ul>\n"
+    )
+    edges_html = ""
+    if len(group.edges) > 1:
+        edges_html = (
+            "<p>How these records are tied together:</p>\n<ul>\n"
+            + "\n".join(_edge_row(edge) for edge in group.edges)
+            + "\n</ul>\n"
+        )
+    golden_html = _golden_table(group.golden)
+    return (
+        f'<div class="group">\n<h4>{escape(heading)}</h4>\n'
+        f"{members_html}{edges_html}{golden_html}</div>\n"
+    )
+
+
+def render_cluster_preview(view: PairView, preview: ClusterPreview | None) -> str:
+    """The cluster and golden-record section for a pair's review screen.
+
+    Shows the reviewer the record their decision on this pair implies, not
+    only the two rows the pairwise table compares above it: the full set of
+    records this would place in one cluster, how those records are otherwise
+    tied together, and the golden record that cluster would produce, with
+    which record supplied each field.
+    """
+
+    if preview is None:
+        return ""
+
+    if preview.conflict:
+        body = f'<p class="tag differ">Conflicting decisions</p>\n<p>{escape(CONFLICT_NOTE)}</p>\n'
+    elif preview.merged:
+        group = preview.groups[0]
+        n = len(group.members)
+        lead = (
+            "This decision places these records in one cluster:"
+            if n > 2
+            else "This pair merges into one record:"
+        )
+        body = f"<p>{escape(lead)}</p>\n" + _cluster_group_html(
+            group, f"Cluster of {n} record{'s' if n != 1 else ''}"
+        )
+    else:
+        left_group, right_group = preview.groups
+        body = (
+            "<p>Rejecting keeps these two records in separate clusters:</p>\n"
+            '<div class="groups">\n'
+            + _cluster_group_html(left_group, f"Record {escape(view.left_id)}'s cluster")
+            + _cluster_group_html(right_group, f"Record {escape(view.right_id)}'s cluster")
+            + "</div>\n"
+        )
+
+    return (
+        '<div class="rationale cluster-preview" role="note">\n'
+        "<h3>What this creates</h3>\n"
+        f"{body}</div>\n"
+    )
+
+
 def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -> str:
     """The decision screen for one candidate pair."""
 
@@ -254,6 +373,7 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
 
     pct = view.probability * 100
     rationale = escape(rationale_for(view).summary())
+    cluster_html = render_cluster_preview(view, session.cluster_preview(view.index))
     body = (
         "<header>\n<h1>Review queue</h1>\n"
         f'<p class="progress" aria-live="polite">Pair {view.index + 1} of {total} '
@@ -276,6 +396,7 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
         f'<th scope="col">{escape(view.right_id)} ({escape(view.right_source)})</th>'
         '<th scope="col">Agreement</th></tr></thead>\n'
         "<tbody>\n" + "\n".join(field_rows) + "\n</tbody>\n</table>\n"
+        f"{cluster_html}"
         f'<form method="post" action="/pair/{view.index}">\n'
         '<div class="actions">\n'
         '<button type="submit" name="verdict" value="approve" accesskey="a">'

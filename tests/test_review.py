@@ -21,8 +21,9 @@ import pytest
 
 from constituent_reconciler import pipeline
 from constituent_reconciler.config import Recipe, load_recipe
-from constituent_reconciler.models import RunResult
+from constituent_reconciler.models import Band, Pair, Record, RunResult
 from constituent_reconciler.policy import PolicyViolation
+from constituent_reconciler.review.render import render_pair
 from constituent_reconciler.review.server import (
     build_server,
     handle_get,
@@ -116,6 +117,116 @@ def test_decisions_file_carries_no_field_values(tmp_path: Path) -> None:
         for value in record.raw.values():
             if value and len(value) > 2:
                 assert value not in blob
+
+
+# -- cluster and golden-record preview (EXP-02) -------------------------------
+
+
+def _synthetic_session(
+    tmp_path: Path, pairs: tuple[Pair, ...], *, fields: tuple[str, ...] = ("first_name",)
+) -> ReviewSession:
+    # A, B, C all normalize to the same first name, so any pair of them merges
+    # cleanly when the test forces the edge; the interesting behavior under
+    # test is which records end up in one cluster and what the golden record
+    # says, not the matcher's own scoring.
+    records = {
+        record_id: Record(
+            unique_id=record_id,
+            source="existing" if record_id == "A" else "incoming",
+            raw={"first_name": record_id},
+            normalized={"first_name": "ann"},
+        )
+        for record_id in "ABC"
+    }
+    result = RunResult(records=records, pairs=pairs, clusters=(), golden=())
+    return ReviewSession(result, fields, tmp_path / "decisions.json")
+
+
+def _index_of(session: ReviewSession, left: str, right: str) -> int:
+    key = frozenset((left, right))
+    return next(v.index for v in session.views() if frozenset((v.left_id, v.right_id)) == key)
+
+
+def test_cluster_preview_of_an_undecided_pair_previews_an_approval(tmp_path: Path) -> None:
+    session = _synthetic_session(tmp_path, (Pair("A", "B", 0.85, Band.REVIEW),))
+    preview = session.cluster_preview(0)
+    assert preview is not None
+    assert preview.merged is True
+    assert preview.conflict is False
+    (group,) = preview.groups
+    assert {member.record_id for member in group.members} == {"A", "B"}
+    # The golden record is previewed before the decision is made, not only after.
+    assert group.golden
+    assert any(f.field == "first_name" and f.value == "ann" for f in group.golden)
+
+
+def test_cluster_preview_of_a_rejected_pair_shows_two_separate_clusters(tmp_path: Path) -> None:
+    session = _synthetic_session(tmp_path, (Pair("A", "B", 0.85, Band.REVIEW),))
+    session.record(0, REJECTED)
+    preview = session.cluster_preview(0)
+    assert preview is not None
+    assert preview.merged is False
+    assert preview.conflict is False
+    assert len(preview.groups) == 2
+    assert {m.record_id for group in preview.groups for m in group.members} == {"A", "B"}
+    # Neither side merged, so neither previews a golden record.
+    assert all(not group.golden for group in preview.groups)
+
+
+def test_cluster_preview_flags_a_transitive_contradiction(tmp_path: Path) -> None:
+    # A-B and B-C are both approved, which transitively unions A and C even
+    # though no one approved A-C directly -- and here a reviewer explicitly
+    # rejected A-C. The preview must refuse to show that as a clean merge.
+    pairs = (
+        Pair("A", "B", 0.85, Band.REVIEW),
+        Pair("B", "C", 0.85, Band.REVIEW),
+        Pair("A", "C", 0.85, Band.REVIEW),
+    )
+    session = _synthetic_session(tmp_path, pairs)
+    session.record(_index_of(session, "A", "B"), APPROVED)
+    session.record(_index_of(session, "B", "C"), APPROVED)
+    ac_index = _index_of(session, "A", "C")
+    session.record(ac_index, REJECTED)
+
+    preview = session.cluster_preview(ac_index)
+    assert preview is not None
+    assert preview.merged is False
+    assert preview.conflict is True
+    assert preview.groups == ()
+
+
+def test_cluster_preview_surfaces_a_pending_edge_inside_a_growing_cluster(tmp_path: Path) -> None:
+    # The EXP-02 scenario: approving A-B, then opening the still-pending B-C
+    # pair, should show that approving it forms a 3-record cluster, and that
+    # the matcher separately scored A and C apart -- visible before it is
+    # written, not only inferable after the fact from three separate pairs.
+    pairs = (
+        Pair("A", "B", 0.85, Band.REVIEW),
+        Pair("B", "C", 0.85, Band.REVIEW),
+        Pair("A", "C", 0.60, Band.DROP),
+    )
+    session = _synthetic_session(tmp_path, pairs)
+    session.record(_index_of(session, "A", "B"), APPROVED)
+    bc_index = _index_of(session, "B", "C")
+
+    preview = session.cluster_preview(bc_index)
+    assert preview is not None
+    assert preview.merged is True
+    (group,) = preview.groups
+    assert {member.record_id for member in group.members} == {"A", "B", "C"}
+    statuses = {(edge.left, edge.right): edge.status for edge in group.edges}
+    assert statuses[("A", "B")] == "approved"
+    assert statuses[("B", "C")] == "pending"
+    assert statuses[("A", "C")] == "scored-apart"
+
+
+def test_render_pair_includes_the_cluster_preview_section(tmp_path: Path) -> None:
+    _, _, session = _session(tmp_path)
+    view = session.view(0)
+    assert view is not None
+    html = render_pair(session, view, apply_command="reconcile apply --config r.toml")
+    assert "What this creates" in html
+    assert "golden record" in html
 
 
 # -- match rationale ---------------------------------------------------------

@@ -13,15 +13,27 @@ pack requires of any artifact the review step produces.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from constituent_reconciler.models import Pair, RunResult
+from constituent_reconciler import decisions
+from constituent_reconciler.models import Band, Cluster, Pair, Record, RunResult
 
 APPROVED = "approved"
 REJECTED = "rejected"
 _VERDICTS = frozenset({APPROVED, REJECTED})
+
+# Shown when merging the pair on screen would contradict a rejection recorded
+# elsewhere in the same group of records: the same cannot-link problem
+# ``reconcile apply`` must eventually resolve, surfaced during review instead
+# of only after decisions are written.
+CONFLICT_NOTE = (
+    "A different pair in this group of records was already rejected, so "
+    "merging this pair would silently pull two records back together that a "
+    "reviewer kept apart. Nothing merges until that conflict is resolved: "
+    "revisit the rejected pair, or reject this one too."
+)
 
 # Plain-language labels for the canonical fields, so the rationale and the
 # comparison table read the way a caseworker speaks rather than the way the
@@ -164,6 +176,98 @@ class Counts:
     pending: int
 
 
+@dataclass(frozen=True)
+class ClusterMemberView:
+    """One record in a cluster preview."""
+
+    record_id: str
+    source: str
+    is_primary: bool
+
+
+@dataclass(frozen=True)
+class ClusterEdgeView:
+    """One scored relationship between two members of a cluster preview.
+
+    ``status`` is one of ``auto`` (the matcher merged it with no human),
+    ``approved`` or ``rejected`` (this session's own verdict), ``pending`` (a
+    review-band pair still undecided), or ``scored-apart`` (the matcher scored
+    it low enough to drop, yet both ends still ended up in this cluster through
+    other edges). ``pair_index`` is the review-queue index of this edge when it
+    is itself a review pair, so the page can link to it.
+    """
+
+    left: str
+    right: str
+    probability: float
+    status: str
+    pair_index: int | None
+
+
+@dataclass(frozen=True)
+class GoldenFieldView:
+    """One field of a previewed golden record, with which record supplied it."""
+
+    field: str
+    value: str
+    source_id: str
+
+
+@dataclass(frozen=True)
+class ClusterGroupView:
+    """The members, internal edges, and golden record of one previewed cluster."""
+
+    members: tuple[ClusterMemberView, ...]
+    edges: tuple[ClusterEdgeView, ...]
+    golden: tuple[GoldenFieldView, ...]
+
+
+@dataclass(frozen=True)
+class ClusterPreview:
+    """What this session's decisions imply for the cluster around one pair.
+
+    ``merged`` is True when the pair's two records land in one cluster --
+    already, if decided, or provisionally as an approval preview when the pair
+    is still pending. ``conflict`` is True when merging would contradict a
+    rejection elsewhere in the group, in which case ``groups`` is empty and the
+    page shows :data:`CONFLICT_NOTE` instead. When not merged and not in
+    conflict, ``groups`` holds the two clusters the decision keeps apart.
+    """
+
+    pair_index: int
+    merged: bool
+    conflict: bool
+    groups: tuple[ClusterGroupView, ...]
+
+
+def _field_sources(
+    primary: str,
+    members: tuple[str, ...],
+    records: Mapping[str, Record],
+    fields: tuple[str, ...],
+) -> dict[str, str]:
+    """Which record contributed each golden field's value.
+
+    Mirrors the fill order ``decisions.golden_records`` uses internally (the
+    survivor first, then the other members in id order) but returns the
+    contributor's id per field instead of only the merged value, so the
+    preview can say where a value came from.
+    """
+
+    sources: dict[str, str] = {}
+    for field_name in fields:
+        value = records[primary].normalized.get(field_name, "")
+        source = primary if value else ""
+        if not value:
+            for member in members:
+                candidate = records[member].normalized.get(field_name, "")
+                if candidate:
+                    source = member
+                    break
+        sources[field_name] = source
+    return sources
+
+
 class ReviewSession:
     """Stateful review over a run's uncertain pairs, persisted to a file."""
 
@@ -284,6 +388,155 @@ class ReviewSession:
             if index not in self._verdicts:
                 return index
         return None
+
+    # -- cluster and golden-record preview -----------------------------------
+
+    def _live_pairs(self) -> list[Pair]:
+        """This run's scored pairs with the session's own verdicts applied.
+
+        An approved review pair becomes a confident merge and a rejected one is
+        dropped; every other pair keeps its original band. This mirrors
+        ``pipeline.run``'s ``force_auto``/``force_drop`` override so a preview
+        during review matches what ``reconcile apply`` would actually produce.
+        """
+
+        approved = frozenset(
+            self._pairs[i].key() for i, v in self._verdicts.items() if v == APPROVED
+        )
+        rejected = frozenset(
+            self._pairs[i].key() for i, v in self._verdicts.items() if v == REJECTED
+        )
+        adjusted: list[Pair] = []
+        for pair in self._result.pairs:
+            band = pair.band
+            if pair.key() in rejected:
+                band = Band.DROP
+            elif pair.key() in approved:
+                band = Band.AUTO
+            adjusted.append(Pair(pair.left, pair.right, pair.probability, band))
+        return adjusted
+
+    def _edges_within(self, members: tuple[str, ...]) -> tuple[ClusterEdgeView, ...]:
+        """Every scored pair whose two ends both fall inside ``members``.
+
+        Surfaces relationships beyond the single edge that grew the cluster: a
+        three-record cluster built from two approvals still has a third,
+        possibly still-pending, scored pair between its outer two members, and
+        a reviewer deciding one pair should see that the other exists.
+        """
+
+        member_set = frozenset(members)
+        key_to_index = self._key_to_index()
+        edges: list[ClusterEdgeView] = []
+        for pair in self._result.pairs:
+            if pair.left not in member_set or pair.right not in member_set:
+                continue
+            index = key_to_index.get(pair.key())
+            verdict = self._verdicts.get(index) if index is not None else None
+            if verdict == APPROVED:
+                status = "approved"
+            elif verdict == REJECTED:
+                status = "rejected"
+            elif pair.band is Band.AUTO:
+                status = "auto"
+            elif pair.band is Band.REVIEW:
+                status = "pending"
+            else:
+                status = "scored-apart"
+            edges.append(
+                ClusterEdgeView(
+                    left=pair.left,
+                    right=pair.right,
+                    probability=pair.probability,
+                    status=status,
+                    pair_index=index,
+                )
+            )
+        edges.sort(key=lambda edge: (-edge.probability, edge.left, edge.right))
+        return tuple(edges)
+
+    def _cluster_group(self, cluster: Cluster) -> ClusterGroupView:
+        edges = self._edges_within(cluster.members)
+        if len(cluster.members) < 2:
+            only = cluster.members[0]
+            singleton: tuple[ClusterMemberView, ...] = (
+                ClusterMemberView(
+                    record_id=only,
+                    source=self._result.records[only].source,
+                    is_primary=True,
+                ),
+            )
+            return ClusterGroupView(members=singleton, edges=edges, golden=())
+
+        [golden] = decisions.golden_records([cluster], self._result.records, self._fields)
+        sources = _field_sources(
+            golden.primary, cluster.members, self._result.records, self._fields
+        )
+        members = tuple(
+            ClusterMemberView(
+                record_id=member,
+                source=self._result.records[member].source,
+                is_primary=(member == golden.primary),
+            )
+            for member in cluster.members
+        )
+        golden_fields = tuple(
+            GoldenFieldView(
+                field=field_name,
+                value=golden.fields.get(field_name, ""),
+                source_id=sources.get(field_name, ""),
+            )
+            for field_name in self._fields
+        )
+        return ClusterGroupView(members=members, edges=edges, golden=golden_fields)
+
+    def cluster_preview(self, index: int) -> ClusterPreview | None:
+        """The cluster(s) and golden record(s) this pair's decision implies.
+
+        Approving (or, for a still-undecided pair, previewing an approval)
+        projects the pair as a confident merge on top of every other verdict
+        already recorded, then clusters and reduces to a golden record exactly
+        as ``reconcile apply`` would. Rejecting previews the two clusters kept
+        apart instead. When the projected merge would pull in a record another
+        rejection already separated, the preview reports a conflict rather than
+        showing a cluster that ``reconcile apply`` would refuse to honor.
+        """
+
+        if not (0 <= index < len(self._pairs)):
+            return None
+        pair = self._pairs[index]
+        verdict = self._verdicts.get(index)
+        rejected_keys = frozenset(
+            self._pairs[i].key() for i, v in self._verdicts.items() if v == REJECTED
+        )
+        intends_merge = verdict != REJECTED
+
+        projected: list[Pair] = []
+        for live in self._live_pairs():
+            if intends_merge and live.key() == pair.key():
+                live = Pair(live.left, live.right, live.probability, Band.AUTO)
+            projected.append(live)
+
+        clusters = decisions.build_clusters(self._result.records.keys(), projected)
+        by_member = {member: cluster for cluster in clusters for member in cluster.members}
+        left_cluster = by_member[pair.left]
+        right_cluster = by_member[pair.right]
+
+        naive_merged = pair.right in left_cluster.members
+        conflict = False
+        if naive_merged and rejected_keys:
+            cluster_members = frozenset(left_cluster.members)
+            conflict = any(key <= cluster_members for key in rejected_keys)
+        merged = naive_merged and not conflict
+
+        if conflict:
+            groups: tuple[ClusterGroupView, ...] = ()
+        elif merged:
+            groups = (self._cluster_group(left_cluster),)
+        else:
+            groups = (self._cluster_group(left_cluster), self._cluster_group(right_cluster))
+
+        return ClusterPreview(pair_index=index, merged=merged, conflict=conflict, groups=groups)
 
     # -- write access --------------------------------------------------------
 
