@@ -271,7 +271,9 @@ guess.
 1. Which matcher to wrap (Splink versus dedupe), judged on default quality
    without labeled pairs and on packaging weight for a CI install.
 2. The CiviCRM write path: API entity shapes, dedupe-rule interaction, and how
-   to make a write idempotent and reversible.
+   to make a write idempotent and reversible. The dedupe-rule interaction (for
+   CiviCRM and Salesforce/NPSP both) is now documented in
+   [CRM-DEDUPE-COOPERATION.md](./CRM-DEDUPE-COOPERATION.md).
 3. The exact VAWA and FVPSA invariants the DV pack must enforce, sourced from
    NNEDV Safety Net guidance, expressed as tests.
 4. The output record shape and how far to map toward HSDS organization and
