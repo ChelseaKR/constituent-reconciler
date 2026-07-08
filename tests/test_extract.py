@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -151,6 +152,136 @@ def test_default_pack_none_backend_returns_no_op() -> None:
 def test_default_pack_bedrock_backend_returns_bedrock_seam() -> None:
     seam = make_seam("default", backend="bedrock")
     assert isinstance(seam, BedrockSeam)
+
+
+# ---------------------------------------------------------------------------
+# BedrockSeam.refine: Converse response parsing and fault tolerance
+# ---------------------------------------------------------------------------
+
+
+def _converse_response(text: str) -> dict[str, Any]:
+    """A minimal Bedrock Converse response carrying one text block."""
+    return {"output": {"message": {"content": [{"text": text}]}}}
+
+
+class _StubBedrockClient:
+    """Fake bedrock-runtime client: records converse() calls, returns a canned
+    response or raises a canned error."""
+
+    def __init__(
+        self,
+        response: dict[str, Any] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self._response = response
+        self._error = error
+        self.calls: list[dict[str, Any]] = []
+
+    def converse(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(kwargs)
+        if self._error is not None:
+            raise self._error
+        assert self._response is not None
+        return self._response
+
+
+def _fake_page_to_png(path: Path, page_num: int) -> bytes:
+    return b"png-bytes"
+
+
+@pytest.fixture()
+def stub_page_render(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Avoid rendering a real PDF: refine() gets deterministic PNG bytes."""
+    import constituent_reconciler.extract.seam as seam_mod
+
+    monkeypatch.setattr(seam_mod, "_page_to_png", _fake_page_to_png)
+
+
+def test_bedrock_refine_parses_converse_response(stub_page_render: None) -> None:
+    client = _StubBedrockClient(
+        response=_converse_response(
+            '{"fields": ['
+            '{"name": "first_name", "value": " Alice ", "confidence": 0.9},'
+            '{"name": "email", "value": "alice@example.org", "confidence": 1.4}'
+            "]}"
+        )
+    )
+    seam = BedrockSeam(model_id="test-model", client=client)
+    fields = seam.refine(Path("form.pdf"), 1)
+
+    assert [(f.field_name, f.value) for f in fields] == [
+        ("first_name", "Alice"),
+        ("email", "alice@example.org"),
+    ]
+    assert fields[0].confidence == 0.9
+    assert fields[1].confidence == 1.0  # clamped to [0, 1]
+
+    # The Converse call carried the configured model id and the page image.
+    call = client.calls[0]
+    assert call["modelId"] == "test-model"
+    image_block = call["messages"][0]["content"][0]
+    assert image_block["image"]["format"] == "png"
+    assert image_block["image"]["source"]["bytes"] == b"png-bytes"
+
+
+def test_bedrock_refine_fenced_json_response_parses(stub_page_render: None) -> None:
+    fenced = (
+        "```json\n"
+        '{"fields": [{"name": "phone", "value": "555-123-4567", "confidence": 0.7}]}\n'
+        "```"
+    )
+    client = _StubBedrockClient(response=_converse_response(fenced))
+    seam = BedrockSeam(client=client)
+    fields = seam.refine(Path("form.pdf"), 1)
+    assert [(f.field_name, f.value, f.confidence) for f in fields] == [
+        ("phone", "555-123-4567", 0.7)
+    ]
+
+
+def test_bedrock_refine_malformed_json_returns_empty(stub_page_render: None) -> None:
+    client = _StubBedrockClient(response=_converse_response("Sorry, I cannot help with that."))
+    seam = BedrockSeam(client=client)
+    assert seam.refine(Path("form.pdf"), 1) == []
+
+
+def test_bedrock_refine_wrong_shape_returns_empty(stub_page_render: None) -> None:
+    # Valid JSON, but not the {"fields": [...]} contract.
+    client = _StubBedrockClient(response=_converse_response('{"answer": 42}'))
+    seam = BedrockSeam(client=client)
+    assert seam.refine(Path("form.pdf"), 1) == []
+
+
+def test_bedrock_refine_skips_malformed_entries(stub_page_render: None) -> None:
+    client = _StubBedrockClient(
+        response=_converse_response(
+            '{"fields": ['
+            '{"name": "first_name", "value": "Alice", "confidence": 0.8},'
+            '{"name": "", "value": "x", "confidence": 0.8},'
+            '{"name": "email", "value": "  ", "confidence": 0.8},'
+            '{"name": "phone", "value": "555", "confidence": "high"},'
+            '"not-a-dict"'
+            "]}"
+        )
+    )
+    seam = BedrockSeam(client=client)
+    fields = seam.refine(Path("form.pdf"), 1)
+    assert [(f.field_name, f.value) for f in fields] == [("first_name", "Alice")]
+
+
+def test_bedrock_refine_client_error_returns_empty(stub_page_render: None) -> None:
+    client = _StubBedrockClient(error=RuntimeError("throttled"))
+    seam = BedrockSeam(client=client)
+    assert seam.refine(Path("form.pdf"), 1) == []
+
+
+def test_bedrock_refine_without_client_returns_empty() -> None:
+    seam = BedrockSeam()
+    assert seam.refine(Path("form.pdf"), 1) == []
+
+
+def test_bedrock_seam_with_injected_client_is_enabled() -> None:
+    seam = BedrockSeam(client=_StubBedrockClient(response=_converse_response("{}")))
+    assert seam.is_enabled() is True
 
 
 # ---------------------------------------------------------------------------

@@ -79,8 +79,10 @@ The smallest version that ships the differentiator.
 * `cohen_kappa()` in `evaluate.py` is the calibration seam for when an LLM
   extraction judge is wired in and its confidence scores are compared against
   human-labeled field accuracy.
-* Still open: the full `BedrockSeam.refine()` implementation (page-to-image
-  conversion and response parser), and the WCAG 2.2 AA web review UI.
+* Still open: the WCAG 2.2 AA web review UI. The full `BedrockSeam.refine()`
+  implementation (page-to-image conversion and Converse response parsing) has
+  since shipped, with a fake-able injected client so the parsing and
+  fault-tolerance paths are tested without boto3 or network access.
 
 ## v0.4.0 — Address normalization (shipped)
 
