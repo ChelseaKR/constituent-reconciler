@@ -163,6 +163,21 @@ def handle_post(
         return _Response(HTTPStatus.NOT_FOUND, "No such pair")
 
     raw = form.get("verdict", [""])[0]
+    if raw == "correct":
+        try:
+            session.correct(
+                index,
+                field=form.get("field", [""])[0],
+                side=form.get("side", [""])[0],
+                value=form.get("value", [""])[0],
+            )
+        except (IndexError, ValueError) as error:
+            return _Response(HTTPStatus.BAD_REQUEST, str(error))
+        nxt = session.next_undecided(after=index)
+        return _Response(
+            HTTPStatus.SEE_OTHER,
+            location=f"/pair/{nxt}" if nxt is not None else "/",
+        )
     verdict = _VERDICT_FORM.get(raw)
     if verdict is None:
         return _Response(HTTPStatus.BAD_REQUEST, "Unknown verdict")
@@ -281,6 +296,7 @@ def serve(
             "different reviewers approve it."
         )
     print(f"  {session.total} pair(s) to review; decisions save to {session.decisions_path}")
+    print(f"  attributed field corrections save separately to {session.corrections_path}")
     print("  This server is local only and sends no data over the network.")
     print("  Press Ctrl-C to stop.")
     if open_browser:

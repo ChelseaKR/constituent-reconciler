@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from html import escape
 
+from constituent_reconciler.models import Correction
 from constituent_reconciler.review.session import (
     APPROVED,
     AWAITING_SECOND,
@@ -24,6 +25,7 @@ from constituent_reconciler.review.session import (
     ClusterGroupView,
     ClusterMemberView,
     ClusterPreview,
+    FieldCell,
     GoldenFieldView,
     PairView,
     ReviewSession,
@@ -81,6 +83,12 @@ table.compare th[scope=row] { width: 9rem; background: #f2f4f7; }
 .verdict { margin: 0.4rem 0; font-weight: 700; }
 .verdict.approved { color: #054d1c; }
 .verdict.rejected { color: #6b1010; }
+.correct-fieldset {
+  border: 1px solid #999; border-radius: 6px; padding: 0.8rem 1rem; margin: 1rem 0;
+}
+.correct-fieldset label { display: block; margin-top: 0.4rem; font-weight: 600; }
+.correct-fieldset input[type=text], .correct-fieldset select { font: inherit; padding: 0.4rem; }
+.tag.corrected { color: #7a4b00; border-color: #7a4b00; background: #fff3e0; }
 .actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 1rem 0; }
 button, .btn {
   font: inherit; padding: 0.55rem 1rem; border: 2px solid #003366; border-radius: 6px;
@@ -106,11 +114,11 @@ kbd {
 
 _SCRIPT = """
 // Progressive enhancement only: every action below also works via Tab + Enter
-// on a visible control. a=approve, r=reject, j=next, k=previous.
+// on a visible control. a=approve, c=correct, r=reject, j=next, k=previous.
 document.addEventListener('keydown', function (e) {
   if (e.target.matches('input, textarea, select')) return;
   var k = e.key.toLowerCase();
-  var map = { a: 'approve', r: 'reject' };
+  var map = { a: 'approve', c: 'correct', r: 'reject' };
   if (map[k]) {
     var b = document.querySelector('button[value="' + map[k] + '"]');
     if (b) { e.preventDefault(); b.click(); }
@@ -144,7 +152,8 @@ def _calibration_banner(calibration: int) -> str:
 def _page(title: str, body: str, *, privacy: bool, calibration: int = 0) -> str:
     privacy_banner = (
         '<div class="privacy" role="status">Privacy mode (DV policy pack): '
-        "this server stays on your machine and writes no field values to disk.</div>"
+        "this server stays on your machine. Decisions remain PII-free; any field "
+        "correction is stored separately and locally.</div>"
         if privacy
         else ""
     )
@@ -198,14 +207,16 @@ def render_overview(session: ReviewSession, *, apply_command: str) -> str:
     """The landing page: progress, the queue, and what to do when finished."""
 
     counts = session.counts()
-    decided = counts.approved + counts.rejected
+    decided = counts.approved + counts.corrected + counts.rejected
     total = session.total
     privacy = session.privacy_mode
 
     rows: list[str] = []
     for view in session.views():
         verdict = session.verdict(view.index)
-        if verdict == APPROVED:
+        if verdict == APPROVED and session.corrections_for(view.index):
+            state = '<span class="tag corrected">CORRECTED &amp; APPROVED &#10003;</span>'
+        elif verdict == APPROVED:
             state = '<span class="tag match">APPROVED &#10003;</span>'
         elif verdict == REJECTED:
             state = '<span class="tag differ">REJECTED &#10007;</span>'
@@ -247,14 +258,17 @@ def render_overview(session: ReviewSession, *, apply_command: str) -> str:
         "<header>\n<h1>Review queue</h1>\n"
         f"{_reviewer_line(session)}\n"
         f'<p class="progress" aria-live="polite">{decided} of {total} decided '
-        f"&mdash; {counts.approved} approved, {counts.rejected} rejected, "
+        f"&mdash; {counts.approved} approved, {counts.corrected} corrected, "
+        f"{counts.rejected} rejected, "
         f"{counts.pending} pending{awaiting}.</p>\n"
         f"{_progress_bar(decided, total)}\n</header>\n"
         '<main id="main">\n'
         f"{next_link}\n{queue_html}\n"
         "<h2>When you are done</h2>\n"
         "<p>Your decisions are saved as you go to "
-        f"<code>{escape(str(session.decisions_path))}</code>. Apply them with:</p>\n"
+        f"<code>{escape(str(session.decisions_path))}</code>. Corrected field values "
+        f"are attributed in <code>{escape(str(session.corrections_path))}</code>, "
+        "which carries PII and needs the same local handling as resolved output. Apply with:</p>\n"
         f"<pre><code>{escape(apply_command)}</code></pre>\n"
         '<p class="note">Approved pairs are merged; rejected pairs are kept '
         "separate. You can stop and resume at any time.</p>\n"
@@ -269,6 +283,54 @@ def _cell(value: str, span: str) -> str:
     shown = escape(value) if value else "<em>(blank)</em>"
     span_html = f'<div class="span">source: {escape(span)}</div>' if span else ""
     return f"{shown}{span_html}"
+
+
+def _correction_fieldset(view: PairView) -> str:
+    options = "".join(
+        f'<option value="{escape(cell.field)}">{escape(field_label(cell.field))}</option>'
+        for cell in view.fields
+    )
+    return (
+        '<fieldset class="correct-fieldset"><legend>Fix a value and approve</legend>'
+        f'<label for="field-{view.index}">Field</label>'
+        f'<select id="field-{view.index}" name="field">{options}</select>'
+        "<label>Which record is wrong</label>"
+        '<label><input type="radio" name="side" value="left" checked> '
+        f"{escape(view.left_id)}</label>"
+        '<label><input type="radio" name="side" value="right"> '
+        f"{escape(view.right_id)}</label>"
+        f'<label for="value-{view.index}">Correct value</label>'
+        f'<input type="text" id="value-{view.index}" name="value" required>'
+        '<div class="actions"><button type="submit" name="verdict" value="correct" '
+        'accesskey="c">Save correction <kbd>C</kbd></button></div></fieldset>'
+    )
+
+
+def _field_row(cell: FieldCell, correction: Correction | None, view: PairView) -> str:
+    if correction is not None:
+        mark = '<span class="tag corrected">corrected</span>'
+    elif cell.agrees:
+        mark = '<span class="tag match">match</span>'
+    elif cell.comparable:
+        mark = '<span class="tag differ">differs</span>'
+    else:
+        mark = '<span class="tag neutral">not compared</span>'
+    left_cell = _cell(cell.left, cell.left_span)
+    right_cell = _cell(cell.right, cell.right_span)
+    if correction is not None:
+        note = (
+            f'<div class="note">Corrected to {escape(correction.value)} by '
+            f"{escape(correction.reviewer)} at {escape(correction.corrected_at)}.</div>"
+        )
+        if correction.record_id == view.left_id:
+            left_cell += note
+        else:
+            right_cell += note
+    return (
+        f'<tr><th scope="row">{escape(field_label(cell.field))}</th>'
+        f"<td>{left_cell}</td><td>{right_cell}</td>"
+        f'<td class="agree">{mark}</td></tr>'
+    )
 
 
 _EDGE_LABELS: dict[str, tuple[str, str]] = {
@@ -382,26 +444,20 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
     """The decision screen for one candidate pair."""
 
     counts = session.counts()
-    decided = counts.approved + counts.rejected
+    decided = counts.approved + counts.corrected + counts.rejected
     total = session.total
     verdict = session.verdict(view.index)
 
-    field_rows: list[str] = []
-    for cell in view.fields:
-        if cell.agrees:
-            mark = '<span class="tag match">match</span>'
-        elif cell.comparable:
-            mark = '<span class="tag differ">differs</span>'
-        else:
-            mark = '<span class="tag neutral">not compared</span>'
-        field_rows.append(
-            f'<tr><th scope="row">{escape(field_label(cell.field))}</th>'
-            f"<td>{_cell(cell.left, cell.left_span)}</td>"
-            f"<td>{_cell(cell.right, cell.right_span)}</td>"
-            f'<td class="agree">{mark}</td></tr>'
-        )
+    corrections = session.corrections_for(view.index)
+    field_rows = [_field_row(cell, corrections.get(cell.field), view) for cell in view.fields]
 
-    if verdict == APPROVED:
+    if verdict == APPROVED and corrections:
+        by = escape(_decided_by(session, view.index, APPROVED))
+        current = (
+            '<p class="verdict approved" role="status">Current decision: CORRECTED AND '
+            f"APPROVED &#10003; &mdash; approved by {by}.</p>"
+        )
+    elif verdict == APPROVED:
         by = escape(_decided_by(session, view.index, APPROVED))
         current = (
             '<p class="verdict approved" role="status">'
@@ -473,6 +529,7 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
         f"{cluster_html}"
         f'<form method="post" action="/pair/{view.index}">\n'
         f'<input type="hidden" name="token" value="{escape(session.token)}">\n'
+        f"{_correction_fieldset(view) if not view.synthetic else ''}\n"
         '<div class="actions">\n'
         '<button type="submit" name="verdict" value="approve" accesskey="a">'
         "Approve merge <kbd>A</kbd></button>\n"
@@ -481,12 +538,14 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
         "</div>\n</form>\n"
         '<nav class="actions" aria-label="Move between pairs">\n'
         f"{prev_link}\n{next_link}\n</nav>\n"
-        '<p class="note">Keyboard: <kbd>A</kbd> approve, <kbd>R</kbd> reject, '
+        '<p class="note">Keyboard: <kbd>A</kbd> approve, <kbd>C</kbd> correct, '
+        "<kbd>R</kbd> reject, "
         "<kbd>J</kbd> next, <kbd>K</kbd> previous. "
         f'<a href="/">Back to the full queue</a>.</p>\n'
         "</main>\n"
         '<footer><p class="note">Decisions save to '
-        f"<code>{escape(str(session.decisions_path))}</code>. Apply with "
+        f"<code>{escape(str(session.decisions_path))}</code>; corrections save to "
+        f"<code>{escape(str(session.corrections_path))}</code>. Apply with "
         f"<code>{escape(apply_command)}</code>.</p></footer>"
     )
     return _page(

@@ -31,7 +31,7 @@ from constituent_reconciler.evaluate import (
     evaluate,
     extraction_metrics,
 )
-from constituent_reconciler.models import RunResult
+from constituent_reconciler.models import Correction, RunResult
 from constituent_reconciler.narrative import LANGUAGES, render_narrative
 from constituent_reconciler.pipeline import ExportSummary
 from constituent_reconciler.policy import PolicyViolation
@@ -63,6 +63,44 @@ def _load_household_ids(data: dict[str, object], key: str) -> frozenset[str]:
     if not isinstance(entries, list):
         raise ValueError(f"{key} must be a list of household ids")
     return frozenset(str(entry) for entry in entries)
+
+
+def _load_corrections(path: Path) -> list[Correction]:
+    """Load the separately persisted, PII-bearing field corrections."""
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or not isinstance(data.get("corrections", []), list):
+        raise ValueError("corrections file must contain a corrections list")
+    corrections: list[Correction] = []
+    for entry in data.get("corrections", []):
+        if not isinstance(entry, dict):
+            raise ValueError("corrections entries must be objects")
+        left = str(entry.get("left", ""))
+        right = str(entry.get("right", ""))
+        side = str(entry.get("side", ""))
+        field_name = str(entry.get("field", ""))
+        value = str(entry.get("value", ""))
+        reviewer = str(entry.get("reviewer", ""))
+        corrected_at = str(entry.get("corrected_at", ""))
+        if not left or not right:
+            raise ValueError("correction must name both pair record ids")
+        if side not in ("left", "right"):
+            raise ValueError(f"correction side must be 'left' or 'right', got {side!r}")
+        if not field_name or not value.strip() or not reviewer.strip() or not corrected_at.strip():
+            raise ValueError(
+                "correction requires field, non-blank value, reviewer, and corrected_at"
+            )
+        corrections.append(
+            Correction(
+                record_id=left if side == "left" else right,
+                field=field_name,
+                value=value,
+                reviewer=reviewer,
+                corrected_at=corrected_at,
+                pair=frozenset((left, right)),
+            )
+        )
+    return corrections
 
 
 def _pairs_awaiting_second_review(data: dict[str, object]) -> list[str]:
@@ -295,11 +333,34 @@ def _cmd_apply(args: argparse.Namespace) -> int:
         return 2
     force_auto = _load_pairs(decisions_data, ["approved"])
     force_drop = _load_pairs(decisions_data, ["rejected"])
+    corrections_path = (
+        Path(args.corrections) if args.corrections else decisions_path.parent / "corrections.json"
+    )
+    try:
+        corrections = _load_corrections(corrections_path) if corrections_path.exists() else []
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(f"error: invalid corrections file {corrections_path}: {error}", file=sys.stderr)
+        return 2
+    orphan = next(
+        (correction.pair for correction in corrections if correction.pair not in force_auto),
+        None,
+    )
+    if orphan is not None:
+        print(
+            f"error: correction for {sorted(orphan)!r} is not attached to a fully approved pair",
+            file=sys.stderr,
+        )
+        return 2
     # "households_confirmed" is a list of household ids copied from an earlier
     # run's household_suggestions.csv by a reviewer; a suggestion never applies
     # to the CRM export column until it appears here (household.py).
     confirmed_households = _load_household_ids(decisions_data, "households_confirmed")
-    result = pipeline.run(recipe, force_auto=force_auto, force_drop=force_drop)
+    result = pipeline.run(
+        recipe,
+        force_auto=force_auto,
+        force_drop=force_drop,
+        corrections=corrections,
+    )
     _, withheld = partition_by_consent(result.golden, require_consent=recipe.require_consent)
     print(render_run_summary(result, withheld=len(withheld)))
     try:
@@ -603,6 +664,11 @@ def build_parser() -> argparse.ArgumentParser:
     apply_parser = sub.add_parser("apply", help="apply review decisions and re-resolve")
     apply_parser.add_argument("--config", required=True, help="path to recipe.toml")
     apply_parser.add_argument("--decisions", required=True, help="decisions JSON")
+    apply_parser.add_argument(
+        "--corrections",
+        default=None,
+        help="corrections JSON (default: corrections.json beside --decisions)",
+    )
     apply_parser.add_argument("--out", default="out", help="output directory")
     apply_parser.add_argument(
         "--policy-pack",

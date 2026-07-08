@@ -15,7 +15,9 @@ reviewer, and any rejection rejects immediately, fail-closed.
 The decisions file is the session's only side effect, and it carries record ids,
 verdicts, reviewer names, and timestamps only. No field value of a reviewed
 record is written, which is the minimization the DV pack requires of any artifact
-the review step produces.
+the review step produces. Field corrections are the exception: because their
+replacement values are PII, they are attributed and stored separately in
+``corrections.json`` with the same local handling as resolved output.
 
 Optional planted calibration pairs are interleaved into the in-memory queue.
 Their verdicts are never written to the decisions file, so synthetic records
@@ -33,7 +35,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from constituent_reconciler import decisions
-from constituent_reconciler.models import Band, Cluster, Pair, Record, RunResult
+from constituent_reconciler.models import Band, Cluster, Correction, Pair, Record, RunResult
 from constituent_reconciler.review.calibration import PlantedPair
 from constituent_reconciler.schema import DECISIONS_SCHEMA_VERSION
 
@@ -204,6 +206,7 @@ class Counts:
     rejected: int
     pending: int
     awaiting_second: int = 0
+    corrected: int = 0
 
 
 @dataclass(frozen=True)
@@ -382,7 +385,9 @@ class ReviewSession:
         }
         self._known_answers = {item.pair.key(): item.known_answer for item in calibration}
         self._entries: dict[int, list[ReviewEntry]] = {}
+        self._corrections: dict[int, dict[str, Correction]] = {}
         self._load_existing()
+        self._load_corrections()
 
     # -- construction helpers ------------------------------------------------
 
@@ -455,6 +460,54 @@ class ReviewSession:
                 )
             if entries:
                 self._entries[index] = entries
+
+    def _load_corrections(self) -> None:
+        """Resume only attributed corrections backed by the matching audit entry."""
+
+        if not self.corrections_path.exists():
+            return
+        try:
+            data = json.loads(self.corrections_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return
+        index_of = self._key_to_index()
+        raw_corrections = data.get("corrections", []) if isinstance(data, dict) else []
+        if not isinstance(raw_corrections, list):
+            return
+        for raw in raw_corrections:
+            if not isinstance(raw, dict):
+                continue
+            left, right = str(raw.get("left", "")), str(raw.get("right", ""))
+            side, field_name = str(raw.get("side", "")), str(raw.get("field", ""))
+            value = str(raw.get("value", ""))
+            reviewer, corrected_at = str(raw.get("reviewer", "")), str(raw.get("corrected_at", ""))
+            index = index_of.get(frozenset((left, right)))
+            if (
+                index is None
+                or side not in {"left", "right"}
+                or field_name not in self._fields
+                or not value.strip()
+                or not reviewer.strip()
+                or not corrected_at.strip()
+            ):
+                continue
+            matching_approval = any(
+                entry.reviewer == reviewer
+                and entry.verdict == APPROVED
+                and entry.decided_at == corrected_at
+                for entry in self._entries.get(index, ())
+            )
+            if not matching_approval:
+                continue
+            pair = self._pairs[index]
+            self._corrections.setdefault(index, {})[field_name] = Correction(
+                record_id=pair.left if side == "left" else pair.right,
+                field=field_name,
+                value=value,
+                reviewer=reviewer,
+                corrected_at=corrected_at,
+                pair=pair.key(),
+            )
 
     # -- read access ---------------------------------------------------------
 
@@ -546,15 +599,24 @@ class ReviewSession:
 
     def counts(self) -> Counts:
         states = [self.verdict(index) for index in range(len(self._pairs))]
-        approved = states.count(APPROVED)
+        corrected = sum(
+            1
+            for index, state in enumerate(states)
+            if state == APPROVED and bool(self._corrections.get(index))
+        )
+        approved = states.count(APPROVED) - corrected
         rejected = states.count(REJECTED)
         awaiting = states.count(AWAITING_SECOND)
         return Counts(
             approved=approved,
             rejected=rejected,
-            pending=len(self._pairs) - approved - rejected - awaiting,
+            pending=len(self._pairs) - approved - corrected - rejected - awaiting,
             awaiting_second=awaiting,
+            corrected=corrected,
         )
+
+    def corrections_for(self, index: int) -> dict[str, Correction]:
+        return dict(self._corrections.get(index, {}))
 
     def next_undecided(self, after: int = -1) -> int | None:
         """Index of the first pair still open for this reviewer after ``after``.
@@ -742,6 +804,24 @@ class ReviewSession:
         if verdict not in _VERDICTS:
             raise ValueError(f"unknown verdict {verdict!r}; expected approved or rejected")
         name = self.reviewer if reviewer is None else _clean_reviewer(reviewer)
+        if verdict == REJECTED:
+            # A rejection means no corrected value from this pair may flow into
+            # apply, regardless of who proposed it.
+            self._corrections.pop(index, None)
+        elif any(
+            correction.reviewer == name for correction in self._corrections.get(index, {}).values()
+        ):
+            # The correcting reviewer explicitly chose approve-as-is later;
+            # abandon only their own correction, not a different reviewer's.
+            remaining = {
+                field_name: correction
+                for field_name, correction in self._corrections.get(index, {}).items()
+                if correction.reviewer != name
+            }
+            if remaining:
+                self._corrections[index] = remaining
+            else:
+                self._corrections.pop(index, None)
         entry = ReviewEntry(
             reviewer=name,
             verdict=verdict,
@@ -752,10 +832,46 @@ class ReviewSession:
         self._entries[index] = entries
         self.save()
 
+    def correct(self, index: int, *, field: str, side: str, value: str) -> None:
+        """Replace one displayed value and restart approval from this reviewer.
+
+        Changing evidence invalidates every earlier verdict on the pair. The
+        correction itself counts as this reviewer's approval; in two-person
+        mode a later distinct reviewer must see it and concur before apply.
+        """
+
+        if not (0 <= index < len(self._pairs)) or index in self._synthetic_indexes:
+            raise IndexError(f"pair index {index} cannot be corrected")
+        if field not in self._fields:
+            raise ValueError(f"unknown field {field!r}; expected one of {self._fields}")
+        if side not in {"left", "right"}:
+            raise ValueError(f"unknown side {side!r}; expected 'left' or 'right'")
+        if not value.strip():
+            raise ValueError("a correction requires a non-blank replacement value")
+        decided_at = datetime.now(UTC).isoformat(timespec="seconds")
+        pair = self._pairs[index]
+        correction = Correction(
+            record_id=pair.left if side == "left" else pair.right,
+            field=field,
+            value=value,
+            reviewer=self.reviewer,
+            corrected_at=decided_at,
+            pair=pair.key(),
+        )
+        # A new value changes the evidence; prior approvals and rejections no
+        # longer describe what the next reviewer sees.
+        self._entries[index] = [
+            ReviewEntry(reviewer=self.reviewer, verdict=APPROVED, decided_at=decided_at)
+        ]
+        self._corrections[index] = {field: correction}
+        self.save()
+
     def clear(self, index: int) -> None:
         """Reset a pair to undecided, clearing every reviewer's entry on it."""
 
-        if self._entries.pop(index, None) is not None:
+        changed = self._entries.pop(index, None) is not None
+        changed = self._corrections.pop(index, None) is not None or changed
+        if changed:
             self.save()
 
     def _pair_key(self, index: int) -> str:
@@ -822,7 +938,35 @@ class ReviewSession:
         self._decisions_path.write_text(
             json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
+        corrections = self.to_corrections()
+        if corrections["corrections"] or self.corrections_path.exists():
+            self.corrections_path.write_text(
+                json.dumps(corrections, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+
+    def to_corrections(self) -> dict[str, list[dict[str, str]]]:
+        entries: list[dict[str, str]] = []
+        for index in sorted(self._corrections):
+            pair = self._pairs[index]
+            for field_name in sorted(self._corrections[index]):
+                correction = self._corrections[index][field_name]
+                entries.append(
+                    {
+                        "left": pair.left,
+                        "right": pair.right,
+                        "side": "left" if correction.record_id == pair.left else "right",
+                        "field": correction.field,
+                        "value": correction.value,
+                        "reviewer": correction.reviewer,
+                        "corrected_at": correction.corrected_at,
+                    }
+                )
+        return {"corrections": entries}
 
     @property
     def decisions_path(self) -> Path:
         return self._decisions_path
+
+    @property
+    def corrections_path(self) -> Path:
+        return self._decisions_path.parent / "corrections.json"

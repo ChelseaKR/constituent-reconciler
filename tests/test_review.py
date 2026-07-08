@@ -830,3 +830,77 @@ def test_calibration_banner_is_disclosed_without_marking_one_pair(tmp_path: Path
     planted_view = next(view for view in session.views() if view.synthetic)
     page = handle_get(session, f"/pair/{planted_view.index}", _context()).body
     assert page.count("planted known-answer") == 1
+
+
+# -- attributed field correction (EXP-01) -----------------------------------
+
+
+def test_correction_is_attributed_and_kept_out_of_decisions(tmp_path: Path) -> None:
+    _, _, session = _session(tmp_path)
+    view = session.views()[0]
+    session.correct(view.index, field="dob", side="right", value="1972-03-08")
+
+    assert session.verdict(view.index) == APPROVED
+    correction = session.corrections_for(view.index)["dob"]
+    assert correction.reviewer == "casey"
+    assert correction.record_id == view.right_id
+    decisions_blob = session.decisions_path.read_text(encoding="utf-8")
+    corrections_blob = session.corrections_path.read_text(encoding="utf-8")
+    assert "1972-03-08" not in decisions_blob
+    assert "1972-03-08" in corrections_blob
+    assert correction.corrected_at in corrections_blob
+
+
+def test_correction_invalidates_prior_approval_and_requires_fresh_second_review(
+    tmp_path: Path,
+) -> None:
+    result, recipe, first = _session(tmp_path, require_second=True, reviewer="casey")
+    first.record(0, APPROVED, reviewer="jordan")
+    first.correct(0, field="dob", side="right", value="1972-03-08")
+    assert first.verdict(0) == AWAITING_SECOND
+    assert [entry.reviewer for entry in first.audit(0)] == ["casey"]
+
+    second = ReviewSession(
+        result,
+        recipe.fields,
+        first.decisions_path,
+        reviewer="jordan",
+        require_second_reviewer=True,
+    )
+    assert second.corrections_for(0)["dob"].value == "1972-03-08"
+    second.record(0, APPROVED)
+    assert second.verdict(0) == APPROVED
+    assert second.corrections_for(0)["dob"].reviewer == "casey"
+
+
+def test_reject_or_correcting_reviewers_plain_approval_abandons_correction(
+    tmp_path: Path,
+) -> None:
+    _, _, session = _session(tmp_path)
+    session.correct(0, field="dob", side="right", value="1972-03-08")
+    session.record(0, APPROVED)
+    assert session.corrections_for(0) == {}
+    session.correct(0, field="dob", side="right", value="1972-03-08")
+    session.record(0, REJECTED, reviewer="jordan")
+    assert session.corrections_for(0) == {}
+
+
+def test_correction_handler_validates_and_render_shows_attribution(tmp_path: Path) -> None:
+    _, _, session = _session(tmp_path)
+    bad = handle_post(
+        session,
+        "/pair/0",
+        {
+            "verdict": ["correct"],
+            "field": ["dob"],
+            "side": ["right"],
+            "value": ["   "],
+            "token": [session.token],
+        },
+        _context(),
+    )
+    assert bad.status == HTTPStatus.BAD_REQUEST
+    session.correct(0, field="dob", side="right", value="1972-03-08")
+    html = render_pair(session, session.views()[0], apply_command="reconcile apply")
+    assert "Corrected to 1972-03-08 by casey" in html
+    assert "corrections.json" in html

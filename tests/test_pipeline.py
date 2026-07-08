@@ -12,7 +12,7 @@ from constituent_reconciler import pipeline
 from constituent_reconciler.config import HouseholdConfig, OutputConfig, Recipe, load_recipe
 from constituent_reconciler.consent import partition_by_consent
 from constituent_reconciler.evaluate import evaluate
-from constituent_reconciler.models import Consent, GoldenRecord, Record
+from constituent_reconciler.models import Consent, Correction, GoldenRecord, Record
 from constituent_reconciler.provenance import verify_log
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "intake-demo"
@@ -657,3 +657,33 @@ def test_identical_ids_across_sources_do_not_collide(tmp_path: Path) -> None:
     )
     result = pipeline.run(_identity_recipe(tmp_path))
     assert set(result.records) == {"existing:X001", "incoming:X001"}
+
+
+def test_correction_is_applied_before_normalization_and_preserves_consent() -> None:
+    recipe = load_recipe(EXAMPLES / "recipe.toml")
+    correction = Correction(
+        record_id="incoming:N004",
+        field="dob",
+        value="1972-03-08",
+        reviewer="casey",
+        corrected_at="2026-07-12T00:00:00+00:00",
+    )
+    result = pipeline.run(
+        recipe,
+        force_auto=[frozenset(("existing:E002", "incoming:N004"))],
+        corrections=[correction],
+    )
+    corrected = result.records["incoming:N004"]
+    assert corrected.raw["dob"] == "1972-03-08"
+    assert corrected.normalized["dob"] == "1972-03-08"
+    assert corrected.consent.status == "granted"
+    golden = next(record for record in result.golden if "incoming:N004" in record.members)
+    assert golden.fields["dob"] == "1972-03-08"
+
+
+def test_correction_fails_closed_on_unknown_record_or_unmapped_field() -> None:
+    recipe = load_recipe(EXAMPLES / "recipe.toml")
+    with pytest.raises(ValueError, match="not present"):
+        pipeline.run(recipe, corrections=[Correction("missing", "dob", "1972-03-08")])
+    with pytest.raises(ValueError, match="does not map"):
+        pipeline.run(recipe, corrections=[Correction("incoming:N004", "not_a_field", "x")])
