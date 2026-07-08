@@ -1,15 +1,49 @@
-"""Shared fixtures for the test suite.
+"""Shared fixtures and fakes for the test suite.
 
 ``make_pdf`` generates a minimal but valid PDF-1.4 file whose text content
 pdfplumber can extract. It uses only the Python standard library, with no
 dependency on reportlab, fpdf2, or any PDF-creation library.
+
+``FakeCivicrmTransport`` and ``FakeSalesforceTransport`` are queued-response
+transports for the network connectors. The connector unit tests and the
+conformance suite share them so every test observes requests the same way.
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
+
+
+class FakeCivicrmTransport:
+    """Returns queued responses and records every request for inspection."""
+
+    def __init__(self, responses: list[tuple[int, dict[str, object]]]) -> None:
+        self._responses = responses
+        self.calls: list[tuple[str, dict[str, str], bytes]] = []
+
+    def post(self, url: str, *, headers: dict[str, str], body: bytes) -> tuple[int, bytes]:
+        self.calls.append((url, headers, body))
+        status, payload = self._responses.pop(0)
+        return status, json.dumps(payload).encode("utf-8")
+
+
+class FakeSalesforceTransport:
+    """Returns queued responses and records every request for inspection."""
+
+    def __init__(self, responses: list[tuple[int, dict[str, object] | None]]) -> None:
+        self._responses = responses
+        self.calls: list[tuple[str, str, dict[str, str], bytes | None]] = []
+
+    def send(
+        self, method: str, url: str, *, headers: dict[str, str], body: bytes | None
+    ) -> tuple[int, bytes]:
+        self.calls.append((method, url, headers, body))
+        status, payload = self._responses.pop(0)
+        raw = b"" if payload is None else json.dumps(payload).encode("utf-8")
+        return status, raw
 
 
 def _make_pdf(lines: list[str]) -> bytes:

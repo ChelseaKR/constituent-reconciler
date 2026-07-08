@@ -10,25 +10,15 @@ without touching disk.
 from __future__ import annotations
 
 import csv
-import os
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from constituent_reconciler import consent, decisions, matching, suppression
 from constituent_reconciler.config import Recipe
+from constituent_reconciler.connectors import get_factory
 from constituent_reconciler.connectors.base import Connector, WriteResult
-from constituent_reconciler.connectors.civicrm import CivicrmConfig, CivicrmConnector, Transport
-from constituent_reconciler.connectors.crm_csv import (
-    CIVICRM_IMPORT_MAP,
-    SALESFORCE_IMPORT_MAP,
-    CrmCsvConnector,
-)
-from constituent_reconciler.connectors.csv_out import CsvConnector
-from constituent_reconciler.connectors.salesforce import (
-    SalesforceConfig,
-    SalesforceConnector,
-)
+from constituent_reconciler.connectors.civicrm import Transport
 from constituent_reconciler.connectors.salesforce import Transport as SalesforceTransport
 from constituent_reconciler.models import GoldenRecord, Pair, Record, RunResult, SourceSpan
 from constituent_reconciler.normalize import normalize_record
@@ -336,48 +326,20 @@ def build_connector(
 ) -> Connector:
     """Construct the connector named by the recipe. Secrets come from the env.
 
+    Construction is a registry lookup (``connectors.get_factory``), so adding a
+    destination means one new module plus a registry entry, not an edit here.
     Under a policy pack that requires local targets (the DV pack), a non-local
-    connector is refused before it is built, fail-closed: client PII must not
-    egress, so the network write target is rejected rather than configured.
+    connector is refused before any write, fail-closed: client PII must not
+    egress, so the network write target is rejected rather than used.
     """
 
-    output = recipe.output
-    if output.connector == "csv":
-        connector: Connector = CsvConnector(out_dir / "resolved.csv")
-    elif output.connector == "salesforce_csv":
-        connector = CrmCsvConnector(
-            "salesforce_csv",
-            out_dir / "salesforce_import.csv",
-            SALESFORCE_IMPORT_MAP,
-            external_id_column=output.external_id_field,
-        )
-    elif output.connector == "civicrm_csv":
-        connector = CrmCsvConnector(
-            "civicrm_csv",
-            out_dir / "civicrm_import.csv",
-            CIVICRM_IMPORT_MAP,
-            external_id_column=output.external_id_field,
-        )
-    elif output.connector == "civicrm":
-        config = CivicrmConfig(
-            endpoint=output.endpoint,
-            api_key=os.environ.get(output.auth_env, ""),
-            auth_header=output.auth_header,
-            auth_scheme=output.auth_scheme,
-            external_id_field=output.external_id_field,
-        )
-        connector = CivicrmConnector(config, transport=transport)
-    elif output.connector == "salesforce":
-        sf_config = SalesforceConfig(
-            instance_url=output.endpoint,
-            access_token=os.environ.get(output.auth_env, ""),
-            api_version=output.api_version,
-            external_id_field=output.external_id_field,
-            object_name=output.object_name,
-        )
-        connector = SalesforceConnector(sf_config, transport=sf_transport)
-    else:
-        raise ValueError(f"unknown output connector: {output.connector!r}")
+    transports: dict[str, object] = {}
+    if transport is not None:
+        transports["civicrm"] = transport
+    if sf_transport is not None:
+        transports["salesforce"] = sf_transport
+    factory = get_factory(recipe.output.connector)
+    connector = factory(recipe.output, out_dir, transports)
 
     if recipe.require_local_targets and not connector.is_local:
         raise PolicyViolation(

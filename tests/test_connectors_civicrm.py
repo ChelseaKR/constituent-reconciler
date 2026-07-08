@@ -9,21 +9,9 @@ import pytest
 from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.connectors.civicrm import CivicrmConfig, CivicrmConnector
 from constituent_reconciler.models import GoldenRecord
+from tests.conftest import FakeCivicrmTransport
 
 FIELDS = ("first_name", "last_name", "dob", "email", "phone")
-
-
-class _FakeTransport:
-    """Returns queued responses and records every request for inspection."""
-
-    def __init__(self, responses: list[tuple[int, dict[str, object]]]) -> None:
-        self._responses = responses
-        self.calls: list[tuple[str, dict[str, str], bytes]] = []
-
-    def post(self, url: str, *, headers: dict[str, str], body: bytes) -> tuple[int, bytes]:
-        self.calls.append((url, headers, body))
-        status, payload = self._responses.pop(0)
-        return status, json.dumps(payload).encode("utf-8")
 
 
 def _golden(cluster_id: str, fields: dict[str, str], consent: bool = True) -> GoldenRecord:
@@ -41,14 +29,14 @@ def _params(body: bytes) -> dict[str, Any]:
     return decoded
 
 
-def _connector(transport: _FakeTransport) -> CivicrmConnector:
+def _connector(transport: FakeCivicrmTransport) -> CivicrmConnector:
     return CivicrmConnector(
         CivicrmConfig(endpoint="https://x.example/api4", api_key="key"), transport=transport
     )
 
 
 def test_creates_a_contact_when_none_exists() -> None:
-    transport = _FakeTransport([(200, {"values": []}), (200, {"values": [{"id": 42}]})])
+    transport = FakeCivicrmTransport([(200, {"values": []}), (200, {"values": [{"id": 42}]})])
     connector = _connector(transport)
     record = _golden("E1", {"first_name": "jane", "last_name": "doe", "dob": "1990-01-01"})
 
@@ -65,7 +53,9 @@ def test_creates_a_contact_when_none_exists() -> None:
 
 
 def test_updates_a_contact_when_it_already_exists() -> None:
-    transport = _FakeTransport([(200, {"values": [{"id": 7}]}), (200, {"values": [{"id": 7}]})])
+    transport = FakeCivicrmTransport(
+        [(200, {"values": [{"id": 7}]}), (200, {"values": [{"id": 7}]})]
+    )
     connector = _connector(transport)
     record = _golden("E1", {"first_name": "jane", "last_name": "doe", "email": "jane@x.org"})
 
@@ -81,7 +71,7 @@ def test_updates_a_contact_when_it_already_exists() -> None:
 
 
 def test_dry_run_makes_no_network_calls() -> None:
-    transport = _FakeTransport([])
+    transport = FakeCivicrmTransport([])
     connector = _connector(transport)
     record = _golden("E1", {"first_name": "jane", "last_name": "doe"})
 
@@ -92,7 +82,7 @@ def test_dry_run_makes_no_network_calls() -> None:
 
 
 def test_missing_api_key_raises_before_any_call() -> None:
-    transport = _FakeTransport([(200, {"values": []})])
+    transport = FakeCivicrmTransport([(200, {"values": []})])
     connector = CivicrmConnector(
         CivicrmConfig(endpoint="https://x.example/api4", api_key=""), transport=transport
     )
@@ -102,7 +92,7 @@ def test_missing_api_key_raises_before_any_call() -> None:
 
 
 def test_api_error_status_raises() -> None:
-    transport = _FakeTransport([(500, {"error_message": "boom"})])
+    transport = FakeCivicrmTransport([(500, {"error_message": "boom"})])
     connector = _connector(transport)
     record = _golden("E1", {"first_name": "jane", "last_name": "doe"})
     with pytest.raises(ConnectorError):
