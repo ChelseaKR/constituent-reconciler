@@ -234,7 +234,9 @@ The tool enforces consent and non-egress as tested invariants, but it does not s
 your retention schedule or write your consent language, and it does not determine
 which confidentiality rules apply to your program. Those are yours to settle with
 your own counsel and your funder's requirements. The retention and destruction model
-per policy pack is on the roadmap (R8) and is not a substitute for that review.
+per policy pack is defined in
+[DATA-FLOW-AND-RETENTION.md](./DATA-FLOW-AND-RETENTION.md) (R8), and it is not a
+substitute for that review.
 
 If a pilot surfaces a gap, a connector you need, a matching default that misfires
 on your data, or a confidentiality requirement the pack does not cover, open a
