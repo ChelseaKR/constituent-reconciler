@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from datetime import date
 
 from constituent_reconciler.models import GoldenRecord
 from constituent_reconciler.policy import DEFAULT_SUPPRESSION_THRESHOLD
@@ -79,8 +80,12 @@ def suppress_cells(
 
 
 def _consent_counts(records: Iterable[GoldenRecord]) -> dict[str, int]:
-    granted = sum(1 for r in records if r.consent)
-    withheld = sum(1 for r in records if not r.consent)
+    # Callers pass the already-gated exportable set, so this is normally all
+    # "granted"; it is computed from the lifecycle rather than assumed so the
+    # count stays honest if a caller ever passes an ungated set.
+    today = date.today()
+    granted = sum(1 for r in records if r.consent.is_active(as_of=today))
+    withheld = sum(1 for r in records if not r.consent.is_active(as_of=today))
     return {"granted": granted, "withheld": withheld}
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 from dataclasses import replace
+from datetime import date, timedelta
 from pathlib import Path
 
 from constituent_reconciler import pipeline
@@ -56,8 +57,11 @@ def test_dv_policy_pack_withholds_revoked_record() -> None:
     assert recipe.require_consent is True
     result = pipeline.run(recipe)
     _, withheld = partition_by_consent(result.golden, require_consent=recipe.require_consent)
-    withheld_members = {member for record in withheld for member in record.members}
+    withheld_members = {member for entry in withheld for member in entry.members}
     assert "N009" in withheld_members
+    by_members = {entry.members: entry for entry in withheld}
+    n009 = next(entry for members, entry in by_members.items() if "N009" in members)
+    assert n009.reason == "revoked"
 
 
 def test_apply_approved_review_pair_merges_cluster() -> None:
@@ -269,3 +273,57 @@ def test_export_via_civicrm_creates_and_logs_provenance(tmp_path: Path) -> None:
         assert ok
     finally:
         del os.environ["CIVICRM_API_KEY"]
+
+
+def _write_expiry_fixture(tmp_path: Path) -> Path:
+    """Two records: one consent expired yesterday, one still good until tomorrow."""
+
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    (tmp_path / "incoming.csv").write_text(
+        "id,first,last,dob,consent,expires\n"
+        f"X1,Alice,Expired,1980-01-01,granted,{yesterday}\n"
+        f"X2,Bob,Current,1981-02-02,granted,{tomorrow}\n",
+        encoding="utf-8",
+    )
+    recipe_path = tmp_path / "recipe.toml"
+    recipe_path.write_text(
+        "[input]\n"
+        'incoming = "incoming.csv"\n'
+        'id_column = "id"\n'
+        "\n"
+        "[mapping]\n"
+        'first_name = "first"\n'
+        'last_name = "last"\n'
+        'dob = "dob"\n'
+        "\n"
+        "[consent]\n"
+        'column = "consent"\n'
+        'expires = "expires"\n'
+        "require = true\n",
+        encoding="utf-8",
+    )
+    return recipe_path
+
+
+def test_expired_consent_is_withheld_end_to_end(tmp_path: Path) -> None:
+    """The merge-blocking invariant: an expired consent never reaches export.
+
+    A per-record expiry date read from the recipe's mapped column is checked
+    against today on every run; there is no default expiry window baked in
+    anywhere, only what the recipe explicitly maps.
+    """
+
+    recipe = load_recipe(_write_expiry_fixture(tmp_path))
+    result = pipeline.run(recipe)
+    summary = pipeline.export(result, recipe, out_dir=tmp_path / "out")
+
+    assert summary.withheld_path is not None
+    withheld_text = summary.withheld_path.read_text(encoding="utf-8")
+    assert "X1" in withheld_text
+    assert "expired" in withheld_text
+    assert "X2" not in withheld_text
+
+    resolved_text = (tmp_path / "out" / "resolved.csv").read_text(encoding="utf-8")
+    assert "X2" in resolved_text
+    assert "X1" not in resolved_text

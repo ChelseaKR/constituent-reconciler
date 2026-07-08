@@ -7,7 +7,7 @@ subtraction from a published total.
 
 from __future__ import annotations
 
-from constituent_reconciler.models import GoldenRecord
+from constituent_reconciler.models import Consent, GoldenRecord
 from constituent_reconciler.suppression import (
     SUPPRESSED,
     aggregate_summary,
@@ -21,7 +21,7 @@ def _golden(cluster_id: str, members: tuple[str, ...], consent: bool) -> GoldenR
         members=members,
         fields={},
         primary=members[0],
-        consent=consent,
+        consent=Consent(status="granted") if consent else Consent(),
     )
 
 

@@ -8,6 +8,7 @@ clusters without importing Splink or pandas.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from enum import StrEnum
 
 
@@ -64,10 +65,79 @@ CANONICAL_FIELDS: tuple[str, ...] = (
     "address",
 )
 
-# Consent values that permit a record to be exported. Anything else (missing,
-# "revoked", "expired", unknown) is treated as no-consent and blocks export when
-# the active policy requires consent. Fail-closed by construction.
-CONSENT_GRANTED: frozenset[str] = frozenset({"granted", "active", "yes", "true"})
+# Status tokens that read as an affirmative grant, absent any other signal.
+GRANTED_STATUSES: frozenset[str] = frozenset({"granted", "active", "yes", "true"})
+
+# Status tokens that read as an explicit revocation. Kept distinct from an
+# absent or unrecognized status so a withheld record's reason can say "revoked"
+# (someone said no) rather than "absent" (no one ever said yes) -- a reviewer
+# acts on those two differently.
+REVOKED_STATUSES: frozenset[str] = frozenset({"revoked", "withdrawn", "denied", "no", "false"})
+
+# The fail-closed withhold reasons ``Consent.reason`` can return. Anything not
+# ``None`` means the record does not clear the gate.
+WITHHOLD_REASONS: frozenset[str] = frozenset(
+    {"absent", "revoked", "future-dated", "expired", "out-of-scope"}
+)
+
+
+@dataclass(frozen=True)
+class Consent:
+    """Consent as a lifecycle: a status with a window and a scope, not a token.
+
+    ``status`` is the raw source token, stripped and lower-cased. ``granted_on``
+    and ``expires_on`` are optional dates read from the recipe's consent-date
+    and consent-expires columns; ``None`` means the recipe does not map that
+    column for this record, not that consent lasts forever by inference --
+    ``reason()`` only treats a missing ``expires_on`` as "no ceiling was
+    recorded", it never invents one. ``scope`` is the set of destination names
+    (connector names such as ``"csv"`` or ``"civicrm"``) this consent covers;
+    an empty scope covers every destination, which is the behavior for a
+    recipe that does not map a scope column.
+
+    There is no default expiry window anywhere in this class or its callers.
+    If a deployment wants a hard ceiling on how long consent lasts absent an
+    explicit per-record expiry date, that number is a counsel-gated policy
+    decision the recipe must state explicitly (a mapped expiry column); this
+    code will not guess it.
+    """
+
+    status: str = ""
+    granted_on: date | None = None
+    expires_on: date | None = None
+    scope: frozenset[str] = field(default_factory=frozenset)
+
+    def reason(self, *, as_of: date, destination: str | None = None) -> str | None:
+        """The fail-closed withhold reason, or ``None`` if consent is active.
+
+        Checked in order: an explicit revocation, an absent or unrecognized
+        status, a not-yet-effective grant date, an expired ceiling, then scope.
+        A status that is neither a recognized grant nor a recognized
+        revocation (a typo, an unmapped column, a blank cell) reads as
+        "absent" -- unrecognized is not evidence of consent.
+        """
+
+        status = self.status.strip().lower()
+        if status in REVOKED_STATUSES:
+            return "revoked"
+        if status not in GRANTED_STATUSES:
+            return "absent"
+        if self.granted_on is not None and self.granted_on > as_of:
+            return "future-dated"
+        if self.expires_on is not None and self.expires_on < as_of:
+            return "expired"
+        if destination is not None and self.scope and destination not in self.scope:
+            return "out-of-scope"
+        return None
+
+    def is_active(self, *, as_of: date, destination: str | None = None) -> bool:
+        return self.reason(as_of=as_of, destination=destination) is None
+
+    def label(self, *, as_of: date, destination: str | None = None) -> str:
+        """A short, informational label: ``"granted"`` or the withhold reason."""
+
+        reason = self.reason(as_of=as_of, destination=destination)
+        return "granted" if reason is None else reason
 
 
 class Band(StrEnum):
@@ -84,21 +154,31 @@ class Record:
 
     ``raw`` holds the source column values keyed by canonical field name (the
     recipe mapping is applied at read time). ``normalized`` is filled in by the
-    normalize step. ``consent_status`` is the raw consent token, lower-cased.
-    ``spans`` maps each canonical field name to where it was found in a source
-    document (a ``SourceSpan`` for PDFs, a ``TextSpan`` for text and email
-    bodies); empty for records read from structured CSV.
+    normalize step. ``consent`` is the record's consent lifecycle, built from
+    whichever consent columns the recipe maps; a recipe that maps none of them
+    leaves it at the default (absent). ``spans`` maps each canonical field name
+    to where it was found in a source document (a ``SourceSpan`` for PDFs, a
+    ``TextSpan`` for text and email bodies); empty for records read from
+    structured CSV.
     """
 
     unique_id: str
     source: str
     raw: dict[str, str]
     normalized: dict[str, str] = field(default_factory=dict)
-    consent_status: str = ""
+    consent: Consent = field(default_factory=Consent)
     spans: dict[str, SourceSpan | TextSpan] = field(default_factory=dict)
 
-    def has_consent(self) -> bool:
-        return self.consent_status.strip().lower() in CONSENT_GRANTED
+    def has_consent(self, *, as_of: date | None = None) -> bool:
+        """Whether this record's consent is currently active, unscoped.
+
+        Used to rank candidate survivors during golden-record selection, not to
+        gate export -- the export gate (``consent.partition_by_consent``) checks
+        the golden record's own ``Consent`` against the actual write
+        destination and a caller-supplied ``as_of`` for reproducible runs.
+        """
+
+        return self.consent.is_active(as_of=as_of if as_of is not None else date.today())
 
 
 @dataclass(frozen=True)
@@ -127,15 +207,18 @@ class GoldenRecord:
     """The single merged record a cluster resolves to.
 
     ``fields`` are the surviving canonical values, ``primary`` is the record id
-    chosen as the survivor, and ``consent`` is the export decision for the
-    merged record (fail-closed: granted only when the survivor carries consent).
+    chosen as the survivor, and ``consent`` is the survivor's ``Consent``
+    lifecycle, carried through unevaluated. The export gate
+    (``consent.partition_by_consent``) is what turns this into a granted or
+    withheld decision, because only it knows the actual write destination and
+    the run's ``as_of`` date; a golden record on its own does not decide.
     """
 
     cluster_id: str
     members: tuple[str, ...]
     fields: dict[str, str]
     primary: str
-    consent: bool
+    consent: Consent = field(default_factory=Consent)
 
 
 @dataclass(frozen=True)

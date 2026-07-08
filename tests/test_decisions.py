@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from datetime import date
+
 from constituent_reconciler.decisions import band_pairs, build_clusters, golden_records
-from constituent_reconciler.models import Band, Cluster, Record
+from constituent_reconciler.models import Band, Cluster, Consent, Record
 
 FIELDS = ("first_name", "last_name", "dob", "email", "phone")
 
@@ -37,7 +39,7 @@ def _record(uid: str, source: str, normalized: dict[str, str], consent: str) -> 
         source=source,
         raw={},
         normalized=normalized,
-        consent_status=consent,
+        consent=Consent(status=consent),
     )
 
 
@@ -68,4 +70,6 @@ def test_golden_prefers_existing_consented_survivor_and_fills_blanks() -> None:
     assert record.fields["dob"] == "1965-07-19"
     # Survivor's phone is blank, so it is filled from the other cluster member.
     assert record.fields["phone"] == "5305550143"
-    assert record.consent is True
+    # The golden record carries the survivor's Consent lifecycle unevaluated;
+    # it reads as active today because there is no expiry recorded.
+    assert record.consent.is_active(as_of=date.today())
