@@ -38,6 +38,29 @@ jobs:
           make eval-extraction
           git diff --exit-code eval/report.md eval/extraction-report.md
 
+  # Automated axe-core audit of the review queue's real rendered HTML
+  # (docs/decisions/0009-automated-axe-audit.md), separate from `verify` so a
+  # contributor without Node installed is not blocked from the Python checks.
+  # Covers the "axe clean" half of the accessibility row in the metrics
+  # ledger; the "screen-reader walkthrough" half is manual and tracked in
+  # docs/reviews/SCREEN-READER-WALKTHROUGH.md.
+  accessibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+      - name: Install (Python)
+        run: make install
+      - name: Install (Node, frozen lockfile)
+        run: npm ci
+      - name: axe audit of the rendered review queue
+        run: make axe
+
   # Dependency-vulnerability gate (SEC-11, SEC-13, CQ-11), separate from
   # `verify` so it is its own required status check and its own log/timeout.
   security:

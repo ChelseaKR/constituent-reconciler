@@ -113,10 +113,19 @@ The review queue is the human surface. As of v0.7 it is a local web UI
 (`reconcile review`) built to the WCAG 2.2 AA structural bar: a comparison table
 with scoped headers, status carried by text and a symbol rather than colour
 alone, decision controls that work with the keyboard and with no JavaScript, and
-no external asset fetch. The axe AUTO-GATE and the screen-reader walkthrough
-REVIEW-GATE are not yet run, and EN/ES parity for the UI copy is not yet done;
-both stay open before the 1.0 accessibility claim. TODO: run axe in CI, complete
-the screen-reader walkthrough, add the ES copy, and commit the ACR.
+no external asset fetch. The axe AUTO-GATE now runs (`accessibility` job in
+`.github/workflows/ci.yml`, an axe-core scan over jsdom of the review queue's
+real rendered HTML; docs/decisions/0009-automated-axe-audit.md), zero
+violations against the current markup as of 2026-07-07. Its one honest gap is
+`color-contrast`, which jsdom cannot evaluate (no canvas); every color pair in
+the stylesheet was checked by hand against the WCAG formula instead and clears
+the bar with margin (worst case 4.59:1 against a 3:1 non-text requirement). The
+screen-reader walkthrough REVIEW-GATE is not yet run — it needs a human
+tester with real assistive technology, not something a script can complete —
+and EN/ES parity for the UI copy is not yet done; both stay open before the
+1.0 accessibility claim. TODO: complete the screen-reader walkthrough
+(checklist at docs/reviews/SCREEN-READER-WALKTHROUGH.md), add the ES copy, and
+commit the ACR.
 
 ## Security
 
