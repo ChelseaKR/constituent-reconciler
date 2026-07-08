@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import csv
 import json
 from dataclasses import replace
 from pathlib import Path
 
 from constituent_reconciler import pipeline
-from constituent_reconciler.config import OutputConfig, load_recipe
+from constituent_reconciler.config import HouseholdConfig, OutputConfig, load_recipe
 from constituent_reconciler.consent import partition_by_consent
 from constituent_reconciler.evaluate import evaluate
+from constituent_reconciler.models import GoldenRecord
 from constituent_reconciler.provenance import verify_log
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "intake-demo"
@@ -81,6 +83,118 @@ def test_export_writes_csv_review_queue_and_provenance(tmp_path: Path) -> None:
     assert summary.provenance_path is not None
     ok, _ = verify_log(summary.provenance_path)
     assert ok
+
+
+def _household_golden(
+    cluster_id: str, *, first: str = "", last: str = "", address: str = ""
+) -> GoldenRecord:
+    fields: dict[str, str] = {}
+    if first:
+        fields["first_name"] = first
+    if last:
+        fields["last_name"] = last
+    if address:
+        fields["address"] = address
+    return GoldenRecord(
+        cluster_id=cluster_id,
+        members=(cluster_id,),
+        fields=fields,
+        primary=cluster_id,
+        consent=True,
+    )
+
+
+def test_household_suggestions_off_by_default(tmp_path: Path) -> None:
+    recipe = load_recipe(EXAMPLES / "recipe.toml")
+    assert recipe.household.enabled is False
+    result = pipeline.run(recipe)
+    summary = pipeline.export(result, recipe, out_dir=tmp_path)
+    assert summary.household_path is None
+    assert summary.household_suggestions == ()
+    assert not (tmp_path / "household_suggestions.csv").exists()
+
+
+def test_household_suggestions_written_when_enabled(tmp_path: Path) -> None:
+    # pipeline.run() executes against the recipe's real (address-less) fields;
+    # only the export-time recipe adds "address" and turns grouping on, so the
+    # matcher never has to score an unmapped field. The golden records fed to
+    # export are swapped in directly, the same pattern test_connectors_crm_csv
+    # uses to isolate the export step from ingestion and matching.
+    recipe = load_recipe(EXAMPLES / "recipe.toml")
+    result = pipeline.run(recipe)
+    export_recipe = replace(
+        recipe,
+        fields=(*recipe.fields, "address"),
+        household=HouseholdConfig(enabled=True),
+    )
+    synthetic_golden = (
+        _household_golden("E1", first="jane", last="reyes", address="123 N MAIN ST"),
+        _household_golden("E2", first="john", last="reyes", address="123 N MAIN ST"),
+        _household_golden("E3", first="wei", last="chen", address="9 OAK AVE"),
+    )
+    result = replace(result, golden=synthetic_golden)
+
+    summary = pipeline.export(result, export_recipe, out_dir=tmp_path)
+
+    assert summary.household_path is not None
+    assert summary.household_path.exists()
+    assert len(summary.household_suggestions) == 1
+    suggestion = summary.household_suggestions[0]
+    assert suggestion.members == ("E1", "E2")
+
+    rows = list(csv.DictReader(summary.household_path.open(encoding="utf-8")))
+    assert len(rows) == 1
+    assert rows[0]["household_id"] == "HH-E1"
+    assert rows[0]["members"] == "E1|E2"
+    assert rows[0]["confirmed"] == ""  # never auto-confirmed
+
+
+def test_household_confirmation_populates_crm_export_column(tmp_path: Path) -> None:
+    recipe = load_recipe(EXAMPLES / "recipe.toml")
+    result = pipeline.run(recipe)
+    export_recipe = replace(
+        recipe,
+        fields=(*recipe.fields, "address"),
+        household=HouseholdConfig(enabled=True),
+        output=OutputConfig(connector="civicrm_csv"),
+    )
+    synthetic_golden = (
+        _household_golden("E1", first="jane", last="reyes", address="123 N MAIN ST"),
+        _household_golden("E2", first="john", last="reyes", address="123 N MAIN ST"),
+    )
+    result = replace(result, golden=synthetic_golden)
+
+    summary = pipeline.export(
+        result, export_recipe, out_dir=tmp_path, confirmed_households=["HH-E1"]
+    )
+
+    rows = list(csv.DictReader((tmp_path / "civicrm_import.csv").open(encoding="utf-8")))
+    by_id = {row["external_identifier"]: row["household_external_id"] for row in rows}
+    assert by_id == {"E1": "HH-E1", "E2": "HH-E1"}
+    # The suggestion file also shows it as confirmed, for a reviewer re-opening it.
+    assert summary.household_path is not None
+    suggestion_rows = list(csv.DictReader(summary.household_path.open(encoding="utf-8")))
+    assert suggestion_rows[0]["confirmed"] == "yes"
+
+
+def test_household_grouping_never_runs_under_dv_unless_recipe_opts_in(tmp_path: Path) -> None:
+    # The invariant the ideation item calls "provably never runs unless
+    # explicitly enabled": loading the demo recipe under the dv override still
+    # leaves household grouping off, so export produces no suggestion file even
+    # though records here would otherwise agree on address and surname.
+    recipe = load_recipe(EXAMPLES / "recipe.toml", policy_pack="dv")
+    assert recipe.household.enabled is False
+    result = pipeline.run(recipe)
+    result = replace(
+        result,
+        golden=(
+            _household_golden("E1", first="jane", last="reyes", address="123 N MAIN ST"),
+            _household_golden("E2", first="john", last="reyes", address="123 N MAIN ST"),
+        ),
+    )
+    summary = pipeline.export(result, recipe, out_dir=tmp_path)
+    assert summary.household_path is None
+    assert summary.household_suggestions == ()
 
 
 class _RoutingTransport:

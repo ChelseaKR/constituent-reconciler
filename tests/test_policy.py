@@ -75,3 +75,46 @@ def test_recipe_may_turn_consent_on_under_default_pack() -> None:
     # cannot opt out of one the pack imposes.
     recipe = load_recipe(EXAMPLES / "recipe.toml")
     assert recipe.require_consent is False  # default demo does not require it
+
+
+def test_household_grouping_defaults_off() -> None:
+    # No [household] section in the demo recipe: the grouping step must not run.
+    recipe = load_recipe(EXAMPLES / "recipe.toml")
+    assert recipe.household.enabled is False
+
+
+def test_household_grouping_defaults_off_under_dv_too() -> None:
+    # The invariant the ideation item calls out by name: even under the dv
+    # pack, household inference never turns itself on. Only an explicit
+    # [household] enabled = true in the recipe can do that.
+    recipe = load_recipe(EXAMPLES / "recipe-dv.toml")
+    assert recipe.policy_pack == "dv"
+    assert recipe.household.enabled is False
+
+    overridden = load_recipe(EXAMPLES / "recipe.toml", policy_pack="dv")
+    assert overridden.household.enabled is False
+
+
+def test_household_grouping_can_be_explicitly_enabled(tmp_path: Path) -> None:
+    # A recipe that opts in explicitly turns the step on, including under dv:
+    # the pack does not force it off, it just never forces it on.
+    recipe_path = tmp_path / "recipe.toml"
+    recipe_path.write_text(
+        """
+        [input]
+        incoming = "incoming.csv"
+
+        [mapping]
+        first_name = "First Name"
+        last_name = "Last Name"
+
+        [household]
+        enabled = true
+        """,
+        encoding="utf-8",
+    )
+    recipe = load_recipe(recipe_path)
+    assert recipe.household.enabled is True
+
+    recipe_dv = load_recipe(recipe_path, policy_pack="dv")
+    assert recipe_dv.household.enabled is True

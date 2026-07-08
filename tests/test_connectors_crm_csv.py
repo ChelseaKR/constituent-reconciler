@@ -106,3 +106,39 @@ def test_dry_run_writes_no_file(tmp_path: Path) -> None:
 def test_crm_csv_targets_are_local() -> None:
     # Local files: the DV pack permits them while refusing the network push.
     assert CrmCsvConnector.is_local is True
+
+
+def test_household_column_absent_unless_set(tmp_path: Path) -> None:
+    # The most important default: a connector nobody calls set_household_column
+    # on writes exactly the file it always wrote, no extra column.
+    path = tmp_path / "civicrm_import.csv"
+    record = _golden("E1", {"first_name": "jane", "last_name": "doe"})
+    _civi(path).write_all([record], FIELDS, dry_run=False)
+    header = path.read_text(encoding="utf-8").splitlines()[0].split(",")
+    assert "household_external_id" not in header
+
+
+def test_household_column_carries_confirmed_id_only(tmp_path: Path) -> None:
+    path = tmp_path / "civicrm_import.csv"
+    e1 = _golden("E1", {"first_name": "jane", "last_name": "reyes"})
+    e2 = _golden("E2", {"first_name": "john", "last_name": "reyes"})
+    e3 = _golden("E3", {"first_name": "wei", "last_name": "chen"})
+    connector = _civi(path)
+    # E1 and E2 are a confirmed household; E3 was never in a confirmed group.
+    connector.set_household_column({"E1": "HH-E1", "E2": "HH-E1"})
+    connector.write_all([e1, e2, e3], FIELDS, dry_run=False)
+
+    rows = {row["external_identifier"]: row for row in csv.DictReader(path.open(encoding="utf-8"))}
+    assert rows["E1"]["household_external_id"] == "HH-E1"
+    assert rows["E2"]["household_external_id"] == "HH-E1"
+    assert rows["E3"]["household_external_id"] == ""
+
+
+def test_household_column_name_is_configurable(tmp_path: Path) -> None:
+    path = tmp_path / "salesforce_import.csv"
+    record = _golden("E1", {"first_name": "jane", "last_name": "reyes"})
+    connector = _sf(path)
+    connector.set_household_column({"E1": "HH-E1"}, column="Household_External_Id__c")
+    connector.write_all([record], FIELDS, dry_run=False)
+    rows = list(csv.DictReader(path.open(encoding="utf-8")))
+    assert rows[0]["Household_External_Id__c"] == "HH-E1"
