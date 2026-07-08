@@ -43,13 +43,26 @@ class ExtractConfig:
         empty record.
       - ``"bedrock"``: route low-confidence pages to Claude on Bedrock (cloud
         call; forbidden under DV and HIPAA packs regardless of this setting).
+      - ``"local"``: route low-confidence pages to a model server on this
+        machine, for example Ollama (no network egress). Under DV and HIPAA
+        packs this stays off unless the pack sets ``allow_local_seam`` or the
+        recipe sets ``local_model_override``; see
+        docs/decisions/0009-local-model-seam.md.
 
     ``confidence_threshold`` is the page-level score below which a page is
-    considered low-confidence and offered to the cloud seam if one is active.
+    considered low-confidence and offered to the seam if one is active.
+
+    ``local_model_override`` is the explicit, deliberate opt-in a deployer
+    sets after their own counsel has cleared model-assisted extraction under
+    the active policy pack; it is never implied by ``backend = "local"``
+    alone. ``local_model_id`` names the local model to request (an Ollama
+    model tag); it has no effect unless ``backend`` is ``"local"``.
     """
 
     backend: str = "none"
     confidence_threshold: float = 0.5
+    local_model_override: bool = False
+    local_model_id: str = "llama3.2"
 
 
 @dataclass(frozen=True)
@@ -182,6 +195,8 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
     extract = ExtractConfig(
         backend=str(extract_section.get("backend", "none")),
         confidence_threshold=float(extract_section.get("confidence_threshold", 0.5)),
+        local_model_override=bool(extract_section.get("local_model_override", False)),
+        local_model_id=str(extract_section.get("local_model_id", "llama3.2")),
     )
 
     # Off by default under every policy pack; a recipe must opt in explicitly.

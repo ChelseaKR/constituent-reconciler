@@ -18,7 +18,7 @@ from constituent_reconciler.extract.base import (
 )
 from constituent_reconciler.extract.pdf import PdfplumberExtractor
 from constituent_reconciler.extract.sandbox import SandboxedExtractor
-from constituent_reconciler.extract.seam import BedrockSeam, NoOpSeam, make_seam
+from constituent_reconciler.extract.seam import BedrockSeam, LocalSeam, NoOpSeam, make_seam
 from constituent_reconciler.extract.text import TextExtractor, extract_eml, extract_text_file
 
 __all__ = [
@@ -27,6 +27,7 @@ __all__ = [
     "ExtractedField",
     "ExtractionResult",
     "Extractor",
+    "LocalSeam",
     "NoOpSeam",
     "PageResult",
     "PdfplumberExtractor",
