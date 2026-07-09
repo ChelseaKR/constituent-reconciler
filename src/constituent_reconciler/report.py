@@ -45,9 +45,7 @@ def _worst_field(quality: SourceQuality) -> str:
     """
 
     published = {
-        name: value
-        for name, value in quality.completeness.items()
-        if isinstance(value, float)
+        name: value for name, value in quality.completeness.items() if isinstance(value, float)
     }
     if not quality.completeness:
         return "-"

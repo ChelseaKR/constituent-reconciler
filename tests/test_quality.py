@@ -46,16 +46,22 @@ def _result(records: list[Record], clusters: tuple[Cluster, ...] = ()) -> RunRes
 
 def test_completeness_is_fraction_of_nonempty_normalized_values() -> None:
     records = [
-        _record("A1", "intake", {"first_name": "Ana", "phone": "555-000-1111"},
-                {"first_name": "ana", "phone": "5550001111"}),
-        _record("A2", "intake", {"first_name": "Bo", "phone": ""},
-                {"first_name": "bo", "phone": ""}),
-        _record("B1", "legacy", {"first_name": "Cy", "phone": ""},
-                {"first_name": "cy", "phone": ""}),
-        _record("B2", "legacy", {"first_name": "Di", "phone": ""},
-                {"first_name": "di", "phone": ""}),
-        _record("B3", "legacy", {"first_name": "", "phone": ""},
-                {"first_name": "", "phone": ""}),
+        _record(
+            "A1",
+            "intake",
+            {"first_name": "Ana", "phone": "555-000-1111"},
+            {"first_name": "ana", "phone": "5550001111"},
+        ),
+        _record(
+            "A2", "intake", {"first_name": "Bo", "phone": ""}, {"first_name": "bo", "phone": ""}
+        ),
+        _record(
+            "B1", "legacy", {"first_name": "Cy", "phone": ""}, {"first_name": "cy", "phone": ""}
+        ),
+        _record(
+            "B2", "legacy", {"first_name": "Di", "phone": ""}, {"first_name": "di", "phone": ""}
+        ),
+        _record("B3", "legacy", {"first_name": "", "phone": ""}, {"first_name": "", "phone": ""}),
     ]
     intake, legacy = source_quality(_result(records))
     assert intake.source == "intake"
@@ -70,16 +76,27 @@ def test_completeness_is_fraction_of_nonempty_normalized_values() -> None:
 def test_normalization_failures_count_present_but_unparseable_values() -> None:
     records = [
         # Raw dob present, normalized empty: an unparseable date, one failure.
-        _record("A1", "intake", {"first_name": "Ana", "dob": "not a date"},
-                {"first_name": "ana", "dob": ""}),
+        _record(
+            "A1",
+            "intake",
+            {"first_name": "Ana", "dob": "not a date"},
+            {"first_name": "ana", "dob": ""},
+        ),
         # Raw dob empty: missing, not a failure.
-        _record("A2", "intake", {"first_name": "Bo", "dob": ""},
-                {"first_name": "bo", "dob": ""}),
+        _record("A2", "intake", {"first_name": "Bo", "dob": ""}, {"first_name": "bo", "dob": ""}),
         # Raw dob present and parsed: not a failure.
-        _record("A3", "intake", {"first_name": "Cy", "dob": "1980-01-02"},
-                {"first_name": "cy", "dob": "1980-01-02"}),
-        _record("A4", "intake", {"first_name": "Di", "dob": "1990-03-04"},
-                {"first_name": "di", "dob": "1990-03-04"}),
+        _record(
+            "A3",
+            "intake",
+            {"first_name": "Cy", "dob": "1980-01-02"},
+            {"first_name": "cy", "dob": "1980-01-02"},
+        ),
+        _record(
+            "A4",
+            "intake",
+            {"first_name": "Di", "dob": "1990-03-04"},
+            {"first_name": "di", "dob": "1990-03-04"},
+        ),
     ]
     (intake,) = source_quality(_result(records))
     assert intake.normalization_failures == {"first_name": 0, "dob": 1}
@@ -119,8 +136,9 @@ def test_duplicate_density_counts_records_in_multi_member_clusters() -> None:
 
 def test_explicit_fields_limit_what_is_measured() -> None:
     records = [
-        _record("A1", "intake", {"first_name": "Ana", "phone": "x"},
-                {"first_name": "ana", "phone": ""}),
+        _record(
+            "A1", "intake", {"first_name": "Ana", "phone": "x"}, {"first_name": "ana", "phone": ""}
+        ),
     ]
     (intake,) = source_quality(_result(records), fields=("first_name",))
     assert set(intake.completeness) == {"first_name"}
@@ -137,9 +155,7 @@ def _bulk(source: str, prefix: str, n: int, **overrides: str) -> list[Record]:
     for i in range(n):
         raw = {"first_name": f"Name{i}", "phone": overrides.get("phone", f"55500{i:05d}")}
         normalized = {"first_name": f"name{i}", "phone": raw["phone"][-10:]}
-        records.append(
-            _record(f"{prefix}{i:03d}", source, raw, normalized, consent="granted")
-        )
+        records.append(_record(f"{prefix}{i:03d}", source, raw, normalized, consent="granted"))
     return records
 
 
@@ -147,11 +163,7 @@ def test_small_source_is_suppressed_and_leaks_no_raw_count() -> None:
     # Three sources so exactly which rows survive is unambiguous: the two small
     # sources are primary-suppressed and the large one needs no complementary
     # suppression.
-    records = (
-        _bulk("tiny", "T", 2)
-        + _bulk("small", "S", 3)
-        + _bulk("large", "L", 20)
-    )
+    records = _bulk("tiny", "T", 2) + _bulk("small", "S", 3) + _bulk("large", "L", 20)
     report = source_quality(_result(records), suppress=True, threshold=11)
     by_source = {q.source: q for q in report}
 
@@ -186,8 +198,13 @@ def test_within_source_small_cells_are_suppressed() -> None:
     # completeness fraction (which would reveal it) is suppressed. Consent is
     # 20 of 20 (complement a true zero) and survives.
     records = _bulk("large", "L", 15) + [
-        _record(f"L9{i}", "large", {"first_name": f"Zed{i}", "phone": ""},
-                {"first_name": f"zed{i}", "phone": ""}, consent="granted")
+        _record(
+            f"L9{i}",
+            "large",
+            {"first_name": f"Zed{i}", "phone": ""},
+            {"first_name": f"zed{i}", "phone": ""},
+            consent="granted",
+        )
         for i in range(5)
     ]
     (large,) = source_quality(_result(records), suppress=True, threshold=11)

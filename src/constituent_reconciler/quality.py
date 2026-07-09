@@ -146,9 +146,7 @@ def source_quality(
             filled = sum(1 for r in group if r.normalized.get(name, ""))
             _, completeness[name] = _cell(filled, total, suppress=suppress, threshold=threshold)
             failed = sum(
-                1
-                for r in group
-                if r.raw.get(name, "").strip() and not r.normalized.get(name, "")
+                1 for r in group if r.raw.get(name, "").strip() and not r.normalized.get(name, "")
             )
             failures[name], failure_rates[name] = _cell(
                 failed, total, suppress=suppress, threshold=threshold
