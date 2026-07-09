@@ -10,7 +10,7 @@ from constituent_reconciler import pipeline
 from constituent_reconciler.config import HouseholdConfig, OutputConfig, load_recipe
 from constituent_reconciler.consent import partition_by_consent
 from constituent_reconciler.evaluate import evaluate
-from constituent_reconciler.models import GoldenRecord
+from constituent_reconciler.models import Consent, GoldenRecord
 from constituent_reconciler.provenance import verify_log
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "intake-demo"
@@ -104,7 +104,7 @@ def _household_golden(
         members=(cluster_id,),
         fields=fields,
         primary=cluster_id,
-        consent=True,
+        consent=Consent(status="granted"),
     )
 
 

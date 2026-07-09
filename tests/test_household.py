@@ -8,7 +8,7 @@ same pattern test_connectors_crm_csv.py uses for the CRM export.
 from __future__ import annotations
 
 from constituent_reconciler.household import confirmed_member_map, suggest_households
-from constituent_reconciler.models import GoldenRecord
+from constituent_reconciler.models import Consent, GoldenRecord
 
 
 def _golden(cluster_id: str, *, last_name: str = "", address: str = "") -> GoldenRecord:
@@ -22,7 +22,7 @@ def _golden(cluster_id: str, *, last_name: str = "", address: str = "") -> Golde
         members=(cluster_id,),
         fields=fields,
         primary=cluster_id,
-        consent=True,
+        consent=Consent(status="granted"),
     )
 
 

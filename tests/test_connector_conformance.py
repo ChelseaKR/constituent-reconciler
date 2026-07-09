@@ -34,7 +34,7 @@ from constituent_reconciler.connectors import (
     Connector,
     get_factory,
 )
-from constituent_reconciler.models import GoldenRecord
+from constituent_reconciler.models import Consent, GoldenRecord
 from tests.conftest import FakeCivicrmTransport, FakeSalesforceTransport
 
 FIELDS = ("first_name", "last_name", "dob", "email", "phone")
@@ -52,14 +52,14 @@ RECORDS = (
         members=("E1", "N1"),
         fields={"first_name": "jane", "last_name": "doe", "email": "jane@example.org"},
         primary="E1",
-        consent=True,
+        consent=Consent(status="granted"),
     ),
     GoldenRecord(
         cluster_id="C002",
         members=("N2",),
         fields={"first_name": "amir", "last_name": "khan", "dob": "1980-02-03"},
         primary="N2",
-        consent=True,
+        consent=Consent(status="granted"),
     ),
 )
 
