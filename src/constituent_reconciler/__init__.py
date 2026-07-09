@@ -23,6 +23,7 @@ from constituent_reconciler.models import (
     Record,
     RunResult,
     SourceSpan,
+    TextSpan,
 )
 
 __all__ = [
@@ -34,4 +35,5 @@ __all__ = [
     "Record",
     "RunResult",
     "SourceSpan",
+    "TextSpan",
 ]
