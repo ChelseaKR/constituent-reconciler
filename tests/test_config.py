@@ -13,8 +13,7 @@ from pathlib import Path
 from constituent_reconciler.config import load_recipe
 
 MINIMAL_INPUT = (
-    '[input]\nincoming = "incoming.csv"\n\n'
-    '[mapping]\nfirst_name = "First"\nlast_name = "Last"\n'
+    '[input]\nincoming = "incoming.csv"\n\n[mapping]\nfirst_name = "First"\nlast_name = "Last"\n'
 )
 
 

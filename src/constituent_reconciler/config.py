@@ -207,9 +207,7 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
         existing=existing,
         id_column=(str(input_section["id_column"]) if "id_column" in input_section else None),
         consent_column=(str(consent_section["column"]) if "column" in consent_section else None),
-        consent_date_column=(
-            str(consent_section["date"]) if "date" in consent_section else None
-        ),
+        consent_date_column=(str(consent_section["date"]) if "date" in consent_section else None),
         consent_expires_column=(
             str(consent_section["expires"]) if "expires" in consent_section else None
         ),
