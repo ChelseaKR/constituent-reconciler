@@ -127,9 +127,7 @@ def test_extract_eml_round_trips_plain_body(tmp_path: Path) -> None:
 
 def test_extract_eml_prefers_plain_part_in_multipart_alternative(tmp_path: Path) -> None:
     msg = _intake_eml()
-    msg.add_alternative(
-        "<html><body><p>First Name: Zzz</p></body></html>", subtype="html"
-    )
+    msg.add_alternative("<html><body><p>First Name: Zzz</p></body></html>", subtype="html")
     path = _write_eml(tmp_path / "multipart.eml", msg)
 
     result = extract_eml(path)
@@ -211,9 +209,7 @@ def test_ingest_source_routes_txt_and_eml_in_directory(tmp_path: Path) -> None:
     folder = tmp_path / "inbox"
     folder.mkdir()
     _write_eml(folder / "a-message.eml", _intake_eml())
-    (folder / "b-note.txt").write_text(
-        "First Name: Grace\nLast Name: Hopper\n", encoding="utf-8"
-    )
+    (folder / "b-note.txt").write_text("First Name: Grace\nLast Name: Hopper\n", encoding="utf-8")
 
     records = _ingest_source(folder, "incoming", recipe=_demo_recipe(), id_prefix="N")
     assert [r.raw.get("first_name") for r in records] == ["Ada", "Grace"]
@@ -234,9 +230,7 @@ def test_ingest_source_skips_text_files_when_backend_is_none(tmp_path: Path) -> 
     (folder / "note.txt").write_text(_BODY, encoding="utf-8")
     _write_eml(folder / "message.eml", _intake_eml())
 
-    records = _ingest_source(
-        folder, "incoming", recipe=_demo_recipe(backend="none"), id_prefix="N"
-    )
+    records = _ingest_source(folder, "incoming", recipe=_demo_recipe(backend="none"), id_prefix="N")
     assert records == []
 
 
