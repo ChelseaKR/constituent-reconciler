@@ -186,8 +186,7 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
     fill_policy = str(fill_value) if fill_value is not None else DEFAULT_FILL_POLICY
     if fill_policy not in FILL_POLICIES:
         raise ValueError(
-            f"recipe [policy] fill must be one of {', '.join(FILL_POLICIES)}; "
-            f"got {fill_policy!r}"
+            f"recipe [policy] fill must be one of {', '.join(FILL_POLICIES)}; got {fill_policy!r}"
         )
     # A recipe may turn consent enforcement on explicitly even under a permissive
     # pack; it may not turn off a requirement the pack imposes (fail-closed).

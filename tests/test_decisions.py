@@ -99,15 +99,25 @@ def test_field_sources_name_members_that_carry_the_merged_value() -> None:
         "N1": _record(
             "N1",
             "incoming",
-            {"first_name": "ana", "last_name": "", "dob": "1980-02-02",
-             "email": "ana@example.org", "phone": ""},
+            {
+                "first_name": "ana",
+                "last_name": "",
+                "dob": "1980-02-02",
+                "email": "ana@example.org",
+                "phone": "",
+            },
             "",
         ),
         "N2": _record(
             "N2",
             "incoming",
-            {"first_name": "", "last_name": "silva", "dob": "1980-02-02",
-             "email": "", "phone": "5305550100"},
+            {
+                "first_name": "",
+                "last_name": "silva",
+                "dob": "1980-02-02",
+                "email": "",
+                "phone": "5305550100",
+            },
             "",
         ),
         "N9": _record(
