@@ -8,10 +8,14 @@ of the same address stop being a mismatch ("123 North Main Street" and
 address exists or is deliverable. The README states this plainly under non-goals.
 
 The abbreviation tables follow USPS Publication 28 (Postal Addressing Standards),
-Appendix C. The standardization is position-insensitive token mapping: a real
-CASS engine is position-aware (a leading versus trailing directional, "ST" as
-Street suffix versus "Saint" prefix). The simplification is documented and is
-acceptable for a matching key; it is not acceptable to call it certified.
+Appendix C. The standardization is position-aware: a directional abbreviates only
+directly after the leading house number or at the end of the street portion, a
+street suffix abbreviates only in the suffix position (so "ST" leading a street
+name stays "Saint" and is never rewritten), and a unit designator maps only when
+a unit value follows it. Words that merely resemble a suffix or directional
+elsewhere in the street name are left alone. This retires the earlier
+position-insensitive simplification; it still does not make the ruleset
+USPS-CASS-certified, and it does not validate that an address exists.
 
 An optional libpostal backend is available for callers who have the libpostal C
 library and the ``postal`` Python package installed. It is never required; the
@@ -111,24 +115,58 @@ _PUNCT = re.compile(r"[^\w#\s]", re.UNICODE)
 _WHITESPACE = re.compile(r"\s+")
 
 
-def _standardize_token(token: str) -> str:
-    """Map one upper-cased token through the abbreviation tables, in order."""
+def _is_house_number(token: str) -> bool:
+    """A leading token carrying a digit reads as a house number ("123", "123B")."""
 
-    if token in _DIRECTIONALS:
-        return _DIRECTIONALS[token]
-    if token in _STREET_SUFFIXES:
-        return _STREET_SUFFIXES[token]
-    if token in _UNIT_DESIGNATORS:
-        return _UNIT_DESIGNATORS[token]
-    return token
+    return any(ch.isdigit() for ch in token)
+
+
+def _is_unit_value(token: str) -> bool:
+    """A token that can follow a unit designator as its value: "#", "4", "4B", "B".
+
+    A multi-letter word without a digit ("HILL") is not a unit value, which is
+    what keeps a designator word inside a street name from being rewritten.
+    """
+
+    return token == "#" or len(token) == 1 or any(ch.isdigit() for ch in token)  # noqa: S105
+
+
+def _find_unit_start(tokens: list[str], start: int) -> int:
+    """Index where the secondary-unit phrase begins, or ``len(tokens)`` if none.
+
+    A unit phrase starts at a bare ``#`` or at a unit designator that is
+    followed by a unit value ("APT 4", "SUITE 200", "APT # 4").
+    """
+
+    for i in range(start, len(tokens)):
+        if tokens[i] == "#":
+            return i
+        if tokens[i] in _UNIT_DESIGNATORS and i + 1 < len(tokens) and _is_unit_value(tokens[i + 1]):
+            return i
+    return len(tokens)
 
 
 def normalize_address_deterministic(value: str) -> str:
     """Standardize an address with the vendored ruleset. Always deterministic.
 
-    Upper-cases, drops punctuation other than a unit pound sign, and maps each
-    token through the USPS-style abbreviation tables. An empty or blank input
-    returns ``""`` so the matcher treats it as no evidence, not a mismatch.
+    Upper-cases, drops punctuation other than a unit pound sign, and maps
+    tokens through the USPS-style abbreviation tables with position rules:
+
+    - A directional abbreviates directly after the leading house number
+      ("123 NORTH MAIN ST" -> "123 N MAIN ST") or at the end of the street
+      portion ("123 MAIN ST NORTH" -> "123 MAIN ST N"). A directional word in
+      the interior of a street name is left alone.
+    - A street suffix abbreviates only in the suffix position: the last token
+      of the street portion, allowing for a trailing directional or a unit
+      phrase after it. "ST" leading a street name ("123 ST CHARLES AVE") is
+      Saint, not Street, and stays as written; a suffix word that is itself
+      the whole street name ("123 AVENUE B") also stays.
+    - A unit designator maps only when a unit value follows it, so a
+      designator word inside a street name is untouched.
+
+    Every mapping replaces one token with one token, so the pass is idempotent.
+    An empty or blank input returns ``""`` so the matcher treats it as no
+    evidence, not a mismatch.
     """
 
     text = value.strip().upper()
@@ -138,7 +176,32 @@ def normalize_address_deterministic(value: str) -> str:
     text = _WHITESPACE.sub(" ", text).strip()
     if not text:
         return ""
-    return " ".join(_standardize_token(token) for token in text.split())
+
+    tokens = text.split()
+    out = list(tokens)
+
+    start = 1 if _is_house_number(tokens[0]) else 0
+    unit_start = _find_unit_start(tokens, start)
+
+    # Unit designators, wherever they sit, map only when a unit value follows.
+    for i in range(len(tokens) - 1):
+        if tokens[i] in _UNIT_DESIGNATORS and _is_unit_value(tokens[i + 1]):
+            out[i] = _UNIT_DESIGNATORS[tokens[i]]
+
+    # The street portion runs from just after the house number to just before
+    # the unit phrase. Directionals and suffixes are positional within it.
+    if unit_start > start:
+        last = unit_start - 1
+        trailing_directional = tokens[last] in _DIRECTIONALS
+        if trailing_directional:
+            out[last] = _DIRECTIONALS[tokens[last]]
+        if start == 1 and tokens[start] in _DIRECTIONALS:
+            out[start] = _DIRECTIONALS[tokens[start]]
+        suffix_idx = last - 1 if trailing_directional else last
+        if suffix_idx > start and tokens[suffix_idx] in _STREET_SUFFIXES:
+            out[suffix_idx] = _STREET_SUFFIXES[tokens[suffix_idx]]
+
+    return " ".join(out)
 
 
 def normalize_address_libpostal(value: str) -> str:

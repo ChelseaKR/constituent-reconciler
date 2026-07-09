@@ -29,11 +29,19 @@ reduce to "123 N MAIN ST". The standardization is idempotent, which a test
 asserts.
 
 It is labeled, in the code and the docs, as **CASS-style and not USPS-certified**.
-The mapping is also position-insensitive (a real CASS engine distinguishes a
-leading directional from a trailing one, and "ST" as Street from "Saint"), which
-is a documented simplification acceptable for a matching key and not acceptable
-to call certification. Overclaiming here was called out in the research as the
-fastest way to lose credibility, so the honesty is deliberate.
+As shipped in v0.4 the mapping was also position-insensitive (a real CASS engine
+distinguishes a leading directional from a trailing one, and "ST" as Street from
+"Saint"), which was a documented simplification acceptable for a matching key and
+not acceptable to call certification. Overclaiming here was called out in the
+research as the fastest way to lose credibility, so the honesty is deliberate.
+
+*Amended 2026-07-02 (E6):* the position-insensitive simplification is retired.
+The pass is now position-aware: a directional abbreviates directly after the
+leading house number or at the end of the street portion, a street suffix
+abbreviates only in the suffix position (leading "ST" stays Saint, "123 AVENUE B"
+stays a street named Avenue), and a unit designator maps only when a unit value
+follows it. The ruleset is still not USPS-certified and still does not validate
+deliverability; that label does not change.
 
 ### libpostal is an optional backend, never a requirement
 
@@ -74,6 +82,9 @@ perturbing the tuned demo while still proving it works.
   it also now preserves `Record.spans`, which it had been dropping (a latent v0.3
   bug surfaced while wiring this through).
 - libpostal is documented as an optional backend; the default install does not
-  pull it in, and CI runs the deterministic path only.
+  pull it in. Since E6 (2026-07-02), a non-blocking CI job builds the pinned
+  libpostal release from source on main pushes and a weekly schedule and runs
+  the real-library tests; the blocking verify job still runs the deterministic
+  path only.
 - The abbreviation tables are a subset of USPS Publication 28; extending them is
   additive and does not change existing standardized outputs.

@@ -240,11 +240,17 @@ address    = "street"
 address_backend = "deterministic"   # or "libpostal" (optional, see below)
 ```
 
-See `examples/address-demo/` for a runnable demo. The standardizer is
-**CASS-style and not USPS-certified** — real certification requires licensed USPS
-data. For heavier parsing, set `address_backend = "libpostal"`, which requires
+See `examples/address-demo/` for a runnable demo. The ruleset is position-aware:
+"ST" at the start of a street name stays Saint ("123 St Charles Street" becomes
+"123 ST CHARLES ST"), a street named for a suffix word is left alone
+("123 Avenue B" stays as written), and "Apartment" abbreviates only when a unit
+number follows it. The standardizer is **CASS-style and not USPS-certified** —
+real certification requires licensed USPS data, and no deliverability check is
+made. For heavier parsing, set `address_backend = "libpostal"`, which requires
 the libpostal C library and the `postal` Python package; without them, selecting
 that backend fails with a clear message rather than silently changing results.
+A scheduled, non-blocking CI job builds a pinned libpostal release from source
+and runs the backend's tests against the real library.
 
 ### Writing back to a case system
 

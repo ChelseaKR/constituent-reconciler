@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Weekly run keeps the optional libpostal job exercised even when the repo
+  # is quiet, so a bit-rotted build is noticed before someone needs it.
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
 
 # Least-privilege default token; jobs widen only what they need.
 permissions:
@@ -156,3 +161,49 @@ jobs:
         with:
           name: offline-bundle
           path: dist/bundle
+
+  # Exercises the optional libpostal backend against the real C library. The
+  # deterministic backend stays the default and the blocking gate; this job is
+  # non-blocking and does not run on pull requests because the source build and
+  # trained-model data download are too heavy for the merge path.
+  libpostal:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    continue-on-error: true
+    env:
+      LIBPOSTAL_COMMIT: ffafa3fcd687631955453df70906c53d5677ce9a # v1.1.4
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
+      - name: Restore libpostal build and data
+        id: cache-libpostal
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/libpostal
+            ~/libpostal-data
+          key: libpostal-${{ runner.os }}-${{ env.LIBPOSTAL_COMMIT }}
+      - name: Build libpostal from source
+        if: steps.cache-libpostal.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl autoconf automake libtool pkg-config
+          git clone https://github.com/openvenues/libpostal.git "$HOME/libpostal"
+          git -C "$HOME/libpostal" checkout "$LIBPOSTAL_COMMIT"
+          cd "$HOME/libpostal"
+          ./bootstrap.sh
+          ./configure --datadir="$HOME/libpostal-data"
+          make -j"$(nproc)"
+      - name: Install libpostal
+        run: |
+          cd "$HOME/libpostal"
+          sudo make install
+          sudo ldconfig
+      - name: Install project and postal binding
+        run: |
+          make install
+          uv pip install --python .venv/bin/python postal
+      - name: Run libpostal-path tests
+        run: .venv/bin/python -m pytest -k libpostal
