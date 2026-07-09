@@ -8,15 +8,27 @@ and a normal-approximation interval would understate the uncertainty.
 
 Ground truth is given as clusters of record ids. All within-cluster pairs are the
 true duplicates; everything else is a true non-duplicate.
+
+Extraction is scored separately by ``extraction_metrics``: field-level precision
+and recall of the PDF extractor against a hand-labeled fixture set, compared on
+normalized values so that formatting differences do not count as errors.
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
+from collections import Counter
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
+from constituent_reconciler.extract.base import ExtractedField
 from constituent_reconciler.models import Band, Pair
+from constituent_reconciler.normalize import (
+    normalize_dob,
+    normalize_email,
+    normalize_name,
+    normalize_phone,
+)
 
 
 def wilson_interval(successes: int, trials: int, z: float = 1.96) -> tuple[float, float]:
@@ -146,4 +158,140 @@ def evaluate(
         precision_coverage=(caught_cov / len(coverage)) if coverage else 1.0,
         recall_coverage=(caught_cov / len(truth)) if truth else 1.0,
         blocking_misses=len(truth - candidate),
+    )
+
+
+# Canonical single-argument normalizers for the extraction comparison, keyed by
+# canonical field name. These are the same normalizers the matching pipeline
+# applies, so the eval judges the extractor on the value the matcher would see,
+# not on incidental formatting.
+_EXTRACTION_NORMALIZERS: dict[str, Callable[[str], str]] = {
+    "first_name": normalize_name,
+    "last_name": normalize_name,
+    "dob": normalize_dob,
+    "email": normalize_email,
+    "phone": normalize_phone,
+}
+
+
+def normalize_extracted_value(field_name: str, value: str) -> str:
+    """Canonical comparison form of an extracted or labeled field value.
+
+    Known fields go through the pipeline's own normalizer, so ``(415) 555-0100``
+    and ``4155550100`` compare equal for ``phone`` and ``03/09/1988`` equals
+    ``1988-03-09`` for ``dob``. Unknown fields, and values the canonical
+    normalizer cannot parse (it returns the empty string), fall back to a
+    whitespace-collapsed casefold of the raw value, so two identical raw
+    strings still compare equal instead of both collapsing to ``""``.
+    """
+
+    normalizer = _EXTRACTION_NORMALIZERS.get(field_name)
+    if normalizer is not None:
+        normalized = normalizer(value)
+        if normalized:
+            return normalized
+    return " ".join(value.split()).casefold()
+
+
+@dataclass(frozen=True)
+class FieldScore:
+    """Per-field extraction counts, aggregated across documents."""
+
+    tp: int
+    fp: int
+    fn: int
+
+    @property
+    def precision(self) -> float:
+        denom = self.tp + self.fp
+        return self.tp / denom if denom else 1.0
+
+    @property
+    def recall(self) -> float:
+        denom = self.tp + self.fn
+        return self.tp / denom if denom else 1.0
+
+
+@dataclass(frozen=True)
+class ExtractionReport:
+    """Field-level extraction precision and recall against labeled truth."""
+
+    n_docs: int
+    n_truth_fields: int
+    n_predicted_fields: int
+
+    tp: int
+    fp: int
+    fn: int
+
+    precision: float
+    recall: float
+    precision_ci: tuple[float, float]
+    recall_ci: tuple[float, float]
+
+    per_field: Mapping[str, FieldScore]
+
+
+def extraction_metrics(
+    predicted: Mapping[str, Sequence[ExtractedField]],
+    truth: Mapping[str, Sequence[Mapping[str, str]]],
+) -> ExtractionReport:
+    """Score extracted fields against hand-labeled ground truth, per document.
+
+    ``predicted`` maps a document name to the fields the extractor produced for
+    it; ``truth`` maps the same names to labels in the ``labels.json`` shape,
+    ``[{"field_name": ..., "value": ...}, ...]``.
+
+    Within a document, a prediction is a true positive when its ``(field_name,
+    normalized value)`` matches a not-yet-claimed truth label; each label can be
+    claimed once, so a duplicated prediction counts once as a true positive and
+    once as a false positive. Unmatched predictions are false positives and
+    unmatched labels are false negatives. Documents present on only one side
+    still count: predictions without labels are all false positives, labels
+    without predictions are all false negatives. Precision and recall follow
+    the convention above of 1.0 on an empty denominator, with Wilson intervals
+    (which return the widest honest (0, 1) in that case).
+    """
+
+    tp_by_field: Counter[str] = Counter()
+    fp_by_field: Counter[str] = Counter()
+    fn_by_field: Counter[str] = Counter()
+
+    docs = set(predicted) | set(truth)
+    for doc in docs:
+        unclaimed: Counter[tuple[str, str]] = Counter()
+        for label in truth.get(doc, ()):
+            field_name = str(label["field_name"])
+            key = (field_name, normalize_extracted_value(field_name, str(label["value"])))
+            unclaimed[key] += 1
+        for pred in predicted.get(doc, ()):
+            key = (pred.field_name, normalize_extracted_value(pred.field_name, pred.value))
+            if unclaimed[key] > 0:
+                unclaimed[key] -= 1
+                tp_by_field[pred.field_name] += 1
+            else:
+                fp_by_field[pred.field_name] += 1
+        for (field_name, _), count in unclaimed.items():
+            fn_by_field[field_name] += count
+
+    tp = sum(tp_by_field.values())
+    fp = sum(fp_by_field.values())
+    fn = sum(fn_by_field.values())
+    field_names = sorted(set(tp_by_field) | set(fp_by_field) | set(fn_by_field))
+
+    return ExtractionReport(
+        n_docs=len(docs),
+        n_truth_fields=tp + fn,
+        n_predicted_fields=tp + fp,
+        tp=tp,
+        fp=fp,
+        fn=fn,
+        precision=tp / (tp + fp) if tp + fp else 1.0,
+        recall=tp / (tp + fn) if tp + fn else 1.0,
+        precision_ci=wilson_interval(tp, tp + fp),
+        recall_ci=wilson_interval(tp, tp + fn),
+        per_field={
+            name: FieldScore(tp=tp_by_field[name], fp=fp_by_field[name], fn=fn_by_field[name])
+            for name in field_names
+        },
     )

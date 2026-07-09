@@ -1,9 +1,12 @@
 """Command-line interface.
 
-Three commands: ``run`` produces resolved records and a review queue, ``eval``
-scores a run against ground-truth clusters, and ``apply`` carries human review
-decisions back into a fresh run. The CLI uses argparse only, so the package has
-no runtime dependency beyond the matcher.
+The subcommands: ``run`` produces resolved records and a review queue, ``eval``
+scores a run against ground-truth clusters, ``eval-extraction`` scores the PDF
+extractor against labeled fixtures, ``apply`` carries human review decisions
+back into a fresh run, ``review`` serves the local web queue, ``destroy``
+deletes retained artifacts, ``verify`` checks a provenance log's hash chain,
+and ``schema`` prints the declared schema versions. The CLI uses argparse only,
+so the package has no runtime dependency beyond the matcher.
 """
 
 from __future__ import annotations
@@ -19,11 +22,15 @@ from constituent_reconciler.config import Recipe, load_recipe
 from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.consent import partition_by_consent
 from constituent_reconciler.destruction import destroy, parse_retention
-from constituent_reconciler.evaluate import evaluate
+from constituent_reconciler.evaluate import evaluate, extraction_metrics
 from constituent_reconciler.pipeline import ExportSummary
 from constituent_reconciler.policy import PolicyViolation
 from constituent_reconciler.provenance import ProvenanceLog, verify_log
-from constituent_reconciler.report import render_eval_markdown, render_run_summary
+from constituent_reconciler.report import (
+    render_eval_markdown,
+    render_extraction_markdown,
+    render_run_summary,
+)
 from constituent_reconciler.suppression import render_summary
 
 
@@ -99,6 +106,48 @@ def _cmd_eval(args: argparse.Namespace) -> int:
     else:
         print(markdown)
     return 0 if report.false_merge_rate <= args.gate else 1
+
+
+def _cmd_eval_extraction(args: argparse.Namespace) -> int:
+    from constituent_reconciler.extract.base import ExtractedField
+    from constituent_reconciler.extract.pdf import PdfplumberExtractor
+
+    fixtures = Path(args.fixtures)
+    labels_path = fixtures / "labels.json"
+    if not labels_path.is_file():
+        print(f"labels file not found: {labels_path}", file=sys.stderr)
+        return 2
+    labels = json.loads(labels_path.read_text(encoding="utf-8"))
+
+    pdf_paths = sorted(fixtures.glob("*.pdf"))
+    if not pdf_paths:
+        print(f"no fixture PDFs found in: {fixtures}", file=sys.stderr)
+        return 2
+
+    extractor = PdfplumberExtractor()
+    predicted: dict[str, list[ExtractedField]] = {}
+    try:
+        for pdf_path in pdf_paths:
+            result = extractor.extract(pdf_path)
+            predicted[pdf_path.name] = [field for page in result.pages for field in page.fields]
+    except ImportError as error:
+        print(f"extraction error: {error}", file=sys.stderr)
+        return 2
+
+    report = extraction_metrics(predicted, labels)
+    markdown = render_extraction_markdown(
+        report,
+        dataset=fixtures.name,
+        precision_target=args.precision_target,
+        recall_target=args.recall_target,
+    )
+    if args.out:
+        Path(args.out).write_text(markdown, encoding="utf-8")
+        print(f"wrote extraction eval report: {args.out}")
+    else:
+        print(markdown)
+    met = report.precision >= args.precision_target and report.recall >= args.recall_target
+    return 0 if met else 1
 
 
 def _cmd_apply(args: argparse.Namespace) -> int:
@@ -245,6 +294,30 @@ def build_parser() -> argparse.ArgumentParser:
         "--gate", type=float, default=0.0, help="max allowed false-merge rate (default 0.0)"
     )
     eval_parser.set_defaults(func=_cmd_eval)
+
+    exeval_parser = sub.add_parser(
+        "eval-extraction",
+        help="score the PDF extractor against a labeled fixture set",
+    )
+    exeval_parser.add_argument(
+        "--fixtures",
+        required=True,
+        help="directory containing the fixture PDFs and labels.json",
+    )
+    exeval_parser.add_argument("--out", help="write the report here instead of stdout")
+    exeval_parser.add_argument(
+        "--precision-target",
+        type=float,
+        default=0.95,
+        help="minimum field precision for exit status 0 (default 0.95, the ledger target)",
+    )
+    exeval_parser.add_argument(
+        "--recall-target",
+        type=float,
+        default=0.90,
+        help="minimum field recall for exit status 0 (default 0.90, the ledger target)",
+    )
+    exeval_parser.set_defaults(func=_cmd_eval_extraction)
 
     apply_parser = sub.add_parser("apply", help="apply review decisions and re-resolve")
     apply_parser.add_argument("--config", required=True, help="path to recipe.toml")
