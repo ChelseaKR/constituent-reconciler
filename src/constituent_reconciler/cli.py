@@ -22,7 +22,7 @@ from constituent_reconciler.config import Recipe, load_recipe
 from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.consent import partition_by_consent
 from constituent_reconciler.destruction import destroy, parse_retention
-from constituent_reconciler.evaluate import evaluate, extraction_metrics
+from constituent_reconciler.evaluate import evaluate, extraction_metrics, per_class_metrics
 from constituent_reconciler.pipeline import ExportSummary
 from constituent_reconciler.policy import PolicyViolation
 from constituent_reconciler.provenance import ProvenanceLog, verify_log
@@ -96,9 +96,14 @@ def _cmd_eval(args: argparse.Namespace) -> int:
     result = pipeline.run(recipe)
     truth = json.loads(Path(args.truth).read_text(encoding="utf-8"))
     clusters = truth.get("clusters", [])
+    classes = truth.get("classes", {})
     report = evaluate(result.pairs, clusters, n_records=len(result.records))
+    class_reports = per_class_metrics(result.pairs, clusters, classes) if classes else None
     markdown = render_eval_markdown(
-        report, dataset=Path(args.config).parent.name, gate_threshold=args.gate
+        report,
+        dataset=Path(args.config).parent.name,
+        gate_threshold=args.gate,
+        class_reports=class_reports,
     )
     if args.out:
         Path(args.out).write_text(markdown, encoding="utf-8")
