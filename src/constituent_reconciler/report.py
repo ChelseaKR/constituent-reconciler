@@ -134,8 +134,7 @@ def _calibration_lines(calibration: CalibrationReport | None) -> list[str]:
     else:
         gate_word = "PASS" if calibration.passed else "FAIL"
         lines += [
-            f"Cohen's kappa: **{calibration.kappa:.2f}** over "
-            f"{calibration.n_labels} labels.",
+            f"Cohen's kappa: **{calibration.kappa:.2f}** over {calibration.n_labels} labels.",
             "",
             f"Kappa gate at {calibration.threshold:.2f}: **{gate_word}** "
             f"(observed {calibration.kappa:.2f}).",
