@@ -67,9 +67,7 @@ class _ExactAgreementBackend:
         scored: list[tuple[str, str, float]] = []
         for i, one in enumerate(record_list):
             for other in record_list[i + 1 :]:
-                pairs = [
-                    (one.normalized.get(f, ""), other.normalized.get(f, "")) for f in fields
-                ]
+                pairs = [(one.normalized.get(f, ""), other.normalized.get(f, "")) for f in fields]
                 populated = [(a, b) for a, b in pairs if a or b]
                 agreed = sum(1 for a, b in populated if a and a == b)
                 probability = agreed / len(populated) if populated else 0.0
