@@ -303,7 +303,8 @@ class LocalSeam:
             headers={"Content-Type": "application/json"},
             method="GET" if payload is None else "POST",
         )
-        with urllib.request.urlopen(  # noqa: S310 - request URL uses loopback-validated host.
+        # nosemgrep: dynamic-urllib-use-detected - request URL uses loopback-validated host.
+        with urllib.request.urlopen(  # noqa: S310
             request,
             timeout=self._timeout,
         ) as response:
