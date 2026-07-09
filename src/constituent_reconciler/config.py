@@ -130,6 +130,7 @@ class Recipe:
     extract: ExtractConfig = field(default_factory=ExtractConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     household: HouseholdConfig = field(default_factory=HouseholdConfig)
+    tsa_url: str = ""
 
 
 def _resolve(base: Path, value: str) -> Path:
@@ -137,7 +138,12 @@ def _resolve(base: Path, value: str) -> Path:
     return candidate if candidate.is_absolute() else (base / candidate)
 
 
-def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
+def load_recipe(
+    path: str | Path,
+    *,
+    policy_pack: str | None = None,
+    tsa_url: str | None = None,
+) -> Recipe:
     """Load a recipe. ``policy_pack`` overrides the recipe's [policy] pack.
 
     The override exists so ``reconcile run --policy-pack dv`` can apply the DV
@@ -160,6 +166,7 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
     output_section = data.get("output", {})
     household_section = data.get("household", {})
     comparable_section = data.get("comparable", {})
+    provenance_section = data.get("provenance", {})
 
     if "incoming" not in input_section:
         raise ValueError("recipe [input] must set 'incoming'")
@@ -249,4 +256,5 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
         extract=extract,
         output=output,
         household=household,
+        tsa_url=tsa_url if tsa_url is not None else str(provenance_section.get("tsa_url", "")),
     )

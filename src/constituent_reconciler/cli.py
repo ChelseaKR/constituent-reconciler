@@ -77,7 +77,7 @@ def _print_export(recipe: Recipe, summary: ExportSummary, *, dry_run: bool) -> N
 
 def _cmd_run(args: argparse.Namespace) -> int:
     try:
-        recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+        recipe = load_recipe(args.config, policy_pack=args.policy_pack, tsa_url=args.tsa_url)
     except PolicyViolation as error:
         print(f"policy error: {error}", file=sys.stderr)
         return 2
@@ -157,7 +157,7 @@ def _cmd_eval_extraction(args: argparse.Namespace) -> int:
 
 def _cmd_apply(args: argparse.Namespace) -> int:
     try:
-        recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+        recipe = load_recipe(args.config, policy_pack=args.policy_pack, tsa_url=args.tsa_url)
     except PolicyViolation as error:
         print(f"policy error: {error}", file=sys.stderr)
         return 2
@@ -312,6 +312,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="override the recipe's policy pack (e.g. dv); fail-closed on unknown",
     )
+    run_parser.add_argument(
+        "--tsa-url",
+        default=None,
+        help="override [provenance].tsa_url for RFC 3161 trusted timestamps",
+    )
     run_parser.set_defaults(func=_cmd_run)
 
     eval_parser = sub.add_parser("eval", help="score a run against ground-truth clusters")
@@ -355,6 +360,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--policy-pack",
         default=None,
         help="override the recipe's policy pack (e.g. dv); fail-closed on unknown",
+    )
+    apply_parser.add_argument(
+        "--tsa-url",
+        default=None,
+        help="override [provenance].tsa_url for RFC 3161 trusted timestamps",
     )
     apply_parser.set_defaults(func=_cmd_apply)
 

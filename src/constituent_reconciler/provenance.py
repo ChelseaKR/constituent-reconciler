@@ -288,6 +288,7 @@ class UrllibTsaTransport:
             url, data=body, headers=headers, method="POST"
         )
         try:
+            # nosemgrep: dynamic-urllib-use-detected (TSA URL scheme is restricted to HTTPS above)
             with urllib.request.urlopen(  # noqa: S310 - request URL scheme validated above.
                 request, timeout=self.timeout
             ) as response:
