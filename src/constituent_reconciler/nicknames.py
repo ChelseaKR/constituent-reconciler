@@ -114,6 +114,7 @@ _NICKNAME_GROUPS: dict[str, tuple[str, ...]] = {
     "wilhelmina": ("billie", "willa", "mina"),
 }
 
+
 def _build_variant_to_root() -> dict[str, str]:
     index: dict[str, str] = {}
     for root, variants in _NICKNAME_GROUPS.items():

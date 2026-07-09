@@ -59,8 +59,7 @@ def _name_null_level(column: str) -> dict[str, Any]:
 
 def _name_close_level(column: str) -> dict[str, Any]:
     return {
-        "sql_condition": f'jaro_winkler_similarity("{column}_l", "{column}_r") '
-        f">= {_NAME_CLOSE}",
+        "sql_condition": f'jaro_winkler_similarity("{column}_l", "{column}_r") >= {_NAME_CLOSE}',
         "label_for_charts": "close",
     }
 

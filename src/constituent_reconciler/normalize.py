@@ -26,11 +26,23 @@ _NON_DIGIT = re.compile(r"\D")
 # are separators rather than silent letters, which matters for the
 # adjacent-duplicate-code rule in ``soundex`` below.
 _SOUNDEX_CODES: dict[str, str] = {
-    "b": "1", "f": "1", "p": "1", "v": "1",
-    "c": "2", "g": "2", "j": "2", "k": "2", "q": "2", "s": "2", "x": "2", "z": "2",
-    "d": "3", "t": "3",
+    "b": "1",
+    "f": "1",
+    "p": "1",
+    "v": "1",
+    "c": "2",
+    "g": "2",
+    "j": "2",
+    "k": "2",
+    "q": "2",
+    "s": "2",
+    "x": "2",
+    "z": "2",
+    "d": "3",
+    "t": "3",
     "l": "4",
-    "m": "5", "n": "5",
+    "m": "5",
+    "n": "5",
     "r": "6",
 }
 
