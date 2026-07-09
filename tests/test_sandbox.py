@@ -83,9 +83,7 @@ def test_oversize_input_fails_closed_without_spawning(tmp_path: Path) -> None:
 
     # The sleepy worker would stall for the full wall timeout if a child were
     # spawned; a prompt return proves the size cap short-circuits first.
-    extractor = SandboxedExtractor(
-        max_input_bytes=64, wall_timeout_s=60.0, worker=_sleepy_worker
-    )
+    extractor = SandboxedExtractor(max_input_bytes=64, wall_timeout_s=60.0, worker=_sleepy_worker)
     start = time.monotonic()
     result = extractor.extract(big)
     elapsed = time.monotonic() - start

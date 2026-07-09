@@ -121,8 +121,7 @@ class SandboxedExtractor:
         if size > self.max_input_bytes:
             return _fail_closed(
                 path,
-                f"input is {size} bytes, over the {self.max_input_bytes}-byte cap; "
-                "not parsed",
+                f"input is {size} bytes, over the {self.max_input_bytes}-byte cap; not parsed",
             )
 
         ctx = multiprocessing.get_context("spawn")
@@ -166,9 +165,7 @@ class SandboxedExtractor:
 
         if proc.exitcode != 0:
             reason = (
-                payload
-                if isinstance(payload, str)
-                else f"child exited with code {proc.exitcode}"
+                payload if isinstance(payload, str) else f"child exited with code {proc.exitcode}"
             )
             return _fail_closed(path, f"extraction failed: {reason}")
         if not isinstance(payload, ExtractionResult):
