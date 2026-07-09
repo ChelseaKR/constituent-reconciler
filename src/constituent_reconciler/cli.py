@@ -203,9 +203,7 @@ def _cmd_export_comparable(args: argparse.Namespace) -> int:
         return 2
     result = pipeline.run(recipe)
     try:
-        report, report_path = pipeline.export_comparable(
-            result, recipe, out_dir=Path(args.out)
-        )
+        report, report_path = pipeline.export_comparable(result, recipe, out_dir=Path(args.out))
     except PolicyViolation as error:
         print(f"policy error: {error}", file=sys.stderr)
         return 2
