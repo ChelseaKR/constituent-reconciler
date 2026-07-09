@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from constituent_reconciler.decisions import band_pairs, build_clusters, golden_records
+from constituent_reconciler.decisions import (
+    CANNOT_LINK_NOTE,
+    band_pairs,
+    build_clusters,
+    enforce_cannot_links,
+    golden_records,
+)
 from constituent_reconciler.models import Band, Cluster, Record
 
 FIELDS = ("first_name", "last_name", "dob", "email", "phone")
@@ -29,6 +35,62 @@ def test_clusters_use_auto_edges_only() -> None:
     assert {"a", "b"} in member_sets
     assert {"c"} in member_sets
     assert {"d"} in member_sets
+
+
+def test_rejected_pair_is_never_transitively_merged() -> None:
+    # The planted triangle: a-b and b-c are confident merges, but a human
+    # rejected a-c. Without the constraint the transitive closure would put a
+    # and c in one cluster, silently overriding the reviewer.
+    pairs = band_pairs(
+        [("a", "b", 0.99), ("b", "c", 0.99), ("a", "c", 0.10)],
+        auto_threshold=0.97,
+        review_threshold=0.80,
+    )
+    cannot = frozenset({frozenset(("a", "c"))})
+    clusters, adjusted = enforce_cannot_links(["a", "b", "c", "d"], pairs, cannot_link=cannot)
+
+    # The merge-blocking invariant: no cluster contains a rejected pair.
+    for cluster in clusters:
+        members = set(cluster.members)
+        assert not any(constraint <= members for constraint in cannot)
+    # The refused cluster falls apart into singletons; a person re-decides it.
+    member_sets = [set(c.members) for c in clusters]
+    assert {"a"} in member_sets and {"b"} in member_sets and {"c"} in member_sets
+
+    bands = {(p.left, p.right): p for p in adjusted}
+    assert bands[("a", "b")].band is Band.REVIEW
+    assert bands[("b", "c")].band is Band.REVIEW
+    assert bands[("a", "b")].note == CANNOT_LINK_NOTE
+    assert bands[("b", "c")].note == CANNOT_LINK_NOTE
+    # The rejected edge itself stays dropped; the human already decided it.
+    assert bands[("a", "c")].band is Band.DROP
+    assert bands[("a", "c")].note == ""
+
+
+def test_cannot_link_leaves_unrelated_clusters_alone() -> None:
+    pairs = band_pairs(
+        [("a", "b", 0.99), ("c", "d", 0.99)],
+        auto_threshold=0.97,
+        review_threshold=0.80,
+    )
+    # The rejected pair spans two clusters that were never going to merge.
+    cannot = frozenset({frozenset(("a", "c"))})
+    clusters, adjusted = enforce_cannot_links(["a", "b", "c", "d"], pairs, cannot_link=cannot)
+    member_sets = [set(c.members) for c in clusters]
+    assert {"a", "b"} in member_sets
+    assert {"c", "d"} in member_sets
+    assert all(p.band is Band.AUTO for p in adjusted)
+
+
+def test_no_constraints_is_a_no_op() -> None:
+    pairs = band_pairs(
+        [("a", "b", 0.99), ("b", "c", 0.85)],
+        auto_threshold=0.97,
+        review_threshold=0.80,
+    )
+    clusters, adjusted = enforce_cannot_links(["a", "b", "c"], pairs, cannot_link=frozenset())
+    assert clusters == build_clusters(["a", "b", "c"], pairs)
+    assert adjusted == pairs
 
 
 def _record(uid: str, source: str, normalized: dict[str, str], consent: str) -> Record:

@@ -41,12 +41,9 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
     repo-specific `no-pii-in-logs` rule at `.semgrep/no-pii-in-logs.yml`); a
     `codeql` workflow runs CodeQL for `python` and `actions` on push, PR, and a
     weekly schedule; a `zizmor` job lints the workflow files themselves.
-  - A merge-blocking coverage floor (`--cov-fail-under=84`, branch coverage,
-    `pytest-cov`) closes the gap between the ROADMAP's earlier claimed figure
-    and CI actually enforcing it. Set to 84 rather than the 85 target because
-    this PR excludes a pre-existing, in-progress feature branch (see
-    `docs/ROADMAP.md`'s metrics ledger note); raise it to 85 once that branch
-    lands with its own tests.
+  - A merge-blocking coverage floor (`--cov-fail-under=85`, branch coverage,
+    `pytest-cov`) closes the gap between the ROADMAP's claimed 86% and CI
+    actually enforcing it.
   - `__version__` is now derived from installed package metadata
     (`importlib.metadata.version`) instead of being hand-copied alongside
     `pyproject.toml`'s `version`, so the two can no longer drift (REL-02).

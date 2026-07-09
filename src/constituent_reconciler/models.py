@@ -84,12 +84,18 @@ class Record:
 
 @dataclass(frozen=True)
 class Pair:
-    """A scored candidate pair of record ids, with the band it was assigned."""
+    """A scored candidate pair of record ids, with the band it was assigned.
+
+    ``note`` explains a routing decision in reviewer language; it is set when a
+    pair is re-routed to review because a human rejection elsewhere in its
+    cluster makes the merge unsafe, and is empty otherwise.
+    """
 
     left: str
     right: str
     probability: float
     band: Band
+    note: str = ""
 
     def key(self) -> frozenset[str]:
         return frozenset((self.left, self.right))

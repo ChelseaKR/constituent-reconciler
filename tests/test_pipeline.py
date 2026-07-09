@@ -67,6 +67,97 @@ def test_apply_approved_review_pair_merges_cluster() -> None:
     assert merged
 
 
+def test_apply_rejected_auto_pair_stays_separate() -> None:
+    # A rejection is durable: even a pair the matcher merges confidently must
+    # stay separate once a human says the records are different people.
+    recipe = load_recipe(EXAMPLES / "recipe.toml")
+    applied = pipeline.run(recipe, force_drop=[frozenset(("E003", "N002"))])
+    for cluster in applied.clusters:
+        assert not {"E003", "N002"} <= set(cluster.members)
+    for record in applied.golden:
+        assert not {"E003", "N002"} <= set(record.members)
+
+
+def test_apply_rejection_wins_over_conflicting_approval() -> None:
+    # A decisions file that both approves and rejects the same pair is a
+    # contradiction; the record-separating verdict wins, fail-closed.
+    recipe = load_recipe(EXAMPLES / "recipe.toml")
+    key = frozenset(("E002", "N004"))
+    applied = pipeline.run(recipe, force_auto=[key], force_drop=[key])
+    for cluster in applied.clusters:
+        assert not {"E002", "N004"} <= set(cluster.members)
+
+
+def _write_triangle_fixture(tmp_path: Path) -> Path:
+    """Three identical records: every pair auto-merges until a human objects."""
+
+    (tmp_path / "incoming.csv").write_text(
+        "id,first,last,dob,email,phone\n"
+        "T1,Maria,Lopez,1980-01-01,maria@example.org,5305550101\n"
+        "T2,Maria,Lopez,1980-01-01,maria@example.org,5305550101\n"
+        "T3,Maria,Lopez,1980-01-01,maria@example.org,5305550101\n",
+        encoding="utf-8",
+    )
+    recipe_path = tmp_path / "recipe.toml"
+    recipe_path.write_text(
+        "[input]\n"
+        'incoming = "incoming.csv"\n'
+        'id_column = "id"\n'
+        "\n"
+        "[mapping]\n"
+        'first_name = "first"\n'
+        'last_name = "last"\n'
+        'dob = "dob"\n'
+        'email = "email"\n'
+        'phone = "phone"\n',
+        encoding="utf-8",
+    )
+    return recipe_path
+
+
+def test_rejected_pair_is_not_rejoined_transitively(tmp_path: Path) -> None:
+    """The no-silent-merge invariant, end to end.
+
+    T1-T2 and T2-T3 are confident merges; a reviewer rejected T1-T3. The
+    transitive closure must not rejoin T1 and T3 behind the reviewer's back:
+    the whole group is refused and its confident edges are re-routed to review
+    with a note saying why.
+    """
+
+    recipe = load_recipe(_write_triangle_fixture(tmp_path))
+    base = pipeline.run(recipe)
+    assert {frozenset((p.left, p.right)) for p in base.auto_pairs} == {
+        frozenset(("T1", "T2")),
+        frozenset(("T2", "T3")),
+        frozenset(("T1", "T3")),
+    }
+    assert any(set(c.members) == {"T1", "T2", "T3"} for c in base.clusters)
+
+    rejected = frozenset(("T1", "T3"))
+    applied = pipeline.run(recipe, force_drop=[rejected])
+
+    # No cluster and no golden record contains the rejected pair.
+    for cluster in applied.clusters:
+        assert not rejected <= set(cluster.members)
+    for record in applied.golden:
+        assert not rejected <= set(record.members)
+    # The refused group is all singletons, and its confident edges wait for a
+    # person, each carrying the reviewer-facing note.
+    assert {tuple(c.members) for c in applied.clusters} == {("T1",), ("T2",), ("T3",)}
+    review_keys = {p.key() for p in applied.review_pairs}
+    assert review_keys == {frozenset(("T1", "T2")), frozenset(("T2", "T3"))}
+    assert all(p.note for p in applied.review_pairs)
+
+
+def test_review_queue_carries_the_cannot_link_note(tmp_path: Path) -> None:
+    recipe = load_recipe(_write_triangle_fixture(tmp_path))
+    applied = pipeline.run(recipe, force_drop=[frozenset(("T1", "T3"))])
+    summary = pipeline.export(applied, recipe, out_dir=tmp_path / "out")
+    lines = summary.review_path.read_text(encoding="utf-8").strip().splitlines()
+    assert lines[0].endswith(",note")
+    assert "reviewer decided two records" in lines[1]
+
+
 def test_export_writes_csv_review_queue_and_provenance(tmp_path: Path) -> None:
     recipe = load_recipe(EXAMPLES / "recipe.toml")
     result = pipeline.run(recipe)
