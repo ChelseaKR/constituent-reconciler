@@ -111,6 +111,8 @@ class ProvenanceLog:
             consent=consent,
             digest=content_hash(payload),
             external_id=external_id,
+            field_sources=field_sources,
+            fill_policy=fill_policy,
         )
 
     def append_run_start(self, manifest_hash: str) -> dict[str, object]:
@@ -129,6 +131,8 @@ class ProvenanceLog:
             consent=None,
             digest=manifest_hash,
             external_id=None,
+            field_sources=None,
+            fill_policy="",
         )
 
     def _append(
@@ -140,6 +144,8 @@ class ProvenanceLog:
         consent: bool | None,
         digest: str,
         external_id: str | None,
+        field_sources: Mapping[str, str] | None,
+        fill_policy: str,
     ) -> dict[str, object]:
         entry: dict[str, object] = {
             "seq": self._seq,
