@@ -20,8 +20,11 @@ CONFIG_SCHEMA_VERSION = 1
 # The Connector protocol: write_all signature, WriteResult shape, is_local.
 CONNECTOR_INTERFACE_VERSION = 1
 
-# The JSON artifacts: aggregate_summary.json and the provenance log entry shape.
-REPORT_SCHEMA_VERSION = 1
+# The JSON artifacts: aggregate_summary.json, run_manifest.json, and the
+# provenance log entry shape. Version 2 added the run manifest and the
+# provenance "run-start" entry, whose consent field is null rather than a
+# boolean; version-1 logs still verify unchanged.
+REPORT_SCHEMA_VERSION = 2
 
 
 def versions() -> dict[str, int]:
