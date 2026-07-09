@@ -37,9 +37,7 @@ def mixed_folder(tmp_path: Path) -> Path:
     pytest.importorskip("pdfplumber", reason="pdfplumber not installed")
     folder = tmp_path / "incoming-docs"
     folder.mkdir()
-    (folder / "batch.csv").write_text(
-        "first,last,dob\nBob,Smith,1985-07-04\n", encoding="utf-8"
-    )
+    (folder / "batch.csv").write_text("first,last,dob\nBob,Smith,1985-07-04\n", encoding="utf-8")
     (folder / "form.pdf").write_bytes(
         _make_pdf(
             [
@@ -114,9 +112,7 @@ def test_normalize_record_reports_failures_into_caller_mapping() -> None:
         source="incoming",
         raw={"first_name": "Alice", "last_name": "Walker", "dob": "sometime in June"},
     )
-    normalized = normalize_record(
-        record, ("first_name", "last_name", "dob"), failures=failures
-    )
+    normalized = normalize_record(record, ("first_name", "last_name", "dob"), failures=failures)
     assert normalized.normalized["dob"] == ""
     assert failures == {"dob": {"incoming": 1}}
 

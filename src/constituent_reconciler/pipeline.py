@@ -345,9 +345,7 @@ def _ingest_source(
                         child, 'text extraction disabled (extract.backend = "none")'
                     )
                 else:
-                    accounting.note_skipped(
-                        child, f"unsupported extension: {suffix or '(none)'}"
-                    )
+                    accounting.note_skipped(child, f"unsupported extension: {suffix or '(none)'}")
         return records
     elif path.suffix.lower() == ".pdf" and recipe.extract.backend != "none":
         chunk = read_pdf_records(

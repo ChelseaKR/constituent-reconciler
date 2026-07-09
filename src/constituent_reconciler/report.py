@@ -115,15 +115,15 @@ def _render_ingest(ingest: IngestReport) -> list[str]:
         lines.append(f"  files skipped:     {len(ingest.files_skipped)}")
         lines += [f"    {skipped.path} ({skipped.reason})" for skipped in ingest.files_skipped]
     if ingest.pages_extracted or ingest.pages_dropped:
-        lines.append(f"  pdf pages:         {ingest.pages_extracted} extracted, "
-                     f"{ingest.pages_dropped} dropped (no name found)")
+        lines.append(
+            f"  pdf pages:         {ingest.pages_extracted} extracted, "
+            f"{ingest.pages_dropped} dropped (no name found)"
+        )
     if ingest.normalization_failures:
         lines.append("  normalization failures (value present, nothing parseable):")
         for field_name in sorted(ingest.normalization_failures):
             per_source = ingest.normalization_failures[field_name]
-            counts = ", ".join(
-                f"{source}: {count}" for source, count in sorted(per_source.items())
-            )
+            counts = ", ".join(f"{source}: {count}" for source, count in sorted(per_source.items()))
             lines.append(f"    {field_name}: {counts}")
     return lines
 
