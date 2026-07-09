@@ -161,7 +161,7 @@ def _read_consent(
     )
 
 
-def read_pdf_records(
+def read_pdf_records(  # noqa: C901 - branches mirror ingest accounting cases.
     path: Path,
     source: str,
     *,
@@ -272,7 +272,7 @@ def read_text_records(
     return records
 
 
-def _ingest_source(
+def _ingest_source(  # noqa: C901 - routes all supported source types and skips.
     path: Path,
     source: str,
     *,
