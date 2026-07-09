@@ -192,9 +192,7 @@ def test_no_email_or_phone_calls_when_the_fields_are_empty() -> None:
 def test_dry_run_makes_no_network_calls_and_reports_the_full_payload() -> None:
     transport = _FakeTransport([])
     connector = _connector(transport)
-    record = _golden(
-        "E1", {"first_name": "jane", "last_name": "doe", "email": "jane@x.org"}
-    )
+    record = _golden("E1", {"first_name": "jane", "last_name": "doe", "email": "jane@x.org"})
 
     results = connector.write_all([record], FIELDS, dry_run=True)
 
