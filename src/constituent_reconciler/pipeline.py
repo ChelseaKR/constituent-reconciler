@@ -77,11 +77,21 @@ def read_pdf_records(
     Pages that produce nothing useful are skipped. Low-confidence pages are
     offered to the cloud seam when the policy pack allows it; under DV and HIPAA
     packs the seam is always a NoOp regardless of the recipe's backend setting.
+
+    ``backend = "pdfplumber+ocr"`` selects the OCR-fallback extractor, which
+    OCRs any page with no embedded text layer instead of yielding an empty
+    page; every other backend value uses the plain pdfplumber text-layer
+    extractor.
     """
     from constituent_reconciler.extract.pdf import PdfplumberExtractor
     from constituent_reconciler.extract.seam import make_seam
 
-    extractor = PdfplumberExtractor()
+    if recipe.extract.backend == "pdfplumber+ocr":
+        from constituent_reconciler.extract.ocr import PdfplumberOcrExtractor
+
+        extractor: PdfplumberExtractor | PdfplumberOcrExtractor = PdfplumberOcrExtractor()
+    else:
+        extractor = PdfplumberExtractor()
     seam = make_seam(recipe.policy_pack, recipe.extract.backend)
     extraction = extractor.extract(path)
 

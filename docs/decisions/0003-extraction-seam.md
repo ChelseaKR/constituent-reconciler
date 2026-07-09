@@ -32,12 +32,38 @@ pdfplumber operates on the PDF text layer directly, requires no system-level
 OCR dependencies (Tesseract, etc.), and produces clean text from
 digitally-created PDFs with pdfminer-six under the hood. It is honest about
 what it cannot do: a scanned-only page (no embedded text layer) produces an
-empty page or near-empty page, which routes to the cloud seam by design.
+empty page or near-empty page, which without a further step routes to the
+cloud seam by design -- and, absent a cloud seam (the default, and the only
+option under `dv`/`hipaa`), produces nothing at all.
 
 pdfplumber is an optional dependency under a new `[extract]` optional group.
 The import is deferred to extraction time so the rest of the package works
 without it installed, and the CI `dev` extra includes it so the extraction tests
 always run in CI.
+
+### Local OCR fallback for image-only pages (EXP-04)
+
+Paper intake is the default reality for the target segment, not an edge case,
+and an offline-only deployment (`dv`, `hipaa`) can never reach the cloud seam.
+Leaving an image-only scan to produce an empty record was a real gap, not a
+documented limitation: the README claimed scanned-intake support before the
+code did (closed by this change; see `docs/ideation/03-expansions.md` EXP-04).
+
+`extract/ocr.py` adds a `PdfplumberOcrExtractor`, selected by
+`[extract] backend = "pdfplumber+ocr"`, that runs page-by-page: a page with a
+text layer takes the existing pdfplumber path unchanged; a page with none is
+rasterized with pdfplumber's own renderer and OCR'd via Tesseract
+(`pytesseract`, a new optional `ocr` extra -- the "contribution is the chain,
+not a new OCR engine" principle above still holds; Tesseract is a vendored,
+well-understood offline engine, not a bespoke one). OCR'd pages reuse the same
+label-adjacent field patterns and the same `_page_confidence` plausibility
+gate as the text-layer path, blended with Tesseract's own per-word
+confidence -- the lower of the two wins, so a scanned page is never easier to
+pass than a native PDF. OCR word boxes become `SourceSpan`s in the same PDF
+point-space coordinates the text-layer path already produces, so the review
+queue's source-span navigation works identically for both. Both `pytesseract`
+and the system `tesseract` binary are optional; a PDF whose pages are all
+digitally created never imports either.
 
 ### Field extraction by regex over the text layer
 
@@ -103,3 +129,6 @@ drift threshold at which the gate fails closed.
   the full implementation; the placeholder is intentional and honest.
 - `cohen_kappa()` is available in `evaluate.py` for when a labeled extraction
   corpus and an LLM field-judge are in scope.
+- `backend = "pdfplumber+ocr"` OCRs any page with no text layer via Tesseract
+  (`pytesseract`, the new `ocr` extra); a text-layer PDF behaves identically to
+  `backend = "pdfplumber"` and never imports the OCR path.

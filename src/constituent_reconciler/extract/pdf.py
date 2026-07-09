@@ -97,6 +97,41 @@ def _find_span(page: object, value: str, source_file: str, page_num: int) -> Sou
     return None
 
 
+def extract_text_layer_page(
+    page: object, path_name: str, page_num: int, text: str | None = None
+) -> PageResult:
+    """Extract fields from one page's embedded text layer via label regexes.
+
+    ``text`` may be passed in when the caller already extracted it (the OCR
+    backend uses this to decide whether a page needs OCR at all, without
+    calling ``extract_text`` twice). If omitted, it is read from ``page``.
+    """
+    if text is None:
+        text = page.extract_text(x_tolerance=3, y_tolerance=3) or ""  # type: ignore[attr-defined]
+    confidence = _page_confidence(text)
+    page_result = PageResult(page_num=page_num, confidence=confidence)
+
+    for field_name, patterns in _FIELD_PATTERNS.items():
+        for pattern in patterns:
+            match = pattern.search(text)
+            if match:
+                value = match.group(1).strip().rstrip()
+                if not value:
+                    continue
+                span = _find_span(page, value, path_name, page_num)
+                page_result.fields.append(
+                    ExtractedField(
+                        field_name=field_name,
+                        value=value,
+                        confidence=confidence,
+                        span=span,
+                    )
+                )
+                break
+
+    return page_result
+
+
 def extract_pdf(path: Path) -> ExtractionResult:
     """Extract constituent fields from a PDF using pdfplumber.
 
@@ -113,29 +148,7 @@ def extract_pdf(path: Path) -> ExtractionResult:
     result = ExtractionResult(source_file=path.name)
     with pdfplumber.open(path) as pdf:
         for page_num, page in enumerate(pdf.pages, start=1):
-            text = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
-            confidence = _page_confidence(text)
-            page_result = PageResult(page_num=page_num, confidence=confidence)
-
-            for field_name, patterns in _FIELD_PATTERNS.items():
-                for pattern in patterns:
-                    match = pattern.search(text)
-                    if match:
-                        value = match.group(1).strip().rstrip()
-                        if not value:
-                            continue
-                        span = _find_span(page, value, path.name, page_num)
-                        page_result.fields.append(
-                            ExtractedField(
-                                field_name=field_name,
-                                value=value,
-                                confidence=confidence,
-                                span=span,
-                            )
-                        )
-                        break
-
-            result.pages.append(page_result)
+            result.pages.append(extract_text_layer_page(page, path.name, page_num))
 
     return result
 

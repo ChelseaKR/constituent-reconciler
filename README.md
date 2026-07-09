@@ -54,9 +54,11 @@ with a review queue a volunteer can run, is what this project builds.
 
 The pipeline runs as a sequence of logged, deterministic-by-default steps:
 
-1. **Ingest** a folder of CSVs and digitally created PDFs. Scanned documents
-   (OCR) and email bodies are planned and not yet implemented; the roadmap
-   tracks both.
+1. **Ingest** a folder of CSVs and PDFs, digitally created or scanned.
+   Image-only scanned pages run through a local Tesseract OCR backend
+   (`[extract] backend = "pdfplumber+ocr"`, the optional `ocr` extra) so a
+   paper intake form yields fields instead of an empty page; email bodies are
+   planned and the roadmap tracks it.
 2. **Extract** field and value pairs with a source-span pointer and a
    confidence score. Extraction runs offline by default; an optional Bedrock
    (Claude) seam handles only low-confidence pages, and only when the active
