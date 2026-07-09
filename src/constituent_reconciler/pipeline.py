@@ -34,7 +34,7 @@ from constituent_reconciler.models import (
 from constituent_reconciler.normalize import normalize_record
 from constituent_reconciler.policy import PolicyViolation
 from constituent_reconciler.provenance import ProvenanceLog, TimestampAuthority
-from constituent_reconciler.suppression import AggregateSummary
+from constituent_reconciler.suppression import AggregateSummary, ComparableReport
 
 
 def read_records(
@@ -436,6 +436,18 @@ def _write_aggregate_summary(summary: AggregateSummary, out_dir: Path) -> Path:
     return summary_path
 
 
+def _write_comparable_report(report: ComparableReport, out_dir: Path) -> Path:
+    """Write the CoC-shaped comparable-database report as JSON."""
+
+    import json
+
+    report_path = out_dir / "comparable_report.json"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    payload = suppression.comparable_payload(report)
+    report_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return report_path
+
+
 def _write_household_suggestions(
     suggestions: Sequence[household.HouseholdSuggestion],
     confirmed: frozenset[str],
@@ -525,6 +537,8 @@ class ExportSummary:
     logged: int
     aggregate: AggregateSummary | None = None
     aggregate_path: Path | None = None
+    comparable: ComparableReport | None = None
+    comparable_path: Path | None = None
     household_suggestions: tuple[household.HouseholdSuggestion, ...] = ()
     household_path: Path | None = None
 
@@ -636,6 +650,28 @@ def export(
         logged=logged,
         aggregate=aggregate,
         aggregate_path=aggregate_path,
+        comparable=None,
+        comparable_path=None,
         household_suggestions=household_suggestions,
         household_path=household_path,
     )
+
+
+def export_comparable(
+    result: RunResult,
+    recipe: Recipe,
+    *,
+    out_dir: Path,
+) -> tuple[ComparableReport, Path]:
+    """Write only the suppressed comparable-database report."""
+
+    exportable, _ = consent.partition_by_consent(
+        result.golden,
+        require_consent=recipe.require_consent,
+        destination=recipe.output.connector,
+    )
+    report = suppression.comparable_summary(
+        exportable,
+        threshold=recipe.suppression_threshold,
+    )
+    return report, _write_comparable_report(report, out_dir)
