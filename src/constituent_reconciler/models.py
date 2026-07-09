@@ -226,8 +226,8 @@ class GoldenRecord:
     cluster_id: str
     members: tuple[str, ...]
     fields: dict[str, str]
-    field_sources: dict[str, str]
     primary: str
+    field_sources: dict[str, str] = field(default_factory=dict)
     consent: Consent = field(default_factory=Consent)
 
 
