@@ -18,7 +18,8 @@ from constituent_reconciler.config import ExtractConfig, Recipe
 from constituent_reconciler.models import IngestReport, Record, RunResult
 from constituent_reconciler.normalize import normalize_record
 from constituent_reconciler.report import render_run_summary
-from tests.conftest import _make_pdf
+from constituent_reconciler.schema import REPORT_SCHEMA_VERSION
+from constituent_reconciler.testing import make_pdf
 
 
 def _recipe(incoming: Path, *, backend: str = "none") -> Recipe:
@@ -39,7 +40,7 @@ def mixed_folder(tmp_path: Path) -> Path:
     folder.mkdir()
     (folder / "batch.csv").write_text("first,last,dob\nBob,Smith,1985-07-04\n", encoding="utf-8")
     (folder / "form.pdf").write_bytes(
-        _make_pdf(
+        make_pdf(
             [
                 "Intake Form",
                 "First Name: Alice",
@@ -49,7 +50,7 @@ def mixed_folder(tmp_path: Path) -> Path:
         )
     )
     # A page that yields no name is dropped by read_pdf_records.
-    (folder / "blank.pdf").write_bytes(_make_pdf(["Hi"]))
+    (folder / "blank.pdf").write_bytes(make_pdf(["Hi"]))
     (folder / "notes.docx").write_text("not an ingestible source", encoding="utf-8")
     return folder
 
@@ -171,7 +172,7 @@ def test_cli_run_writes_machine_readable_run_report(tmp_path: Path) -> None:
     assert exit_code == 0
 
     payload = json.loads((out_dir / "run_report.json").read_text(encoding="utf-8"))
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == REPORT_SCHEMA_VERSION
     ingest = payload["ingest"]
     assert ingest["files_read"] == [str(folder / "batch.csv")]
     assert ingest["files_skipped"] == [
