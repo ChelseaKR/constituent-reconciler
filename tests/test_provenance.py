@@ -239,9 +239,7 @@ def test_rfc3161_non_granted_status_raises_and_writes_nothing(tmp_path: Path) ->
 
 
 def test_rfc3161_imprint_mismatch_raises(tmp_path: Path) -> None:
-    authority = Rfc3161Authority(
-        "https://tsa.example/tsr", transport=_FakeTsa(wrong_imprint=True)
-    )
+    authority = Rfc3161Authority("https://tsa.example/tsr", transport=_FakeTsa(wrong_imprint=True))
     log = ProvenanceLog(tmp_path / "p.jsonl", authority)
     with pytest.raises(TimestampError, match="messageImprint"):
         log.append(
@@ -250,9 +248,7 @@ def test_rfc3161_imprint_mismatch_raises(tmp_path: Path) -> None:
 
 
 def test_rfc3161_nonce_mismatch_raises(tmp_path: Path) -> None:
-    authority = Rfc3161Authority(
-        "https://tsa.example/tsr", transport=_FakeTsa(wrong_nonce=True)
-    )
+    authority = Rfc3161Authority("https://tsa.example/tsr", transport=_FakeTsa(wrong_nonce=True))
     log = ProvenanceLog(tmp_path / "p.jsonl", authority)
     with pytest.raises(TimestampError, match="nonce"):
         log.append(
