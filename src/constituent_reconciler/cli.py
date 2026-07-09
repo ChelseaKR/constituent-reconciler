@@ -22,7 +22,13 @@ from constituent_reconciler.config import Recipe, load_recipe
 from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.consent import partition_by_consent
 from constituent_reconciler.destruction import destroy, parse_retention
-from constituent_reconciler.evaluate import evaluate, extraction_metrics
+from constituent_reconciler.evaluate import (
+    KAPPA_GATE,
+    CalibrationReport,
+    calibrate,
+    evaluate,
+    extraction_metrics,
+)
 from constituent_reconciler.pipeline import ExportSummary
 from constituent_reconciler.policy import PolicyViolation
 from constituent_reconciler.provenance import ProvenanceLog, verify_log
@@ -91,21 +97,50 @@ def _cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_calibration(path: Path | None) -> CalibrationReport | None:
+    if path is None:
+        return None
+    if not path.is_file():
+        print(f"calibration labels file not found: {path}", file=sys.stderr)
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("calibration labels file must be a JSON object")
+        labels = payload.get("labels", [])
+        if not isinstance(labels, list):
+            raise ValueError("calibration labels must be a list")
+        threshold = payload.get("threshold", KAPPA_GATE)
+        if not isinstance(threshold, int | float):
+            raise ValueError("calibration threshold must be numeric")
+        return calibrate(labels, threshold=float(threshold))
+    except (OSError, json.JSONDecodeError, ValueError) as error:
+        print(f"calibration error: {error}", file=sys.stderr)
+        return None
+
+
 def _cmd_eval(args: argparse.Namespace) -> int:
     recipe = load_recipe(args.config)
     result = pipeline.run(recipe)
     truth = json.loads(Path(args.truth).read_text(encoding="utf-8"))
     clusters = truth.get("clusters", [])
     report = evaluate(result.pairs, clusters, n_records=len(result.records))
+    calibration = _load_calibration(Path(args.calibration) if args.calibration else None)
     markdown = render_eval_markdown(
-        report, dataset=Path(args.config).parent.name, gate_threshold=args.gate
+        report,
+        dataset=Path(args.config).parent.name,
+        gate_threshold=args.gate,
+        calibration=calibration,
     )
     if args.out:
         Path(args.out).write_text(markdown, encoding="utf-8")
         print(f"wrote eval report: {args.out}")
     else:
         print(markdown)
-    return 0 if report.false_merge_rate <= args.gate else 1
+    gates_pass = (
+        report.false_merge_rate <= args.gate and calibration is not None and calibration.passed
+    )
+    return 0 if gates_pass else 1
 
 
 def _cmd_eval_extraction(args: argparse.Namespace) -> int:
@@ -292,6 +327,10 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument("--out", help="write the report here instead of stdout")
     eval_parser.add_argument(
         "--gate", type=float, default=0.0, help="max allowed false-merge rate (default 0.0)"
+    )
+    eval_parser.add_argument(
+        "--calibration",
+        help="calibration labels JSON for the fail-closed kappa gate",
     )
     eval_parser.set_defaults(func=_cmd_eval)
 
