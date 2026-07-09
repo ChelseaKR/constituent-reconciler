@@ -38,12 +38,22 @@ def _load_pairs(path: Path, keys: Sequence[str]) -> list[frozenset[str]]:
     return pairs
 
 
+def _load_household_ids(path: Path, key: str) -> frozenset[str]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return frozenset(str(entry) for entry in data.get(key, []))
+
+
 def _print_export(recipe: Recipe, summary: ExportSummary, *, dry_run: bool) -> None:
     mode = "dry run, nothing written" if dry_run else "wrote"
     print(f"\nconnector '{recipe.output.connector}' ({mode}): {summary.describe()}")
     print(f"  review queue: {summary.review_path}")
     if summary.withheld_path:
         print(f"  withheld:     {summary.withheld_path}")
+    if summary.household_path:
+        print(
+            f"  households:   {summary.household_path} "
+            f"({len(summary.household_suggestions)} suggested, review before use)"
+        )
     if summary.provenance_path:
         print(f"  provenance:   {summary.provenance_path} ({summary.logged} entries)")
     if summary.aggregate is not None:
@@ -100,11 +110,21 @@ def _cmd_apply(args: argparse.Namespace) -> int:
     decisions_path = Path(args.decisions)
     force_auto = _load_pairs(decisions_path, ["approved"])
     force_drop = _load_pairs(decisions_path, ["rejected"])
+    # "households_confirmed" is a list of household ids copied from an earlier
+    # run's household_suggestions.csv by a reviewer; a suggestion never applies
+    # to the CRM export column until it appears here (household.py).
+    confirmed_households = _load_household_ids(decisions_path, "households_confirmed")
     result = pipeline.run(recipe, force_auto=force_auto, force_drop=force_drop)
     _, withheld = partition_by_consent(result.golden, require_consent=recipe.require_consent)
     print(render_run_summary(result, withheld=len(withheld)))
     try:
-        summary = pipeline.export(result, recipe, out_dir=Path(args.out), dry_run=False)
+        summary = pipeline.export(
+            result,
+            recipe,
+            out_dir=Path(args.out),
+            dry_run=False,
+            confirmed_households=confirmed_households,
+        )
     except PolicyViolation as error:
         print(f"\npolicy error: {error}", file=sys.stderr)
         return 2

@@ -14,7 +14,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from constituent_reconciler import consent, decisions, matching, suppression
+from constituent_reconciler import consent, decisions, household, matching, suppression
 from constituent_reconciler.config import Recipe
 from constituent_reconciler.connectors import get_factory
 from constituent_reconciler.connectors.base import Connector, WriteResult
@@ -306,6 +306,41 @@ def _write_aggregate_summary(summary: AggregateSummary, out_dir: Path) -> Path:
     return summary_path
 
 
+def _write_household_suggestions(
+    suggestions: Sequence[household.HouseholdSuggestion],
+    confirmed: frozenset[str],
+    out_dir: Path,
+) -> Path:
+    """Write the household suggestion artifact: its own review queue section.
+
+    Every suggestion is listed regardless of confirmation status, so a reviewer
+    sees the full candidate list in one place; the ``confirmed`` column reflects
+    only what was passed in as already confirmed (from a decisions file), never
+    what the grouping itself proposes. Nothing here is read back by this
+    function; confirmation flows back in through ``export``'s
+    ``confirmed_households`` argument on a later run, the same shape as the
+    pair-review decisions file.
+    """
+
+    path = out_dir / "household_suggestions.csv"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["household_id", "members", "address", "surname", "confirmed", "note"])
+        for suggestion in suggestions:
+            writer.writerow(
+                [
+                    suggestion.household_id,
+                    "|".join(suggestion.members),
+                    suggestion.address,
+                    suggestion.surname,
+                    "yes" if suggestion.household_id in confirmed else "",
+                    household.REVIEW_NOTE,
+                ]
+            )
+    return path
+
+
 def _write_withheld(withheld: Sequence[GoldenRecord], out_dir: Path) -> Path:
     withheld_path = out_dir / "withheld.csv"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -360,6 +395,8 @@ class ExportSummary:
     logged: int
     aggregate: AggregateSummary | None = None
     aggregate_path: Path | None = None
+    household_suggestions: tuple[household.HouseholdSuggestion, ...] = ()
+    household_path: Path | None = None
 
     def counts(self) -> dict[str, int]:
         out: dict[str, int] = {}
@@ -383,6 +420,7 @@ def export(
     authority: TimestampAuthority | None = None,
     transport: Transport | None = None,
     sf_transport: SalesforceTransport | None = None,
+    confirmed_households: Iterable[str] = (),
 ) -> ExportSummary:
     """Write resolved records through the configured connector.
 
@@ -390,6 +428,12 @@ def export(
     consent (under a consent-required policy) are withheld and never handed to a
     connector. Each real write is recorded in the append-only provenance log. A
     dry run performs no writes and logs nothing.
+
+    ``confirmed_households`` carries household ids a reviewer confirmed from an
+    earlier run's ``household_suggestions.csv`` (see ``cli.py``'s ``apply``
+    command). It has no effect unless ``recipe.household.enabled`` is true: the
+    grouping step itself never runs otherwise, under any policy pack, so there
+    is nothing to confirm into.
     """
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -398,7 +442,22 @@ def export(
     )
     by_id = {record.cluster_id: record for record in exportable}
 
+    household_suggestions: tuple[household.HouseholdSuggestion, ...] = ()
+    household_path: Path | None = None
+    household_map: dict[str, str] = {}
+    if recipe.household.enabled:
+        # Suggestions are built over exportable records only: a withheld
+        # (no-consent) record must not appear in a household suggestion any
+        # more than it appears in a CRM export.
+        household_suggestions = tuple(household.suggest_households(exportable))
+        confirmed = frozenset(confirmed_households)
+        household_map = household.confirmed_member_map(household_suggestions, confirmed)
+        if not dry_run:
+            household_path = _write_household_suggestions(household_suggestions, confirmed, out_dir)
+
     connector = build_connector(recipe, out_dir, transport=transport, sf_transport=sf_transport)
+    if household_map and isinstance(connector, CrmCsvConnector):
+        connector.set_household_column(household_map)
     write_results = connector.write_all(exportable, recipe.fields, dry_run=dry_run)
 
     provenance_path = out_dir / "provenance.jsonl"
@@ -443,4 +502,6 @@ def export(
         logged=logged,
         aggregate=aggregate,
         aggregate_path=aggregate_path,
+        household_suggestions=household_suggestions,
+        household_path=household_path,
     )

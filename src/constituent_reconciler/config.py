@@ -49,6 +49,21 @@ class ExtractConfig:
 
 
 @dataclass(frozen=True)
+class HouseholdConfig:
+    """Household-grouping settings, loaded from the recipe's [household] section.
+
+    ``enabled`` defaults to False under every policy pack, including ``dv``: the
+    grouping step (household.py) never runs unless a recipe turns it on
+    explicitly. See docs/decisions for the DV interaction; the off-by-default is
+    an invariant, not a convenience default, because inferring co-residence from
+    a shared address is itself sensitive (shelter residents share an address
+    without being a household).
+    """
+
+    enabled: bool = False
+
+
+@dataclass(frozen=True)
 class OutputConfig:
     """Where resolved records are written. Secrets are never stored here.
 
@@ -87,6 +102,7 @@ class Recipe:
     normalize: NormalizeConfig = field(default_factory=NormalizeConfig)
     extract: ExtractConfig = field(default_factory=ExtractConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
+    household: HouseholdConfig = field(default_factory=HouseholdConfig)
 
 
 def _resolve(base: Path, value: str) -> Path:
@@ -115,6 +131,7 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
     normalize_section = data.get("normalize", {})
     extract_section = data.get("extract", {})
     output_section = data.get("output", {})
+    household_section = data.get("household", {})
 
     if "incoming" not in input_section:
         raise ValueError("recipe [input] must set 'incoming'")
@@ -148,6 +165,12 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
         confidence_threshold=float(extract_section.get("confidence_threshold", 0.5)),
     )
 
+    # Off by default under every policy pack; a recipe must opt in explicitly.
+    # The dv pack does not force this off (a shelter provider may still want a
+    # reviewed suggestion list on its own machine), but it never turns it on:
+    # the only source of "enabled" is the recipe itself.
+    household = HouseholdConfig(enabled=bool(household_section.get("enabled", False)))
+
     output = OutputConfig(
         connector=str(output_section.get("connector", "csv")),
         endpoint=str(output_section.get("endpoint", "")),
@@ -177,4 +200,5 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
         normalize=normalize,
         extract=extract,
         output=output,
+        household=household,
     )

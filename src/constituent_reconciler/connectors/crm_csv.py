@@ -18,6 +18,31 @@ that column is idempotent the same way the live connectors' upsert is.
 The destination is a local file, so ``is_local`` is True and the DV policy pack
 permits it: an org under VAWA/FVPSA can produce a CRM-shaped import file on its
 own machine, while the network push connectors stay refused.
+
+Optionally, a confirmed household grouping (household.py; see
+``CrmCsvConnector.set_household_column``) adds one more column: a shared id
+for the records a human reviewer confirmed belong to the same household. The
+column is present only when the caller supplies a household map, and a record
+absent from that map (its household was never suggested, or was suggested but
+not confirmed) gets an empty value in that column rather than being left out
+of the map's own household -- no suggestion is ever treated as confirmed by
+default.
+
+  * CiviCRM's "Import Contacts" wizard maps a column to the built-in
+    "Household Name" relationship field to create or match a Household contact
+    and a "Household Member of" relationship for each row that shares a value;
+    the household column here is written so an operator can point that mapping
+    at it directly (CiviCRM User and Administrator Guide, Contacts > Importing
+    Contacts > Relationships).
+  * Salesforce/NPSP has no fixed header name for this: the household column is
+    written so an operator maps it, during the import tool's own field
+    mapping, to the org's chosen external-id field on the Household Account
+    (NPSP's standard household-account model), so contacts sharing a value
+    resolve to the same Account.
+
+Neither claim is a promise that the target org's schema matches the default
+NPSP or CiviCRM install; both CRMs are configurable, and this module does not
+call either API, so the CSV is what the operator inspects and maps by hand.
 """
 
 from __future__ import annotations
@@ -34,8 +59,14 @@ from constituent_reconciler.models import GoldenRecord
 __all__ = [
     "CIVICRM_IMPORT_MAP",
     "SALESFORCE_IMPORT_MAP",
+    "DEFAULT_HOUSEHOLD_COLUMN",
     "CrmCsvConnector",
 ]
+
+# Default header for the optional household column. A recipe does not choose
+# this name today; it exists so the two shipped CRM exports use one column
+# name a reader learns once.
+DEFAULT_HOUSEHOLD_COLUMN = "household_external_id"
 
 
 class CrmCsvConnector:
@@ -63,12 +94,38 @@ class CrmCsvConnector:
         self.path = path
         self.field_map = field_map
         self.external_id_column = external_id_column
+        self._household_map: Mapping[str, str] | None = None
+        self._household_column = DEFAULT_HOUSEHOLD_COLUMN
+
+    def set_household_column(
+        self,
+        household_map: Mapping[str, str],
+        *,
+        column: str = DEFAULT_HOUSEHOLD_COLUMN,
+    ) -> None:
+        """Add a household-id column, populated only for confirmed groupings.
+
+        ``household_map`` is a cluster-id -> household-id mapping built from
+        confirmed suggestions only (``household.confirmed_member_map``); a
+        cluster id absent from it (no suggestion, or a suggestion a reviewer
+        has not yet confirmed) gets an empty value in the column, never a
+        guess. Calling this is optional and additive: a connector that never
+        has this called writes exactly the file it wrote before this feature
+        existed.
+        """
+
+        self._household_map = household_map
+        self._household_column = column
 
     def _columns(self, fields: tuple[str, ...]) -> list[str]:
-        # Active, mapped fields in canonical order, then the external-id column.
-        return [self.field_map[f] for f in fields if f in self.field_map] + [
+        # Active, mapped fields in canonical order, then the external-id
+        # column, then the optional household column (only when set).
+        columns = [self.field_map[f] for f in fields if f in self.field_map] + [
             self.external_id_column
         ]
+        if self._household_map is not None:
+            columns.append(self._household_column)
+        return columns
 
     def _row(self, record: GoldenRecord, fields: tuple[str, ...]) -> dict[str, str]:
         row: dict[str, str] = {}
@@ -78,6 +135,8 @@ class CrmCsvConnector:
             if column and value:
                 row[column] = value
         row[self.external_id_column] = record.cluster_id
+        if self._household_map is not None:
+            row[self._household_column] = self._household_map.get(record.cluster_id, "")
         return row
 
     def write_all(
