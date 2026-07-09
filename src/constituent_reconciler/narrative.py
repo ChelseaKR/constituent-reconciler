@@ -27,12 +27,8 @@ _STRINGS: dict[str, dict[str, str]] = {
             "record identifier appears on this page."
         ),
         "h_in": "## What came in",
-        "records_in": (
-            "- Records read from intake files and existing records: **{n}**"
-        ),
-        "candidate_pairs": (
-            "- Pairs of records that might describe the same person: **{n}**"
-        ),
+        "records_in": ("- Records read from intake files and existing records: **{n}**"),
+        "candidate_pairs": ("- Pairs of records that might describe the same person: **{n}**"),
         "h_merge": "## What merged automatically and what went to a person",
         "auto_pairs": "- Pairs merged automatically at high confidence: **{n}**",
         "review_pairs": "- Uncertain pairs sent to a human reviewer: **{n}**",
@@ -43,9 +39,7 @@ _STRINGS: dict[str, dict[str, str]] = {
             "decides each one, so nothing merges silently."
         ),
         "h_withheld": "## What was withheld and why",
-        "withheld_count": (
-            "- Records withheld because consent was not granted: **{n}**"
-        ),
+        "withheld_count": ("- Records withheld because consent was not granted: **{n}**"),
         "withheld_rule": (
             "A record without granted, current consent is never written to the "
             "output. Any consent status other than granted blocks the write. "
@@ -94,20 +88,14 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "h_in": "## Qué ingresó",
         "records_in": (
-            "- Registros leídos de los archivos de admisión y de los registros "
-            "existentes: **{n}**"
+            "- Registros leídos de los archivos de admisión y de los registros existentes: **{n}**"
         ),
         "candidate_pairs": (
-            "- Pares de registros que podrían describir a la misma persona: "
-            "**{n}**"
+            "- Pares de registros que podrían describir a la misma persona: **{n}**"
         ),
         "h_merge": "## Qué se fusionó automáticamente y qué pasó a una persona",
-        "auto_pairs": (
-            "- Pares fusionados automáticamente con alta confianza: **{n}**"
-        ),
-        "review_pairs": (
-            "- Pares inciertos enviados a una persona revisora: **{n}**"
-        ),
+        "auto_pairs": ("- Pares fusionados automáticamente con alta confianza: **{n}**"),
+        "review_pairs": ("- Pares inciertos enviados a una persona revisora: **{n}**"),
         "resolved": "- Registros después de la fusión: **{n}**",
         "merged_records": "- Registros formados al combinar duplicados: **{n}**",
         "merge_rule": (
@@ -116,8 +104,7 @@ _STRINGS: dict[str, dict[str, str]] = {
         ),
         "h_withheld": "## Qué se retuvo y por qué",
         "withheld_count": (
-            "- Registros retenidos porque el consentimiento no fue otorgado: "
-            "**{n}**"
+            "- Registros retenidos porque el consentimiento no fue otorgado: **{n}**"
         ),
         "withheld_rule": (
             "Un registro sin consentimiento otorgado y vigente nunca se escribe "
