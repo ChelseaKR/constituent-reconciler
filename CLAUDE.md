@@ -6,9 +6,12 @@
 ## What this is
 
 `constituent-reconciler` is an offline-first pipeline that turns intake
-documents (PDFs, scans, CSVs, email bodies) plus a target case system into
-verified, deduplicated constituent records written back into that system, with
-a non-technical human review queue over every uncertain match. It chains five
+documents plus a target case system into verified, deduplicated constituent
+records written back into that system, with a non-technical human review queue
+over every uncertain match. The inputs the code reads today are CSVs and
+digitally created (text-layer) PDFs. Scanned documents (OCR) and email bodies
+are planned, tracked as EXP-04 and EXP-08 in docs/ideation/03-expansions.md,
+and the README says the same. It chains five
 steps that already exist as separate libraries: extract, normalize, resolve,
 review, write. The contribution is the chain, the pre-tuned defaults, the
 review queue, and a privacy mode a victim-service provider can legally use.
@@ -70,39 +73,51 @@ README speaks only to nonprofit practitioners.
 
 ## Architecture
 
+This map is the as-built layout. Keep it in step with `ls
+src/constituent_reconciler`; docs/CLAIMS-AUDIT.md records the last audit.
+
 ```
 constituent-reconciler/
 ├── CLAUDE.md                      # this file
 ├── README.md                      # practitioner-facing
 ├── pyproject.toml                 # PEP 621, console_scripts entry: reconcile
 ├── src/constituent_reconciler/
-│   ├── __init__.py
-│   ├── cli.py                     # reconcile run --config recipe.toml; --dry-run; --policy-pack
-│   ├── config.py                  # recipe.toml: source, connector, thresholds, policy pack
-│   ├── pipeline.py                # the state machine: ingest -> extract -> normalize -> resolve -> review -> write
-│   ├── ingest.py                  # folder/inbox/CSV discovery and reading
-│   ├── extract/
-│   │   ├── deterministic.py       # offline default (CSV/structured, simple PDF)
-│   │   └── seam.py                # optional Bedrock seam, policy-gated, low-confidence pages only
-│   ├── normalize.py               # names, dates, libpostal + CASS-style ruleset
-│   ├── resolve.py                 # wrap Splink/dedupe; emit match/non-match/possible-match clusters
-│   ├── gate.py                    # fail-closed confidence gate; routing to review
-│   ├── review/                    # local WCAG 2.2 AA queue UI (source span vs candidate)
+│   ├── __init__.py                # public API surface, intentionally small
+│   ├── address.py                 # deterministic CASS-style standardizer, not USPS-certified
+│   ├── cli.py                     # subcommands: run, eval, apply, review, validate, verify, schema
+│   ├── config.py                  # recipe.toml loading: sources, connector, thresholds, policy pack
 │   ├── connectors/
 │   │   ├── base.py                # connector interface (the jobradar adapter pattern)
-│   │   ├── csv_out.py
-│   │   ├── civicrm.py
-│   │   └── salesforce.py          # later
-│   ├── consent.py                 # consent as a first-class field; expiry, revocation
-│   ├── policy/                    # policy packs: default, dv (VAWA/FVPSA), hipaa
-│   ├── provenance.py              # append-only log, BLAKE2b, RFC 3161 timestamps
-│   └── report.py                  # run report + eval scoring renderers
+│   │   ├── civicrm.py             # CiviCRM live write-back (API v4 upsert)
+│   │   ├── crm_csv.py             # import-ready CRM export files (salesforce_csv, civicrm_csv)
+│   │   ├── csv_out.py             # default local CSV output
+│   │   └── salesforce.py          # Salesforce live write-back (REST upsert, NPSP Contact)
+│   ├── consent.py                 # consent export gate; absent/revoked/expired withheld, fail-closed
+│   ├── decisions.py               # banding, clustering, golden-record selection; the fail-closed gate
+│   ├── defaults.py                # pre-tuned matching defaults
+│   ├── evaluate.py                # eval scoring: false-merge and missed-match rates, Wilson intervals
+│   ├── extract/
+│   │   ├── __init__.py            # public surface: the offline extractor and the seam gate
+│   │   ├── base.py                # extractor protocol and extraction result types
+│   │   ├── pdf.py                 # offline pdfplumber extraction; text-layer PDFs only, no OCR
+│   │   └── seam.py                # optional Bedrock seam, policy-gated, low-confidence pages only
+│   ├── matching.py                # Splink wrapper; pandas appears here and nowhere else
+│   ├── models.py                  # core dataclasses, free of matcher and framework types
+│   ├── normalize.py               # deterministic name/date/address normalization, offline
+│   ├── pipeline.py                # orchestrator: ingest -> extract -> normalize -> resolve -> review -> write
+│   ├── policy.py                  # policy packs: default, dv (VAWA/FVPSA), hipaa
+│   ├── provenance.py              # append-only BLAKE2b hash chain; RFC 3161 is a pluggable seam, not shipped
+│   ├── report.py                  # run summary + committed eval report renderers
+│   ├── review/                    # local WCAG 2.2 AA queue UI: render.py, server.py, session.py
+│   ├── schema.py                  # declared schema/interface versions for the stability contract
+│   └── suppression.py             # aggregate suppression-aware summaries for external sharing
 ├── tests/
 │   ├── fixtures/                  # seeded synthetic data, zero real PII, planted ground truth
-│   └── test_*.py                  # incl. test_no_egress.py, test_consent_blocks_export.py
+│   └── test_*.py                  # incl. test_no_egress.py, test_consent.py
 ├── eval/                          # committed eval report + the fixtures it scores
 ├── .github/workflows/ci.yml
 └── docs/
+    ├── CLAIMS-AUDIT.md            # dated capability-claims audit: claim, where stated, code, status
     ├── ROADMAP.md
     └── RESPONSIBLE-TECH-AUDITS.md
 ```
@@ -140,7 +155,7 @@ Phases match docs/ROADMAP.md. In brief:
 ## Quality bar
 
 * Every step has a passing and a failing fixture. The privacy invariants
-  (`test_no_egress.py`, `test_consent_blocks_export.py`) are merge-blocking.
+  (`test_no_egress.py`, `test_consent.py`) are merge-blocking.
 * `ruff check`, `mypy --strict` on `src/`, and pytest green in CI before any
   feature work continues. No skipped tests on `main`.
 * The eval report is committed and regenerated on release, with false-merge and
