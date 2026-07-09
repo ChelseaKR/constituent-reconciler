@@ -41,5 +41,6 @@ lands) and writes to a case system. The concerns it takes seriously:
 
 Network hardening, multi-tenant isolation, and authentication are out of scope
 while the tool runs locally against an operator's own data. The DV policy pack
-keeps inference offline so that PII does not egress; a later release documents
-the full threat model in `docs/`.
+keeps inference offline so that PII does not egress; the threat model for the
+untrusted-document parse path is documented in
+[`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md).
