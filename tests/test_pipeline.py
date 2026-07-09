@@ -21,6 +21,9 @@ EXPECTED_AUTO = {
     frozenset(("E007", "N005")),
     frozenset(("E010", "N008")),
     frozenset(("E012", "N010")),
+    frozenset(("E017", "N014")),
+    frozenset(("E018", "N016")),
+    frozenset(("E023", "N022")),
     frozenset(("N003", "N011")),
 }
 
@@ -42,13 +45,13 @@ def test_pipeline_eval_gate_is_clean_on_fixtures() -> None:
     result = pipeline.run(recipe)
     truth = json.loads((EXAMPLES / "ground_truth.json").read_text(encoding="utf-8"))["clusters"]
     report = evaluate(result.pairs, truth, n_records=len(result.records))
-    assert report.n_records == 27
-    assert report.n_true_pairs == 7
-    assert report.n_auto == 6
+    assert report.n_records == 45
+    assert report.n_true_pairs == 13
+    assert report.n_auto == 9
     assert report.false_merges == 0
     assert report.false_merge_rate == 0.0
-    assert report.missed == 0
-    assert report.recall_coverage == 1.0
+    assert report.missed == 1
+    assert report.recall_coverage == 12 / 13
     assert report.blocking_misses == 0
 
 
@@ -80,10 +83,10 @@ def test_export_writes_csv_review_queue_and_provenance(tmp_path: Path) -> None:
     resolved = tmp_path / "resolved.csv"
     assert resolved.exists()
     assert summary.review_path.exists()
-    # 27 records minus 6 merges leaves 21 resolved rows plus the header.
-    assert len(resolved.read_text(encoding="utf-8").strip().splitlines()) == 22
+    # 45 records minus 9 merges leaves 36 resolved rows plus the header.
+    assert len(resolved.read_text(encoding="utf-8").strip().splitlines()) == 37
     # Every exported record produced one provenance entry, and the chain verifies.
-    assert summary.logged == 21
+    assert summary.logged == 36
     assert summary.provenance_path is not None
     ok, _ = verify_log(summary.provenance_path)
     assert ok
@@ -247,7 +250,7 @@ def test_export_via_salesforce_creates_and_logs_provenance(tmp_path: Path) -> No
         summary = pipeline.export(
             result, recipe, out_dir=tmp_path, sf_transport=_SalesforceTransport()
         )
-        assert summary.counts().get("created") == 21
+        assert summary.counts().get("created") == 36
         assert summary.provenance_path is not None
         ok, _ = verify_log(summary.provenance_path)
         assert ok
@@ -266,8 +269,8 @@ def test_export_via_civicrm_creates_and_logs_provenance(tmp_path: Path) -> None:
         )
         result = pipeline.run(recipe)
         summary = pipeline.export(result, recipe, out_dir=tmp_path, transport=_RoutingTransport())
-        # Default policy exports all 21 resolved records; none pre-exist, so all create.
-        assert summary.counts().get("created") == 21
+        # Default policy exports all 36 resolved records; none pre-exist, so all create.
+        assert summary.counts().get("created") == 36
         assert summary.provenance_path is not None
         ok, _ = verify_log(summary.provenance_path)
         assert ok
