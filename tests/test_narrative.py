@@ -16,7 +16,15 @@ import pytest
 from constituent_reconciler import pipeline
 from constituent_reconciler.cli import build_parser, main
 from constituent_reconciler.config import Recipe
-from constituent_reconciler.models import Band, Cluster, GoldenRecord, Pair, Record, RunResult
+from constituent_reconciler.models import (
+    Band,
+    Cluster,
+    Consent,
+    GoldenRecord,
+    Pair,
+    Record,
+    RunResult,
+)
 from constituent_reconciler.narrative import render_narrative
 
 RESULT_SUMMARY: dict[str, object] = {
@@ -152,7 +160,7 @@ def _planted_run() -> RunResult:
                 "email": "zephyrine.quandt@example.test",
             },
             "Z0001",
-            True,
+            Consent(status="granted"),
         ),
         GoldenRecord(
             "c-0002",
@@ -163,7 +171,7 @@ def _planted_run() -> RunResult:
                 "email": "balthazar.okonkwo@example.test",
             },
             "Z0003",
-            True,
+            Consent(status="granted"),
         ),
         GoldenRecord(
             "c-0003",
@@ -174,7 +182,7 @@ def _planted_run() -> RunResult:
                 "email": "wilhelmina.f@example.test",
             },
             "Z0004",
-            False,
+            Consent(),
         ),
     )
     return RunResult(records=records, pairs=pairs, clusters=clusters, golden=golden)

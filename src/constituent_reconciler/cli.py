@@ -23,6 +23,7 @@ from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.consent import partition_by_consent
 from constituent_reconciler.destruction import destroy, parse_retention
 from constituent_reconciler.evaluate import evaluate, extraction_metrics
+from constituent_reconciler.narrative import LANGUAGES, render_narrative
 from constituent_reconciler.pipeline import ExportSummary
 from constituent_reconciler.policy import PolicyViolation
 from constituent_reconciler.provenance import ProvenanceLog, verify_log
@@ -153,6 +154,36 @@ def _cmd_eval_extraction(args: argparse.Namespace) -> int:
         print(markdown)
     met = report.precision >= args.precision_target and report.recall >= args.recall_target
     return 0 if met else 1
+
+
+def _load_json_object(path: Path) -> dict[str, object]:
+    data: object = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} must contain a JSON object")
+    return {str(key): value for key, value in data.items()}
+
+
+def _cmd_report(args: argparse.Namespace) -> int:
+    run_dir = Path(args.run_dir)
+    summary_path = run_dir / "run_summary.json"
+    aggregate_path = run_dir / "aggregate_summary.json"
+    if not summary_path.is_file():
+        print(f"report error: run summary not found: {summary_path}", file=sys.stderr)
+        return 2
+    try:
+        result_summary = _load_json_object(summary_path)
+        aggregate = _load_json_object(aggregate_path) if aggregate_path.is_file() else None
+        markdown = render_narrative(result_summary, aggregate, lang=args.lang)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(f"report error: {error}", file=sys.stderr)
+        return 2
+
+    if args.out:
+        Path(args.out).write_text(markdown, encoding="utf-8")
+        print(f"wrote narrative report: {args.out}")
+    else:
+        print(markdown, end="")
+    return 0
 
 
 def _cmd_apply(args: argparse.Namespace) -> int:
@@ -346,6 +377,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="minimum field recall for exit status 0 (default 0.90, the ledger target)",
     )
     exeval_parser.set_defaults(func=_cmd_eval_extraction)
+
+    report_parser = sub.add_parser("report", help="render a count-only run report")
+    report_parser.add_argument(
+        "--run-dir", default="out", help="directory containing run artifacts"
+    )
+    report_parser.add_argument(
+        "--format",
+        choices=("narrative",),
+        default="narrative",
+        help="report format to render",
+    )
+    report_parser.add_argument(
+        "--lang",
+        choices=LANGUAGES,
+        default="en",
+        help="language for narrative reports",
+    )
+    report_parser.add_argument("--out", help="write the report here instead of stdout")
+    report_parser.set_defaults(func=_cmd_report)
 
     apply_parser = sub.add_parser("apply", help="apply review decisions and re-resolve")
     apply_parser.add_argument("--config", required=True, help="path to recipe.toml")
