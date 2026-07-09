@@ -54,7 +54,7 @@ packages = ["src/constituent_reconciler"]
 
 [tool.ruff]
 line-length = 100
-src = ["src", "tests"]
+src = ["src", "tests", "tools"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "W", "S", "C90"]
@@ -67,14 +67,22 @@ max-complexity = 10
 # also deliberately construct fake credentials (S105/S106), a
 # bind-all-interfaces call to assert it is refused (S104), and urlopen calls
 # against the in-test loopback server (S310) — all expected-in-tests patterns,
-# not findings. Real code in src/ still gets the full S set with per-line
-# noqas where a specific call is a reviewed false positive.
-"tests/*" = ["S101", "S104", "S105", "S106", "S110", "S310"]
+# not findings. test_corpusgen.py's `random.Random` calls exercise the
+# corpus generator's error channels directly and are never a security
+# decision either (S311). Real code in src/ still gets the full S set with
+# per-line noqas where a specific call is a reviewed false positive.
+"tests/*" = ["S101", "S104", "S105", "S106", "S110", "S310", "S311"]
+# The corpus generator's randomness is for reproducible synthetic test data,
+# never a security decision, so `random.Random` (S311, "not for cryptographic
+# purposes") is the correct choice here, not a finding.
+"tools/corpusgen/*" = ["S311"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "tools"]
+explicit_package_bases = true
+mypy_path = ["src"]
 
 [[tool.mypy.overrides]]
 module = [

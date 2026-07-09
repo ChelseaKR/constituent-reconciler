@@ -1,4 +1,4 @@
-.PHONY: install verify format-check lint type test security eval run docker clean
+.PHONY: install verify format-check lint type test security eval eval-large run docker clean
 
 # Reproduce the full local toolchain. CI mirrors `make verify` byte for byte.
 # `uv sync --frozen` refuses to run (and exits non-zero) if uv.lock is stale
@@ -8,10 +8,10 @@ install:
 	uv sync --frozen --python 3.12 --group dev --extra extract
 
 format-check:
-	.venv/bin/ruff format --check src tests
+	.venv/bin/ruff format --check src tests tools
 
 lint:
-	.venv/bin/ruff check src tests
+	.venv/bin/ruff check src tests tools
 
 type:
 	.venv/bin/python -m mypy
@@ -36,6 +36,18 @@ eval:
 		--config examples/intake-demo/recipe.toml \
 		--truth examples/intake-demo/ground_truth.json \
 		--out eval/report.md
+
+# Regenerate the large synthetic-corpus eval report (FIX-11). Not part of
+# `verify` or CI: a 10^4-10^5 record corpus through Splink/DuckDB takes
+# materially longer than the 27-record demo `make eval` gates on, so this
+# runs on release instead of every push. Corpus and report are both
+# regenerated fresh each time (deterministic from the seed baked into the
+# script), so nothing here needs to be committed except the resulting report.
+eval-large:
+	.venv/bin/python -m tools.corpusgen.run_large_eval \
+		--out-dir eval/large-corpus \
+		--report-out eval/large-corpus-report.md \
+		--regenerate
 
 # Run the demo end to end and write outputs to ./out.
 run:

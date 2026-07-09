@@ -20,6 +20,11 @@ out/
 out-dv/
 *.out.csv
 
+# Generated synthetic corpora (FIX-11): deterministic from the seed baked
+# into tools/corpusgen, so the raw CSVs are reproducible and not committed.
+# Only the derived report (eval/large-corpus-report.md) is committed.
+eval/large-corpus/
+
 # OS
 .DS_Store
 .coverage
