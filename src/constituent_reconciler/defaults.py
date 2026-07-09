@@ -48,37 +48,129 @@ _NAME_CLOSE: float = 0.88
 _ADDRESS_CLOSE: float = 0.90
 
 
-def _name_comparison(column: str) -> dict[str, Any]:
-    """Three-level name comparison: exact, close (Jaro-Winkler), else."""
+def _name_null_level(column: str) -> dict[str, Any]:
+    return {
+        "sql_condition": f'"{column}_l" IS NULL OR "{column}_r" IS NULL '
+        f"OR \"{column}_l\" = '' OR \"{column}_r\" = ''",
+        "label_for_charts": "null or empty",
+        "is_null_level": True,
+    }
+
+
+def _name_close_level(column: str) -> dict[str, Any]:
+    return {
+        "sql_condition": f'jaro_winkler_similarity("{column}_l", "{column}_r") >= {_NAME_CLOSE}',
+        "label_for_charts": "close",
+    }
+
+
+def _name_else_level() -> dict[str, Any]:
+    return {
+        "sql_condition": "ELSE",
+        "label_for_charts": "different",
+    }
+
+
+def _first_name_comparison(column: str = "first_name") -> dict[str, Any]:
+    """Four-level given-name comparison: exact, nickname, close, else.
+
+    The nickname level sits between exact and Jaro-Winkler "close" because a
+    nickname pair (Bill/William, Peggy/Margaret) is not a character-similarity
+    match at all; it needs the vendored table in :mod:`nicknames`, looked up
+    through the ``first_name_nickname_key`` column normalize.py derives
+    alongside ``first_name``. The four m_probabilities sum to 1.0 (the
+    convention this module uses throughout, see docs/decisions/0001), moved
+    down slightly from the three-level version's 0.92/0.07/0.01 split to make
+    room for the new level without changing the overall shape of the prior.
+    """
 
     return {
         "output_column_name": column,
         "comparison_levels": [
-            {
-                "sql_condition": f'"{column}_l" IS NULL OR "{column}_r" IS NULL '
-                f"OR \"{column}_l\" = '' OR \"{column}_r\" = ''",
-                "label_for_charts": "null or empty",
-                "is_null_level": True,
-            },
+            _name_null_level(column),
             {
                 "sql_condition": f'"{column}_l" = "{column}_r"',
                 "label_for_charts": "exact",
-                "m_probability": 0.92,
+                "m_probability": 0.88,
                 "u_probability": 0.01,
             },
             {
-                "sql_condition": f'jaro_winkler_similarity("{column}_l", "{column}_r") '
-                f">= {_NAME_CLOSE}",
-                "label_for_charts": "close",
-                "m_probability": 0.07,
-                "u_probability": 0.03,
+                "sql_condition": f'"{column}_nickname_key_l" = "{column}_nickname_key_r" '
+                f'AND "{column}_l" != "{column}_r"',
+                "label_for_charts": "nickname",
+                "m_probability": 0.06,
+                "u_probability": 0.01,
+            },
+            {**_name_close_level(column), "m_probability": 0.05, "u_probability": 0.03},
+            {**_name_else_level(), "m_probability": 0.01, "u_probability": 0.95},
+        ],
+    }
+
+
+def _last_name_comparison(column: str = "last_name") -> dict[str, Any]:
+    """Four-level surname comparison: exact, compound-surname, close, else.
+
+    The exact level carries a Splink term-frequency adjustment: agreement on
+    a common surname ("Smith") is weaker evidence of a true match than
+    agreement on a rare one, because chance collision is far more likely for
+    a common name. ``tf_adjustment_column`` points Splink at the ``last_name``
+    column itself; Splink derives the frequency table from the input data at
+    predict time (no separate estimation step, see the matching-depth-pack
+    decision doc).
+
+    ``tf_adjustment_weight`` is deliberately small (0.05, not Splink's
+    default of 1.0). The frequency table is estimated from whatever batch is
+    being resolved, which for the target user (a one or two person nonprofit
+    IT shop) can be a few dozen records, not a national name-frequency
+    reference. At weight 1.0 a surname that happens to be the only one
+    repeated in a small batch swings the match probability by two orders of
+    magnitude on that fact alone, which regressed the exact-typo fixture in
+    this module's own test suite from an auto-merge to a coin flip. A small
+    weight keeps the adjustment directionally correct (a common surname is
+    still discounted relative to a rare one, see
+    ``test_term_frequency_adjustment_favors_the_rarer_surname``) without
+    letting a small batch's sampling noise dominate the score. Revisit this
+    number if the batch sizes this project sees in practice turn out to be
+    much larger, per docs/decisions/0009-matching-depth-pack.md.
+
+    The compound-surname level reads the ``last_name_surname1`` and
+    ``last_name_surname2`` columns normalize.py derives (the last two
+    whitespace tokens of the raw value) and fires when either surname token on
+    one side matches either surname token on the other, modeling the
+    paterno/materno two-surname convention. It sits below exact and above
+    close: agreeing on one shared surname token is real evidence, but weaker
+    than agreeing on the whole string, and it is evidence a Jaro-Winkler
+    similarity on the full string would usually miss (the two full strings
+    can be quite different in length and character order).
+    """
+
+    surname1_l, surname1_r = f'"{column}_surname1_l"', f'"{column}_surname1_r"'
+    surname2_l, surname2_r = f'"{column}_surname2_l"', f'"{column}_surname2_r"'
+    compound_condition = (
+        f"({surname1_l} <> '' AND {surname1_l} IN ({surname1_r}, {surname2_r})) OR "
+        f"({surname2_l} <> '' AND {surname2_l} IN ({surname1_r}, {surname2_r}))"
+    )
+
+    return {
+        "output_column_name": column,
+        "comparison_levels": [
+            _name_null_level(column),
+            {
+                "sql_condition": f'"{column}_l" = "{column}_r"',
+                "label_for_charts": "exact",
+                "m_probability": 0.90,
+                "u_probability": 0.01,
+                "tf_adjustment_column": column,
+                "tf_adjustment_weight": 0.05,
             },
             {
-                "sql_condition": "ELSE",
-                "label_for_charts": "different",
-                "m_probability": 0.01,
-                "u_probability": 0.96,
+                "sql_condition": compound_condition,
+                "label_for_charts": "shared compound surname token",
+                "m_probability": 0.06,
+                "u_probability": 0.02,
             },
+            {**_name_close_level(column), "m_probability": 0.03, "u_probability": 0.02},
+            {**_name_else_level(), "m_probability": 0.01, "u_probability": 0.95},
         ],
     }
 
@@ -156,8 +248,8 @@ def _exact_comparison(column: str, m_yes: float, u_yes: float) -> dict[str, Any]
 # strong exact weights because agreement on them is rare by chance; date of
 # birth is strong but not decisive on its own.
 _COMPARISON_BUILDERS = {
-    "first_name": lambda: _name_comparison("first_name"),
-    "last_name": lambda: _name_comparison("last_name"),
+    "first_name": lambda: _first_name_comparison(),
+    "last_name": lambda: _last_name_comparison(),
     "dob": lambda: _exact_comparison("dob", m_yes=0.90, u_yes=0.01),
     "email": lambda: _exact_comparison("email", m_yes=0.85, u_yes=0.005),
     "phone": lambda: _exact_comparison("phone", m_yes=0.80, u_yes=0.01),
@@ -180,7 +272,20 @@ def blocking_rules_for(fields: tuple[str, ...]) -> list[str]:
     surname rule, a surname change is caught by the date rule, and so on. A true
     duplicate that agrees on none of these is out of scope for v0.1 and is
     reported honestly as a blocking miss in the eval.
+
+    When ``last_name`` is active, a phonetic blocking rule on
+    ``last_name_soundex`` (normalize.py derives this column alongside
+    ``last_name``) is added on top of the exact-match rule. Exact-string
+    blocking on last_name misses a transliteration variant of a surname
+    (a name typed with different but phonetically equivalent spelling); the
+    Soundex rule generates candidate pairs for those too, at the cost of a few
+    more comparisons the scorer then rejects. It is additive, not a
+    replacement: both rules run, and Splink unions the candidate pairs they
+    produce.
     """
 
     candidates = ["dob", "last_name", "email", "first_name"]
-    return [c for c in candidates if c in fields]
+    rules = [c for c in candidates if c in fields]
+    if "last_name" in fields:
+        rules.append("last_name_soundex")
+    return rules

@@ -14,12 +14,37 @@ import re
 import unicodedata
 from datetime import datetime
 
+from constituent_reconciler import nicknames
 from constituent_reconciler.address import normalize_address
 from constituent_reconciler.models import Record
 
 _WHITESPACE = re.compile(r"\s+")
 _NAME_PUNCT = re.compile(r"[^\w\s]", re.UNICODE)
 _NON_DIGIT = re.compile(r"\D")
+
+# American Soundex code table. Vowels and "h", "w", "y" carry no digit; they
+# are separators rather than silent letters, which matters for the
+# adjacent-duplicate-code rule in ``soundex`` below.
+_SOUNDEX_CODES: dict[str, str] = {
+    "b": "1",
+    "f": "1",
+    "p": "1",
+    "v": "1",
+    "c": "2",
+    "g": "2",
+    "j": "2",
+    "k": "2",
+    "q": "2",
+    "s": "2",
+    "x": "2",
+    "z": "2",
+    "d": "3",
+    "t": "3",
+    "l": "4",
+    "m": "5",
+    "n": "5",
+    "r": "6",
+}
 
 # Date formats tried in order; the first that parses wins. US month-first
 # ordering is assumed for slash and dash numeric dates, which is the dominant
@@ -57,6 +82,81 @@ def normalize_name(value: str) -> str:
     # Remove all whitespace, not just collapse it, so spacing stops being a
     # mismatch: "O'Brien", "O Brien", and "OBrien" all reduce to the same token.
     return _WHITESPACE.sub("", no_punct)
+
+
+def soundex(normalized_value: str) -> str:
+    """Return the 4-character American Soundex code for a normalized name.
+
+    Used as a phonetic blocking key (``defaults.blocking_rules_for``), not as
+    a comparison level: blocking only needs recall, so a coarse phonetic
+    bucket that groups "Jimenez"/"Ximenez" or "Katz"/"Kats" together is
+    exactly what is wanted, even though it is far too loose to score a pair
+    as a match on its own.
+
+    Soundex, not full (Double) Metaphone, is the deliberate choice here. The
+    ideation note that motivated this module suggested a metaphone key, but
+    this project's dependency rule keeps everything around the matcher on the
+    standard library (see docs/decisions/0001), and there is no
+    metaphone implementation in the standard library. Soundex is a small,
+    fully-specified, public-domain algorithm that is straightforward to
+    implement correctly in a few lines of stdlib Python; a hand-rolled
+    Metaphone is a much larger surface to get subtly wrong. For a blocking
+    key, Soundex's coarser phonetic grouping is an acceptable trade.
+
+    Expects input that has already been through ``normalize_name`` (lower
+    case, accents stripped, no punctuation or spaces). Returns ``""`` for
+    empty input so it becomes a null (no evidence) in the matcher, matching
+    every other normalizer in this module.
+    """
+
+    if not normalized_value:
+        return ""
+    letters = [ch for ch in normalized_value if ch.isalpha()]
+    if not letters:
+        return ""
+
+    first_letter = letters[0]
+    codes: list[str] = []
+    previous_code = _SOUNDEX_CODES.get(first_letter, "")
+    for ch in letters[1:]:
+        code = _SOUNDEX_CODES.get(ch, "")
+        if code and code != previous_code:
+            codes.append(code)
+        # A vowel-like separator (a, e, i, o, u, y, h, w) resets the
+        # duplicate check, so "Ashcraft" codes the two "c"-family sounds
+        # separately instead of collapsing them.
+        previous_code = code
+    body = "".join(codes)[:3].ljust(3, "0")
+    return f"{first_letter}{body}"
+
+
+def surname_tokens(raw_value: str) -> tuple[str, str]:
+    """Split a raw last-name value into up to two normalized surname tokens.
+
+    Modeled on the two-surname (paterno + materno) convention common in
+    Spanish- and Portuguese-language naming, which ``normalize_name`` erases
+    by collapsing every token into one string: "de la Cruz Gómez" becomes the
+    single opaque token "delacruzgomez", so a record carrying only "Cruz" or
+    only "Gómez" can never agree with it even though a human reviewer would
+    recognize the connection immediately.
+
+    This takes the last two whitespace-separated words of the raw value (the
+    two tokens most likely to be the actual surname pair, since a leading
+    "de la" is a preposition rather than a surname) and normalizes each one
+    independently. A single-token surname yields an empty second token.
+
+    This is a heuristic, not a rule from any naming-convention reference; it
+    is documented as needing linguistic and cultural SME review, the same
+    caveat that applies to ``nicknames`` (see that module's docstring and
+    docs/decisions/0009-matching-depth-pack.md).
+    """
+
+    words = raw_value.split()
+    if not words:
+        return "", ""
+    if len(words) == 1:
+        return normalize_name(words[0]), ""
+    return normalize_name(words[-2]), normalize_name(words[-1])
 
 
 def normalize_dob(value: str) -> str:
@@ -107,6 +207,14 @@ def normalize_record(
 
     ``address_backend`` selects the address standardizer; it is ignored unless
     ``address`` is among ``fields``.
+
+    Beyond the canonical fields themselves, this also fills in the derived
+    matching-depth columns the matcher's comparisons and blocking rules read
+    (``defaults.py``): a nickname-group key for ``first_name``, and a
+    phonetic key plus two surname tokens for ``last_name``. These are stored
+    under their own keys in ``normalized`` rather than as separate canonical
+    fields, since they only ever exist as a function of the base field and a
+    recipe never maps them directly.
     """
 
     normalized: dict[str, str] = {}
@@ -117,6 +225,17 @@ def normalize_record(
         else:
             normalizer = _FIELD_NORMALIZERS.get(field_name, normalize_name)
             normalized[field_name] = normalizer(raw_value)
+
+        if field_name == "first_name":
+            normalized["first_name_nickname_key"] = nicknames.canonical_key(
+                normalized["first_name"]
+            )
+        elif field_name == "last_name":
+            normalized["last_name_soundex"] = soundex(normalized["last_name"])
+            surname1, surname2 = surname_tokens(raw_value)
+            normalized["last_name_surname1"] = surname1
+            normalized["last_name_surname2"] = surname2
+
     return Record(
         unique_id=record.unique_id,
         source=record.source,
