@@ -95,8 +95,9 @@ counsel-gated there, consistent with this document's sourcing rules.
 Every match decision shown to a reviewer carries its source span and its
 confidence. The run report shows per-stage counts and the eval score. The DV
 pack documents the VAWA and FVPSA invariants it claims to enforce, each linked
-to the test that enforces it. TODO: publish the model and data cards for the
-optional extraction seam.
+to the test that enforces it. The model and data cards for the optional
+extraction seam are published as [`docs/MODEL-CARD.md`](MODEL-CARD.md) and
+[`docs/DATA-CARD.md`](DATA-CARD.md).
 
 ## Accessibility
 
