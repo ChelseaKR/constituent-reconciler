@@ -241,6 +241,6 @@ def normalize_record(
         source=record.source,
         raw=record.raw,
         normalized=normalized,
-        consent_status=record.consent_status,
+        consent=record.consent,
         spans=record.spans,
     )

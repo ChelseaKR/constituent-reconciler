@@ -89,11 +89,26 @@ class OutputConfig:
 
 @dataclass(frozen=True)
 class Recipe:
+    """A loaded run configuration. See ``load_recipe`` for how each field is set.
+
+    The four ``consent_*_column`` fields name optional source columns that,
+    together, build each record's ``models.Consent``: ``consent_column`` is the
+    raw status token, ``consent_date_column`` and ``consent_expires_column`` are
+    ISO-8601 (YYYY-MM-DD) dates, and ``consent_scope_column`` is a
+    comma-separated list of destination (connector) names the consent covers. A
+    recipe may map any subset; an unmapped column leaves that part of the
+    lifecycle unset (no expiry ceiling, no scope restriction) rather than
+    inventing a default.
+    """
+
     incoming: Path
     mapping: dict[str, str]
     existing: Path | None = None
     id_column: str | None = None
     consent_column: str | None = None
+    consent_date_column: str | None = None
+    consent_expires_column: str | None = None
+    consent_scope_column: str | None = None
     require_consent: bool = False
     policy_pack: str = "default"
     require_local_targets: bool = False
@@ -192,6 +207,13 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
         existing=existing,
         id_column=(str(input_section["id_column"]) if "id_column" in input_section else None),
         consent_column=(str(consent_section["column"]) if "column" in consent_section else None),
+        consent_date_column=(str(consent_section["date"]) if "date" in consent_section else None),
+        consent_expires_column=(
+            str(consent_section["expires"]) if "expires" in consent_section else None
+        ),
+        consent_scope_column=(
+            str(consent_section["scope"]) if "scope" in consent_section else None
+        ),
         require_consent=require_consent,
         policy_pack=pack,
         require_local_targets=policy.require_local_targets,

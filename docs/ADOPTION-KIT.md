@@ -89,7 +89,10 @@ phone      = "Phone"
 # address  = "Street"     # map this only if you keep address and want it matched
 
 [consent]
-column = "Consent"        # the column that records each person's consent status
+column  = "Consent"          # the column that records each person's consent status
+# date    = "Consent Date"     # optional: ISO-8601 (YYYY-MM-DD) grant date
+# expires = "Consent Expires"  # optional: ISO-8601 expiry date; unmapped = no ceiling
+# scope   = "Consent Scope"    # optional: comma-separated destinations ("crm,funder_export")
 
 [thresholds]
 prior  = 0.01
@@ -103,6 +106,19 @@ pre-tuned defaults; leave them until a pilot run gives you a reason to move them
 Consent values of `granted`, `active`, `yes`, or `true` permit export; anything
 else, including a blank, is read as no consent and blocks the write when a pack
 requires it.
+
+Consent is a lifecycle, not just a status column. `date` and `expires` let you
+record that a person's consent is time-limited; `expires` is checked against
+today's date on every run, fail-closed, so a consent granted years ago does not
+read as granted forever. There is no default expiry window: if your consent
+needs a hard ceiling, that number comes from your organization's counsel, not
+from this tool, and you record it per person by mapping `expires`. `scope`
+lets one consent cover one destination (your CRM, say) without covering
+another (a funder export, say); leave it unmapped and consent covers every
+destination, matching the behavior with no scope column at all. A withheld
+record's reason -- `absent`, `revoked`, `future-dated`, `expired`, or
+`out-of-scope` -- is recorded in `withheld.csv` so a follow-up knows what to
+ask for.
 
 ## Step 3: Pick a policy pack
 

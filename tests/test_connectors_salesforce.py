@@ -9,7 +9,7 @@ from constituent_reconciler.connectors.salesforce import (
     SalesforceConfig,
     SalesforceConnector,
 )
-from constituent_reconciler.models import GoldenRecord
+from constituent_reconciler.models import Consent, GoldenRecord
 from tests.conftest import FakeSalesforceTransport
 
 FIELDS = ("first_name", "last_name", "dob", "email", "phone")
@@ -21,7 +21,7 @@ def _golden(cluster_id: str, fields: dict[str, str], consent: bool = True) -> Go
         members=(cluster_id,),
         fields=fields,
         primary=cluster_id,
-        consent=consent,
+        consent=Consent(status="granted") if consent else Consent(),
     )
 
 

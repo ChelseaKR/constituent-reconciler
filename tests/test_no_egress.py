@@ -73,16 +73,17 @@ def test_dv_pack_withholds_non_consented_records_without_field_values(tmp_path: 
         result.golden, require_consent=recipe.require_consent
     )
     # N009 (consent revoked) is withheld.
-    withheld_members = {m for record in withheld for m in record.members}
+    withheld_members = {m for entry in withheld for m in entry.members}
     assert "N009" in withheld_members
 
     summary = pipeline.export(result, recipe, out_dir=tmp_path)
     assert summary.withheld_path is not None
     withheld_text = summary.withheld_path.read_text(encoding="utf-8")
     # The withheld record is recorded by id and reason only; no field value of a
-    # non-consented person appears in the artifact.
-    assert "N009" in withheld_text or any("N009" in r.members for r in summary.withheld)
-    assert "no-consent" in withheld_text
+    # non-consented person appears in the artifact. The reason distinguishes an
+    # explicit revocation from a merely absent consent.
+    assert "N009" in withheld_text or any("N009" in w.members for w in summary.withheld)
+    assert "revoked" in withheld_text
 
 
 def test_dv_aggregate_summary_carries_no_field_values(tmp_path: Path) -> None:

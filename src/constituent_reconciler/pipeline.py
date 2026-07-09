@@ -12,6 +12,7 @@ from __future__ import annotations
 import csv
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from constituent_reconciler import consent, decisions, household, matching, suppression
@@ -23,7 +24,7 @@ from constituent_reconciler.connectors.crm_csv import CrmCsvConnector
 from constituent_reconciler.connectors.salesforce import Transport as SalesforceTransport
 from constituent_reconciler.extract.base import ExtractedField
 from constituent_reconciler.models import (
-    GoldenRecord,
+    Consent,
     Pair,
     Record,
     RunResult,
@@ -44,6 +45,9 @@ def read_records(
     id_column: str | None,
     consent_column: str | None,
     id_prefix: str,
+    consent_date_column: str | None = None,
+    consent_expires_column: str | None = None,
+    consent_scope_column: str | None = None,
 ) -> list[Record]:
     """Read one CSV into Records, applying the column mapping at read time."""
 
@@ -58,15 +62,18 @@ def read_records(
                 unique_id = row[id_column].strip()
             else:
                 unique_id = f"{id_prefix}{index:04d}"
-            consent_status = ""
-            if consent_column:
-                consent_status = (row.get(consent_column) or "").strip()
             records.append(
                 Record(
                     unique_id=unique_id,
                     source=source,
                     raw=raw,
-                    consent_status=consent_status,
+                    consent=_read_consent(
+                        row,
+                        status_column=consent_column,
+                        granted_on_column=consent_date_column,
+                        expires_on_column=consent_expires_column,
+                        scope_column=consent_scope_column,
+                    ),
                 )
             )
     return records
@@ -85,6 +92,39 @@ def _collect_mapped_fields(
             if ef.span is not None:
                 spans[ef.field_name] = ef.span
     return raw, spans
+
+
+def _read_date(row: dict[str, str], column: str | None) -> date | None:
+    if not column:
+        return None
+    value = (row.get(column) or "").strip()
+    return date.fromisoformat(value) if value else None
+
+
+def _read_scope(row: dict[str, str], column: str | None) -> frozenset[str]:
+    if not column:
+        return frozenset()
+    value = (row.get(column) or "").strip()
+    if not value:
+        return frozenset()
+    return frozenset(part.strip() for part in value.split(",") if part.strip())
+
+
+def _read_consent(
+    row: dict[str, str],
+    *,
+    status_column: str | None,
+    granted_on_column: str | None,
+    expires_on_column: str | None,
+    scope_column: str | None,
+) -> Consent:
+    status = (row.get(status_column) or "").strip() if status_column else ""
+    return Consent(
+        status=status,
+        granted_on=_read_date(row, granted_on_column),
+        expires_on=_read_date(row, expires_on_column),
+        scope=_read_scope(row, scope_column),
+    )
 
 
 def read_pdf_records(
@@ -215,6 +255,9 @@ def _ingest_source(
                     mapping=recipe.mapping,
                     id_column=recipe.id_column,
                     consent_column=recipe.consent_column,
+                    consent_date_column=recipe.consent_date_column,
+                    consent_expires_column=recipe.consent_expires_column,
+                    consent_scope_column=recipe.consent_scope_column,
                     id_prefix=id_prefix,
                 )
                 records += chunk
@@ -252,6 +295,9 @@ def _ingest_source(
             mapping=recipe.mapping,
             id_column=recipe.id_column,
             consent_column=recipe.consent_column,
+            consent_date_column=recipe.consent_date_column,
+            consent_expires_column=recipe.consent_expires_column,
+            consent_scope_column=recipe.consent_scope_column,
             id_prefix=id_prefix,
         )
 
@@ -425,14 +471,14 @@ def _write_household_suggestions(
     return path
 
 
-def _write_withheld(withheld: Sequence[GoldenRecord], out_dir: Path) -> Path:
+def _write_withheld(withheld: Sequence[consent.Withheld], out_dir: Path) -> Path:
     withheld_path = out_dir / "withheld.csv"
     out_dir.mkdir(parents=True, exist_ok=True)
     with withheld_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(["cluster_id", "members", "reason"])
-        for record in sorted(withheld, key=lambda r: r.cluster_id):
-            writer.writerow([record.cluster_id, "|".join(record.members), "no-consent"])
+        for item in sorted(withheld, key=lambda w: w.cluster_id):
+            writer.writerow([item.cluster_id, "|".join(item.members), item.reason])
     return withheld_path
 
 
@@ -472,7 +518,7 @@ def build_connector(
 @dataclass(frozen=True)
 class ExportSummary:
     write_results: tuple[WriteResult, ...]
-    withheld: tuple[GoldenRecord, ...]
+    withheld: tuple[consent.Withheld, ...]
     review_path: Path
     withheld_path: Path | None
     provenance_path: Path | None
@@ -522,7 +568,9 @@ def export(
 
     out_dir.mkdir(parents=True, exist_ok=True)
     exportable, withheld = consent.partition_by_consent(
-        result.golden, require_consent=recipe.require_consent
+        result.golden,
+        require_consent=recipe.require_consent,
+        destination=recipe.output.connector,
     )
     by_id = {record.cluster_id: record for record in exportable}
 
@@ -556,7 +604,9 @@ def export(
                 action=write_result.action,
                 record_id=write_result.record_id,
                 members=record.members,
-                consent=record.consent,
+                consent=record.consent.is_active(
+                    as_of=date.today(), destination=recipe.output.connector
+                ),
                 payload=write_result.payload or {},
                 external_id=write_result.external_id,
             )

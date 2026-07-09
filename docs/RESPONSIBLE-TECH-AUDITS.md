@@ -65,10 +65,18 @@ The strongest claims live here and are enforced as tests.
     attributed to NNEDV and HUD, not quoted as statute.
   * **Consent required.** Informed, written, reasonably time-limited consent is
     required before release (34 U.S.C. § 12291(b)(2)(B)(ii)), and consent may not
-    be a condition of services (§ 12291(b)(2)(D)(ii)(I)). The export withholds any
-    record without granted consent, recorded by id and reason only. Revocability
-    is NNEDV Safety Net best practice, not statutory text, and is described as
-    such.
+    be a condition of services (§ 12291(b)(2)(D)(ii)(I)). Consent is modeled as a
+    lifecycle (`models.Consent`: status, grant date, expiry date, destination
+    scope), not a membership check on a status string: the export gate withholds
+    any record whose consent is revoked, absent, not yet effective, expired, or
+    out of scope for the destination, recorded by id and reason only (`absent`,
+    `revoked`, `future-dated`, `expired`, or `out-of-scope`), never with field
+    values. This is the mechanism for "reasonably time-limited"; the actual
+    expiry window is not invented here -- the recipe must map an explicit
+    per-record expiry column, and setting that number (or declining to) is a
+    counsel-gated decision, not a default this code ships with. Revocability is
+    NNEDV Safety Net best practice, not statutory text, and is described as
+    such. Enforced by `tests/test_consent.py`.
   * **Aggregate, suppressed sharing.** Only non-personally-identifying data in
     the aggregate may be shared for reporting (34 U.S.C. § 12291(b)(2)(D)(i)(I)).
     The pack emits an aggregate summary with no field values and small-cell

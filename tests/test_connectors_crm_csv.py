@@ -10,7 +10,7 @@ from constituent_reconciler.connectors.crm_csv import (
     CrmCsvConnector,
 )
 from constituent_reconciler.connectors.salesforce import FIELD_MAP as SF_MAP
-from constituent_reconciler.models import GoldenRecord
+from constituent_reconciler.models import Consent, GoldenRecord
 
 FIELDS = ("first_name", "last_name", "dob", "email", "phone")
 
@@ -21,7 +21,7 @@ def _golden(cluster_id: str, fields: dict[str, str], consent: bool = True) -> Go
         members=(cluster_id,),
         fields=fields,
         primary=cluster_id,
-        consent=consent,
+        consent=Consent(status="granted") if consent else Consent(),
     )
 
 

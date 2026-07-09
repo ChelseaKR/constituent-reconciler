@@ -8,7 +8,7 @@ import pytest
 
 from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.connectors.civicrm import CivicrmConfig, CivicrmConnector
-from constituent_reconciler.models import GoldenRecord
+from constituent_reconciler.models import Consent, GoldenRecord
 from tests.conftest import FakeCivicrmTransport
 
 FIELDS = ("first_name", "last_name", "dob", "email", "phone")
@@ -20,7 +20,7 @@ def _golden(cluster_id: str, fields: dict[str, str], consent: bool = True) -> Go
         members=(cluster_id,),
         fields=fields,
         primary=cluster_id,
-        consent=consent,
+        consent=Consent(status="granted") if consent else Consent(),
     )
 
 

@@ -126,7 +126,9 @@ def golden_records(
     The survivor supplies the identity. Empty survivor fields are filled from
     other members of the cluster (most-recent-wins is left to a later version;
     v0.1 fills blanks deterministically by member id order). Consent on the
-    merged record follows the survivor, fail-closed.
+    merged record is the survivor's ``Consent`` lifecycle, carried through
+    unevaluated -- the export gate decides granted-or-withheld later, once it
+    knows the write destination and the run's date.
     """
 
     out: list[GoldenRecord] = []
@@ -148,7 +150,7 @@ def golden_records(
                 members=cluster.members,
                 fields=merged,
                 primary=primary,
-                consent=records[primary].has_consent(),
+                consent=records[primary].consent,
             )
         )
     return out

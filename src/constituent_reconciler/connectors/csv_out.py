@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 from collections.abc import Sequence
+from datetime import date
 from pathlib import Path
 
 from constituent_reconciler.connectors.base import WriteResult
@@ -33,6 +34,7 @@ class CsvConnector:
         results: list[WriteResult] = []
         if not dry_run:
             self.path.parent.mkdir(parents=True, exist_ok=True)
+            today = date.today()
             with self.path.open("w", newline="", encoding="utf-8") as handle:
                 writer = csv.writer(handle)
                 writer.writerow(["cluster_id", "primary", "members", "consent", *fields])
@@ -42,7 +44,7 @@ class CsvConnector:
                             record.cluster_id,
                             record.primary,
                             "|".join(record.members),
-                            "granted" if record.consent else "none",
+                            record.consent.label(as_of=today, destination=self.name),
                             *(record.fields.get(f, "") for f in fields),
                         ]
                     )
