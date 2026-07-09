@@ -60,10 +60,7 @@ def test_trailing_directional_is_abbreviated() -> None:
     # The suffix position sits just before the trailing directional.
     assert normalize_address_deterministic("123 Main Street North") == "123 MAIN ST N"
     # A unit phrase after the trailing directional does not disturb either rule.
-    assert (
-        normalize_address_deterministic("123 Main Street North Apt 4")
-        == "123 MAIN ST N APT 4"
-    )
+    assert normalize_address_deterministic("123 Main Street North Apt 4") == "123 MAIN ST N APT 4"
 
 
 def test_interior_directional_word_is_left_alone() -> None:

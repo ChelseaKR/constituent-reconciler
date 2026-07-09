@@ -141,11 +141,7 @@ def _find_unit_start(tokens: list[str], start: int) -> int:
     for i in range(start, len(tokens)):
         if tokens[i] == "#":
             return i
-        if (
-            tokens[i] in _UNIT_DESIGNATORS
-            and i + 1 < len(tokens)
-            and _is_unit_value(tokens[i + 1])
-        ):
+        if tokens[i] in _UNIT_DESIGNATORS and i + 1 < len(tokens) and _is_unit_value(tokens[i + 1]):
             return i
     return len(tokens)
 
