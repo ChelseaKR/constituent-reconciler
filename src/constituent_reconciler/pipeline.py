@@ -25,7 +25,6 @@ from constituent_reconciler.connectors.salesforce import Transport as Salesforce
 from constituent_reconciler.extract.base import ExtractedField
 from constituent_reconciler.models import (
     Consent,
-    GoldenRecord,
     Pair,
     Record,
     RunResult,
