@@ -128,7 +128,7 @@ def _is_unit_value(token: str) -> bool:
     what keeps a designator word inside a street name from being rewritten.
     """
 
-    return token == "#" or len(token) == 1 or any(ch.isdigit() for ch in token)
+    return token == "#" or len(token) == 1 or any(ch.isdigit() for ch in token)  # noqa: S105
 
 
 def _find_unit_start(tokens: list[str], start: int) -> int:
