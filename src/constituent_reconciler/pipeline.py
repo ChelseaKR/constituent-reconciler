@@ -81,6 +81,7 @@ def read_records(
             )
     return records
 
+
 def _collect_mapped_fields(
     page_fields: Iterable[ExtractedField],
     mapping: dict[str, str],
@@ -94,6 +95,7 @@ def _collect_mapped_fields(
             if ef.span is not None:
                 spans[ef.field_name] = ef.span
     return raw, spans
+
 
 @dataclass
 class IngestAccumulator:
