@@ -59,7 +59,7 @@ def read_records(
                 canonical: (row.get(column) or "").strip() for canonical, column in mapping.items()
             }
             if id_column and (row.get(id_column) or "").strip():
-                unique_id = row[id_column].strip()
+                unique_id = f"{source}:{row[id_column].strip()}"
             else:
                 unique_id = f"{id_prefix}{index:04d}"
             records.append(

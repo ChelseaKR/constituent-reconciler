@@ -228,4 +228,4 @@ def test_pipeline_does_not_merge_distinct_person_with_different_address() -> Non
     # B003 shares only a surname with A003: different dob, email, phone, address.
     # It must not auto-merge.
     auto = {pair.key() for pair in result.auto_pairs}
-    assert frozenset(("A003", "B003")) not in auto
+    assert frozenset(("existing:A003", "incoming:B003")) not in auto

@@ -16,12 +16,12 @@ from constituent_reconciler.provenance import verify_log
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "intake-demo"
 
 EXPECTED_AUTO = {
-    frozenset(("E003", "N002")),
-    frozenset(("E005", "N006")),
-    frozenset(("E007", "N005")),
-    frozenset(("E010", "N008")),
-    frozenset(("E012", "N010")),
-    frozenset(("N003", "N011")),
+    frozenset(("existing:E003", "incoming:N002")),
+    frozenset(("existing:E005", "incoming:N006")),
+    frozenset(("existing:E007", "incoming:N005")),
+    frozenset(("existing:E010", "incoming:N008")),
+    frozenset(("existing:E012", "incoming:N010")),
+    frozenset(("incoming:N003", "incoming:N011")),
 }
 
 
@@ -33,8 +33,8 @@ def test_pipeline_auto_merges_and_routes_lookalikes_to_review() -> None:
     assert auto == EXPECTED_AUTO
     # A real duplicate with a DOB typo, and a genuine non-duplicate with the same
     # name, both land in review rather than being auto-merged.
-    assert frozenset(("E002", "N004")) in review
-    assert frozenset(("E008", "N007")) in review
+    assert frozenset(("existing:E002", "incoming:N004")) in review
+    assert frozenset(("existing:E008", "incoming:N007")) in review
 
 
 def test_pipeline_eval_gate_is_clean_on_fixtures() -> None:
@@ -58,18 +58,18 @@ def test_dv_policy_pack_withholds_revoked_record() -> None:
     result = pipeline.run(recipe)
     _, withheld = partition_by_consent(result.golden, require_consent=recipe.require_consent)
     withheld_members = {member for entry in withheld for member in entry.members}
-    assert "N009" in withheld_members
+    assert "incoming:N009" in withheld_members
     by_members = {entry.members: entry for entry in withheld}
-    n009 = next(entry for members, entry in by_members.items() if "N009" in members)
+    n009 = next(entry for members, entry in by_members.items() if "incoming:N009" in members)
     assert n009.reason == "revoked"
 
 
 def test_apply_approved_review_pair_merges_cluster() -> None:
     recipe = load_recipe(EXAMPLES / "recipe.toml")
     base = pipeline.run(recipe)
-    applied = pipeline.run(recipe, force_auto=[frozenset(("E002", "N004"))])
+    applied = pipeline.run(recipe, force_auto=[frozenset(("existing:E002", "incoming:N004"))])
     assert len(applied.clusters) == len(base.clusters) - 1
-    merged = [c for c in applied.clusters if set(c.members) == {"E002", "N004"}]
+    merged = [c for c in applied.clusters if set(c.members) == {"existing:E002", "incoming:N004"}]
     assert merged
 
 
