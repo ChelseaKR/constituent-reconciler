@@ -29,6 +29,7 @@ import hashlib
 import json
 import secrets
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -280,9 +281,16 @@ class UrllibTsaTransport:
         self.timeout = timeout
 
     def post(self, url: str, *, headers: dict[str, str], body: bytes) -> tuple[int, bytes]:
-        request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme != "https":
+            raise TimestampError(f"TSA URL must use https, got {parsed.scheme or 'no scheme'}")
+        request = urllib.request.Request(  # noqa: S310 - scheme validated above.
+            url, data=body, headers=headers, method="POST"
+        )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with urllib.request.urlopen(  # noqa: S310 - request URL scheme validated above.
+                request, timeout=self.timeout
+            ) as response:
                 return int(response.status), response.read()
         except urllib.error.HTTPError as error:
             return int(error.code), error.read()
