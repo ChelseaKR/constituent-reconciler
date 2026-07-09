@@ -206,4 +206,7 @@ jobs:
           make install
           uv pip install --python .venv/bin/python postal
       - name: Run libpostal-path tests
-        run: .venv/bin/python -m pytest -k libpostal
+        # --no-cov: this job runs a small -k subset, so the global coverage
+        # floor from pyproject addopts can never be met here and would turn
+        # this bit-rot alarm into a job that always fails.
+        run: .venv/bin/python -m pytest -k libpostal --no-cov
