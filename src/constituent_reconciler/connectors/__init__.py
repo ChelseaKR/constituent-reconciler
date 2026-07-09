@@ -103,9 +103,7 @@ def get_factory(name: str) -> ConnectorFactory:
 
 
 @register("csv")
-def _build_csv(
-    output: OutputConfig, out_dir: Path, transports: Mapping[str, object]
-) -> Connector:
+def _build_csv(output: OutputConfig, out_dir: Path, transports: Mapping[str, object]) -> Connector:
     return CsvConnector(out_dir / "resolved.csv")
 
 

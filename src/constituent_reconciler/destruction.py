@@ -123,9 +123,7 @@ def destroy(
     candidates = inventory(out_dir, older_than)
     names = tuple(path.name for path in candidates)
     if dry_run:
-        return DestructionSummary(
-            policy=policy, dry_run=True, candidates=names, destroyed=()
-        )
+        return DestructionSummary(policy=policy, dry_run=True, candidates=names, destroyed=())
     destroyed: list[DestroyedArtifact] = []
     for path in candidates:
         if path.name == PROVENANCE_FILENAME:

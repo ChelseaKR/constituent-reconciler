@@ -42,18 +42,14 @@ def _make_out_dir(tmp_path: Path) -> Path:
 
     out_dir = tmp_path / "out"
     out_dir.mkdir()
-    (out_dir / "resolved.csv").write_text(
-        f"cluster_id,email\nC1,{SENTINEL}\n", encoding="utf-8"
-    )
+    (out_dir / "resolved.csv").write_text(f"cluster_id,email\nC1,{SENTINEL}\n", encoding="utf-8")
     (out_dir / "review_queue.csv").write_text(
         f"left,right,email_left\nA,B,{SENTINEL}\n", encoding="utf-8"
     )
     for name in ("resolved.csv", "review_queue.csv"):
         _age(out_dir / name, 2 * DAY_SECONDS)
     log = ProvenanceLog(out_dir / PROVENANCE_FILENAME)
-    log.append(
-        action="created", record_id="C1", members=["C1"], consent=True, payload={"a": "1"}
-    )
+    log.append(action="created", record_id="C1", members=["C1"], consent=True, payload={"a": "1"})
     _age(out_dir / PROVENANCE_FILENAME, 2 * DAY_SECONDS)
     return out_dir
 
@@ -107,9 +103,7 @@ def test_destroy_deletes_hashes_and_certifies(tmp_path: Path) -> None:
         name: hashlib.sha256((out_dir / name).read_bytes()).hexdigest()
         for name in ("resolved.csv", "review_queue.csv")
     }
-    sizes = {
-        name: (out_dir / name).stat().st_size for name in ("resolved.csv", "review_queue.csv")
-    }
+    sizes = {name: (out_dir / name).stat().st_size for name in ("resolved.csv", "review_queue.csv")}
 
     log = ProvenanceLog(out_dir / PROVENANCE_FILENAME)
     summary = destroy(out_dir, timedelta(days=1), policy="1d", log=log, dry_run=False)

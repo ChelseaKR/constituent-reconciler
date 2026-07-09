@@ -19,6 +19,7 @@ from constituent_reconciler.config import Recipe
 from constituent_reconciler.connectors import get_factory
 from constituent_reconciler.connectors.base import Connector, WriteResult
 from constituent_reconciler.connectors.civicrm import Transport
+from constituent_reconciler.connectors.crm_csv import CrmCsvConnector
 from constituent_reconciler.connectors.salesforce import Transport as SalesforceTransport
 from constituent_reconciler.models import GoldenRecord, Pair, Record, RunResult, SourceSpan
 from constituent_reconciler.normalize import normalize_record

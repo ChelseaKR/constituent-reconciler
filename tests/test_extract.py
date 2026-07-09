@@ -226,9 +226,7 @@ def test_bedrock_refine_parses_converse_response(stub_page_render: None) -> None
 
 def test_bedrock_refine_fenced_json_response_parses(stub_page_render: None) -> None:
     fenced = (
-        "```json\n"
-        '{"fields": [{"name": "phone", "value": "555-123-4567", "confidence": 0.7}]}\n'
-        "```"
+        '```json\n{"fields": [{"name": "phone", "value": "555-123-4567", "confidence": 0.7}]}\n```'
     )
     client = _StubBedrockClient(response=_converse_response(fenced))
     seam = BedrockSeam(client=client)

@@ -266,6 +266,9 @@ dependencies = [
 extract = [
     { name = "pdfplumber" },
 ]
+ocr = [
+    { name = "pytesseract" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -280,9 +283,10 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "pdfplumber", marker = "extra == 'extract'", specifier = ">=0.11" },
+    { name = "pytesseract", marker = "extra == 'ocr'", specifier = ">=0.3.10" },
     { name = "splink", specifier = ">=4.0,<5" },
 ]
-provides-extras = ["extract"]
+provides-extras = ["extract", "ocr"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1192,6 +1196,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/28/01/e445a77e784a5b0047a2c30b263630dfaa57318ff3196e6ad3093dca6929/pypdfium2-5.11.0-py3-none-win32.whl", hash = "sha256:324054f36acf6bea42a9d2534eb407da2e312dba746d955c9fd7e324bc160898", size = 3645281, upload-time = "2026-06-29T11:11:33.691Z" },
     { url = "https://files.pythonhosted.org/packages/73/d4/8b8af6eedbc5c8af49817d8f37c2e55be8a2c7f75fca9bee78efbfeb40f6/pypdfium2-5.11.0-py3-none-win_amd64.whl", hash = "sha256:d3b698e7b51bdf2d633cc834395677319e1d66757896b30c632dfac7d7236c81", size = 3778234, upload-time = "2026-06-29T11:11:35.64Z" },
     { url = "https://files.pythonhosted.org/packages/c5/a7/657503553694c70fba0aa5d213144d80401611c82e0205f43f1ff39f40af/pypdfium2-5.11.0-py3-none-win_arm64.whl", hash = "sha256:897788d71b740752e29875856c369fdb52283f609aecf2355f0473db05dfc1b6", size = 3567726, upload-time = "2026-06-29T11:11:38.689Z" },
+]
+
+[[package]]
+name = "pytesseract"
+version = "0.3.13"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "packaging" },
+    { name = "pillow" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9f/a6/7d679b83c285974a7cb94d739b461fa7e7a9b17a3abfd7bf6cbc5c2394b0/pytesseract-0.3.13.tar.gz", hash = "sha256:4bf5f880c99406f52a3cfc2633e42d9dc67615e69d8a509d74867d3baddb5db9", size = 17689, upload-time = "2024-08-16T02:33:56.762Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7a/33/8312d7ce74670c9d39a532b2c246a853861120486be9443eebf048043637/pytesseract-0.3.13-py3-none-any.whl", hash = "sha256:7a99c6c2ac598360693d83a416e36e0b33a67638bb9d77fdcac094a3589d4b34", size = 14705, upload-time = "2024-08-16T02:36:10.09Z" },
 ]
 
 [[package]]

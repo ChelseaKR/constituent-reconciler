@@ -184,9 +184,7 @@ def _cmd_destroy(args: argparse.Namespace) -> int:
         print(f"destroy error: {error}", file=sys.stderr)
         return 2
     log = ProvenanceLog(out_dir / "provenance.jsonl")
-    summary = destroy(
-        out_dir, older_than, policy=args.older_than, log=log, dry_run=args.dry_run
-    )
+    summary = destroy(out_dir, older_than, policy=args.older_than, log=log, dry_run=args.dry_run)
     if args.dry_run:
         for name in summary.candidates:
             print(f"would destroy: {out_dir / name}")
@@ -196,12 +194,11 @@ def _cmd_destroy(args: argparse.Namespace) -> int:
         )
         return 0
     for artifact in summary.destroyed:
-        print(f"destroyed: {out_dir / artifact.name} (sha256 {artifact.sha256}, "
-              f"{artifact.size} bytes)")
-    print(
-        f"\ndestroyed {len(summary.destroyed)} artifact(s) under "
-        f"--older-than {summary.policy}"
-    )
+        print(
+            f"destroyed: {out_dir / artifact.name} (sha256 {artifact.sha256}, "
+            f"{artifact.size} bytes)"
+        )
+    print(f"\ndestroyed {len(summary.destroyed)} artifact(s) under --older-than {summary.policy}")
     if summary.destroyed:
         print(f"  certificates: {log.path}")
     return 0
