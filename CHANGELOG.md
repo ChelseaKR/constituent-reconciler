@@ -20,6 +20,16 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   unexercised end-to-end pending the maintainer cutting the first release.
 
 ### Added
+- **Fail-closed recipe validation and `reconcile validate` (FIX-04)**:
+  `config.load_recipe` now rejects an unknown `[section]` or an unknown key
+  inside a known section — naming the nearest valid spelling — instead of
+  silently ignoring it via `dict.get`. A mapping key outside the canonical
+  fields (a typo'd `frist_name`) now raises instead of vanishing from the
+  mapping. A new `reconcile validate --config recipe.toml` command loads and
+  shape-checks a recipe, confirms `incoming`/`existing` point at files that
+  exist, and prints the active policy pack, thresholds, and switches, without
+  running the pipeline. `docs/ADOPTION-KIT.md` gets a "validate before you
+  run" step.
 - **Local OCR backend for scanned intake (EXP-04)**: `extract/ocr.py` adds a
   `PdfplumberOcrExtractor`, selected by `[extract] backend = "pdfplumber+ocr"`,
   that OCRs (via Tesseract, the new optional `ocr` extra) any PDF page with no

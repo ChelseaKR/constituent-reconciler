@@ -3,10 +3,11 @@
 The subcommands: ``run`` produces resolved records and a review queue, ``eval``
 scores a run against ground-truth clusters, ``eval-extraction`` scores the PDF
 extractor against labeled fixtures, ``apply`` carries human review decisions
-back into a fresh run, ``review`` serves the local web queue, ``destroy``
-deletes retained artifacts, ``verify`` checks a provenance log's hash chain,
-and ``schema`` prints the declared schema versions. The CLI uses argparse only,
-so the package has no runtime dependency beyond the matcher.
+back into a fresh run, ``review`` serves the local web queue, ``validate``
+checks a recipe without running anything, ``destroy`` deletes retained
+artifacts, ``verify`` checks a provenance log's hash chain, and ``schema``
+prints the declared schema versions. The CLI uses argparse only, so the
+package has no runtime dependency beyond the matcher.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from constituent_reconciler import __version__, pipeline
-from constituent_reconciler.config import Recipe, load_recipe
+from constituent_reconciler.config import Recipe, RecipeError, load_recipe
 from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.consent import partition_by_consent
 from constituent_reconciler.destruction import destroy, parse_retention
@@ -250,6 +251,61 @@ def _cmd_review(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_validate(args: argparse.Namespace) -> int:
+    """Load and shape-check a recipe, and report its active switches.
+
+    Runs nothing: no ingest, no matcher, no connector. Meant as the first step
+    of the adoption-kit flow (E8) and as the fast way to catch a typo'd section
+    or key (FIX-04) before a run.
+    """
+
+    config_path = Path(args.config)
+    try:
+        recipe = load_recipe(config_path, policy_pack=args.policy_pack)
+    except RecipeError as error:
+        print(f"invalid recipe: {error}", file=sys.stderr)
+        return 2
+    except PolicyViolation as error:
+        print(f"policy error: {error}", file=sys.stderr)
+        return 2
+
+    problems: list[str] = []
+    if not recipe.incoming.exists():
+        problems.append(f"input.incoming does not exist: {recipe.incoming}")
+    if recipe.existing is not None and not recipe.existing.exists():
+        problems.append(f"input.existing does not exist: {recipe.existing}")
+
+    print(f"recipe: {config_path}")
+    print(f"  incoming: {recipe.incoming}")
+    if recipe.existing is not None:
+        print(f"  existing: {recipe.existing}")
+    print(f"  mapped fields: {', '.join(recipe.fields)}")
+    print(f"  policy pack: {recipe.policy_pack}")
+    print(
+        "  switches: "
+        f"require_consent={recipe.require_consent}, "
+        f"require_local_targets={recipe.require_local_targets}, "
+        f"aggregate_export={recipe.aggregate_export}, "
+        f"household.enabled={recipe.household.enabled}"
+    )
+    print(
+        "  thresholds: "
+        f"prior={recipe.prior}, auto={recipe.auto_threshold}, review={recipe.review_threshold}"
+    )
+    print(f"  extract backend: {recipe.extract.backend}")
+    print(f"  address backend: {recipe.normalize.address_backend}")
+    print(f"  output connector: {recipe.output.connector}")
+
+    if problems:
+        print("\nproblems:", file=sys.stderr)
+        for problem in problems:
+            print(f"  - {problem}", file=sys.stderr)
+        return 2
+
+    print("\nrecipe is valid.")
+    return 0
+
+
 def _cmd_destroy(args: argparse.Namespace) -> int:
     out_dir = Path(args.out)
     if not out_dir.is_dir():
@@ -394,6 +450,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="override the recipe's policy pack (e.g. dv); fail-closed on unknown",
     )
     review_parser.set_defaults(func=_cmd_review)
+
+    validate_parser = sub.add_parser(
+        "validate", help="check a recipe's shape and report its switches, without running"
+    )
+    validate_parser.add_argument("--config", required=True, help="path to recipe.toml")
+    validate_parser.add_argument(
+        "--policy-pack",
+        default=None,
+        help="override the recipe's policy pack (e.g. dv); fail-closed on unknown",
+    )
+    validate_parser.set_defaults(func=_cmd_validate)
 
     destroy_parser = sub.add_parser(
         "destroy",
