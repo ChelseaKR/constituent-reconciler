@@ -17,14 +17,25 @@ breakdowns; that is out of scope and is stated as a limitation in the docs.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 
-from constituent_reconciler.models import GoldenRecord
-from constituent_reconciler.policy import DEFAULT_SUPPRESSION_THRESHOLD
+from constituent_reconciler.models import CANONICAL_FIELDS, GoldenRecord
+from constituent_reconciler.policy import DEFAULT_SUPPRESSION_THRESHOLD, PolicyViolation
 
 SUPPRESSED = "suppressed"
+
+# The profile name stamped into comparable_report.json. "CoC-shaped" means the
+# report carries what a Continuum of Care aggregate submission carries: a period
+# label, category counts, and nothing about any individual.
+COMPARABLE_PROFILE = "coc-comparable"
+
+# Records whose configured breakdown field is empty are counted under this
+# category rather than dropped: "data not collected" is itself a real category
+# in comparable-database reporting, and dropping the records would make the
+# published cells disagree with the published total.
+MISSING_CATEGORY = "(missing)"
 
 
 @dataclass(frozen=True)
@@ -133,6 +144,143 @@ def render_summary(summary: AggregateSummary) -> str:
         f"  resolved records: {summary.total}",
     ]
     for breakdown in summary.breakdowns:
+        cells = ", ".join(f"{k}={v}" for k, v in breakdown.cells.items())
+        lines.append(f"  {breakdown.name}: {cells}")
+    return "\n".join(lines)
+
+
+def ensure_non_identifying(breakdown_fields: Iterable[str]) -> None:
+    """Refuse, fail-closed, a breakdown over an identifying field.
+
+    Every canonical field the pipeline matches on (name, DOB, email, phone,
+    address) identifies a person, so its raw values must never become category
+    labels in a shareable report — a frequency table of last names is a
+    disclosure, however large each count. A comparable report may break down
+    only over non-identifying categorical fields (a program, a county); the
+    tool cannot verify that judgment, but it can refuse the fields it knows
+    are identifying.
+    """
+
+    identifying = sorted(set(breakdown_fields) & set(CANONICAL_FIELDS))
+    if identifying:
+        raise PolicyViolation(
+            f"comparable breakdown field(s) {', '.join(identifying)} are identifying; "
+            "a comparable report may break down only over non-identifying "
+            "categorical fields"
+        )
+
+
+def _field_counts(records: Iterable[GoldenRecord], field_name: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for record in records:
+        value = record.fields.get(field_name, "").strip()
+        category = value if value else MISSING_CATEGORY
+        counts[category] = counts.get(category, 0) + 1
+    return counts
+
+
+@dataclass(frozen=True)
+class ComparableReport:
+    """A CoC-shaped aggregate report over resolved records, suppression applied.
+
+    This is the "comparable database" reporting profile: the aggregate a
+    victim-service provider (barred from entering client data into a shared
+    database such as HMIS) hands its funders instead. It carries only report
+    metadata and suppressed category counts — never a record id, a member list,
+    or a field value of any individual.
+    """
+
+    profile: str
+    period: str
+    generated_at: str
+    threshold: int
+    total: int
+    breakdowns: tuple[Breakdown, ...]
+
+
+def comparable_summary(
+    records: Iterable[GoldenRecord],
+    *,
+    threshold: int = DEFAULT_SUPPRESSION_THRESHOLD,
+    breakdown_fields: Sequence[str] = (),
+    period: str = "",
+) -> ComparableReport:
+    """Build the CoC-shaped comparable report from resolved records.
+
+    Starts from the same consent and resolution breakdowns as the aggregate
+    summary, then adds one breakdown per configured non-identifying field,
+    counting records by that field's distinct values (empty values count under
+    ``(missing)``). Every breakdown — base and configured alike — passes
+    through :func:`suppress_cells`, so the primary and complementary
+    small-cell rules hold for each one. Identifying canonical fields are
+    refused, fail-closed, before anything is counted.
+    """
+
+    ensure_non_identifying(breakdown_fields)
+    record_list = list(records)
+    breakdowns = [
+        Breakdown("consent", suppress_cells(_consent_counts(record_list), threshold=threshold)),
+        Breakdown(
+            "resolution", suppress_cells(_resolution_counts(record_list), threshold=threshold)
+        ),
+    ]
+    for field_name in breakdown_fields:
+        breakdowns.append(
+            Breakdown(
+                field_name,
+                suppress_cells(_field_counts(record_list, field_name), threshold=threshold),
+            )
+        )
+    return ComparableReport(
+        profile=COMPARABLE_PROFILE,
+        period=period or "unspecified",
+        generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        threshold=threshold,
+        total=len(record_list),
+        breakdowns=tuple(breakdowns),
+    )
+
+
+def comparable_payload(report: ComparableReport) -> dict[str, object]:
+    """Serialize the comparable report to the ``comparable_report.json`` shape.
+
+    The payload carries the report metadata (profile name, period label,
+    generated-at timestamp, the suppression threshold applied) and the
+    suppressed breakdowns. Cell values are only integers or the string
+    ``"suppressed"``; no record id, member list, or individual field value can
+    appear.
+    """
+
+    from constituent_reconciler.schema import REPORT_SCHEMA_VERSION
+
+    return {
+        "schema_version": REPORT_SCHEMA_VERSION,
+        "profile": report.profile,
+        "period": report.period,
+        "generated_at": report.generated_at,
+        "suppression_threshold": report.threshold,
+        "total_resolved": report.total,
+        "breakdowns": {b.name: b.cells for b in report.breakdowns},
+        "note": (
+            "Non-identifying aggregate in the comparable-database posture. Small "
+            f"cells suppressed (counts 1-{report.threshold - 1}), modeled on the "
+            "U.S. CMS Cell Size Suppression Policy; complementary suppression "
+            "applied within every breakdown; true zeros preserved. Not a "
+            "substitute for review against your own obligations."
+        ),
+    }
+
+
+def render_comparable(report: ComparableReport) -> str:
+    """Render the comparable report as plain text for the run output."""
+
+    lines = [
+        "comparable report (non-identifying, small cells suppressed):",
+        f"  profile: {report.profile}",
+        f"  period: {report.period}",
+        f"  resolved records: {report.total}",
+    ]
+    for breakdown in report.breakdowns:
         cells = ", ".join(f"{k}={v}" for k, v in breakdown.cells.items())
         lines.append(f"  {breakdown.name}: {cells}")
     return "\n".join(lines)

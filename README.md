@@ -113,6 +113,28 @@ citations and the honest scope of each claim in
 This is a reference implementation, not legal advice. An organization adopting it
 needs its own review against its own obligations.
 
+### The comparable-database export profile
+
+A provider that keeps clients out of HMIS still owes its funders CoC-shaped
+aggregate reporting from its comparable database. One command emits exactly
+that and nothing else — no CRM write, no resolved records on disk:
+
+```sh
+reconcile export-comparable --config examples/intake-demo/recipe-dv.toml --out out-dv
+```
+
+It writes `comparable_report.json` (profile `coc-comparable`): a report-period
+label, a generated-at timestamp, the suppression threshold applied, and
+suppressed category counts. Every breakdown passes through the same CMS-style
+small-cell suppression as `aggregate_summary.json` (counts of 1-10 suppressed,
+complementary suppression within each breakdown, true zeros preserved), and no
+record id, member list, or field value appears in the file. A recipe can opt
+into extra breakdowns over non-identifying categorical fields, and into writing
+the report during a normal `reconcile run`, with a `[comparable]` section
+(`export`, `breakdown_fields`, `period`); the identifying canonical fields
+(name, DOB, email, phone, address) are refused as breakdown fields,
+fail-closed, at recipe load.
+
 ## Usage
 
 Install (Python 3.12+):

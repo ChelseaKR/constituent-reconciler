@@ -31,7 +31,7 @@ from constituent_reconciler.report import (
     render_extraction_markdown,
     render_run_summary,
 )
-from constituent_reconciler.suppression import render_summary
+from constituent_reconciler.suppression import render_comparable, render_summary
 
 
 def _load_pairs(path: Path, keys: Sequence[str]) -> list[frozenset[str]]:
@@ -68,6 +68,11 @@ def _print_export(recipe: Recipe, summary: ExportSummary, *, dry_run: bool) -> N
             print(f"  aggregate:    {summary.aggregate_path}")
         print()
         print(render_summary(summary.aggregate))
+    if summary.comparable is not None:
+        if summary.comparable_path:
+            print(f"  comparable:   {summary.comparable_path}")
+        print()
+        print(render_comparable(summary.comparable))
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
@@ -181,6 +186,29 @@ def _cmd_apply(args: argparse.Namespace) -> int:
         print(f"\nconnector error: {error}", file=sys.stderr)
         return 2
     _print_export(recipe, summary, dry_run=False)
+    return 0
+
+
+def _cmd_export_comparable(args: argparse.Namespace) -> int:
+    """One command: resolve, then emit only the suppressed comparable report.
+
+    No connector is built and no resolved record is written; the CoC-shaped
+    ``comparable_report.json`` is the only artifact.
+    """
+
+    try:
+        recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+    except PolicyViolation as error:
+        print(f"policy error: {error}", file=sys.stderr)
+        return 2
+    result = pipeline.run(recipe)
+    try:
+        report, report_path = pipeline.export_comparable(result, recipe, out_dir=Path(args.out))
+    except PolicyViolation as error:
+        print(f"policy error: {error}", file=sys.stderr)
+        return 2
+    print(render_comparable(report))
+    print(f"\ncomparable report: {report_path}")
     return 0
 
 
@@ -329,6 +357,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="override the recipe's policy pack (e.g. dv); fail-closed on unknown",
     )
     apply_parser.set_defaults(func=_cmd_apply)
+
+    comparable_parser = sub.add_parser(
+        "export-comparable",
+        help="emit only the suppressed, CoC-shaped comparable report (no CRM write)",
+    )
+    comparable_parser.add_argument("--config", required=True, help="path to recipe.toml")
+    comparable_parser.add_argument("--out", default="out", help="output directory")
+    comparable_parser.add_argument(
+        "--policy-pack",
+        default=None,
+        help="override the recipe's policy pack (e.g. dv); fail-closed on unknown",
+    )
+    comparable_parser.set_defaults(func=_cmd_export_comparable)
 
     review_parser = sub.add_parser(
         "review", help="open the local web review queue for uncertain pairs"

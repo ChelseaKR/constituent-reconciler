@@ -89,6 +89,61 @@ def test_export_writes_csv_review_queue_and_provenance(tmp_path: Path) -> None:
     assert ok
 
 
+def test_comparable_export_off_by_default_produces_no_report(tmp_path: Path) -> None:
+    recipe = load_recipe(EXAMPLES / "recipe.toml")
+    assert recipe.comparable_export is False
+    result = pipeline.run(recipe)
+    summary = pipeline.export(result, recipe, out_dir=tmp_path)
+    assert summary.comparable is None
+    assert summary.comparable_path is None
+    assert not (tmp_path / "comparable_report.json").exists()
+
+
+def test_recipe_comparable_export_writes_comparable_report_via_run(tmp_path: Path) -> None:
+    # This is the gap the README claims but the original implementation never
+    # wired: a recipe with [comparable].export = true must make a plain
+    # ``reconcile run`` (pipeline.export here) emit comparable_report.json,
+    # not only the standalone ``export-comparable`` command.
+    recipe = load_recipe(EXAMPLES / "recipe.toml")
+    export_recipe = replace(
+        recipe,
+        comparable_export=True,
+        comparable_period="2026-Q2",
+    )
+    result = pipeline.run(export_recipe)
+    summary = pipeline.export(result, export_recipe, out_dir=tmp_path)
+
+    assert summary.comparable is not None
+    assert summary.comparable.period == "2026-Q2"
+    assert summary.comparable_path == tmp_path / "comparable_report.json"
+    assert summary.comparable_path.exists()
+
+    payload = json.loads(summary.comparable_path.read_text(encoding="utf-8"))
+    assert payload["profile"] == "coc-comparable"
+    assert payload["period"] == "2026-Q2"
+    # No record id, member list, or raw field value in the shareable report.
+    assert "N001" not in json.dumps(payload)
+    assert "id" not in payload["breakdowns"]
+
+
+def test_export_comparable_standalone_cli_path_still_works(tmp_path: Path) -> None:
+    # The standalone ``export-comparable`` command (pipeline.export_comparable,
+    # called from cli.py's _cmd_export_comparable) predates and is independent
+    # of the recipe's [comparable].export flag: it always emits the report, and
+    # must keep doing so unchanged by the recipe-driven wiring above.
+    recipe = load_recipe(EXAMPLES / "recipe-dv.toml")
+    assert recipe.comparable_export is False
+    result = pipeline.run(recipe)
+    report, report_path = pipeline.export_comparable(result, recipe, out_dir=tmp_path)
+
+    assert report.profile == "coc-comparable"
+    assert report_path == tmp_path / "comparable_report.json"
+    assert report_path.exists()
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    assert payload["profile"] == "coc-comparable"
+    assert "breakdowns" in payload
+
+
 def _household_golden(
     cluster_id: str, *, first: str = "", last: str = "", address: str = ""
 ) -> GoldenRecord:
