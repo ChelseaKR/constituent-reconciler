@@ -16,6 +16,7 @@ import urllib.parse
 import urllib.request
 from http import HTTPStatus
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -25,6 +26,7 @@ from constituent_reconciler.models import Band, Pair, Record, RunResult
 from constituent_reconciler.policy import PolicyViolation
 from constituent_reconciler.review.render import render_pair
 from constituent_reconciler.review.server import (
+    HeaderSource,
     RequestContext,
     build_server,
     handle_get,
@@ -46,10 +48,20 @@ EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "intake-demo"
 _AUTHORITY = "127.0.0.1:8765"
 
 
+def _headers(mapping: dict[str, str]) -> HeaderSource:
+    """A plain dict as a HeaderSource.
+
+    ``dict.get``'s overloads satisfy the protocol at runtime, but mypy cannot
+    unify them with the protocol's single defaulted signature, hence the cast.
+    """
+
+    return cast(HeaderSource, mapping)
+
+
 def _context(**headers: str) -> RequestContext:
     """A RequestContext with a valid Host header, plus any extra headers."""
 
-    return RequestContext(authority=_AUTHORITY, headers={"Host": _AUTHORITY, **headers})
+    return RequestContext(authority=_AUTHORITY, headers=_headers({"Host": _AUTHORITY, **headers}))
 
 
 def _session(
@@ -340,7 +352,7 @@ def test_handle_get_wrong_host_is_forbidden(tmp_path: Path) -> None:
     # A hostile page pointed at a rebound hostname would carry a Host header
     # this server never bound to; refusing it is the DNS-rebinding defense.
     _, _, session = _session(tmp_path)
-    forged = RequestContext(authority=_AUTHORITY, headers={"Host": "evil.example:8765"})
+    forged = RequestContext(authority=_AUTHORITY, headers=_headers({"Host": "evil.example:8765"}))
     assert handle_get(session, "/", forged).status == HTTPStatus.FORBIDDEN
 
 
@@ -382,7 +394,7 @@ def test_handle_post_with_wrong_token_is_forbidden(tmp_path: Path) -> None:
 
 def test_handle_post_wrong_host_is_forbidden(tmp_path: Path) -> None:
     _, _, session = _session(tmp_path)
-    forged = RequestContext(authority=_AUTHORITY, headers={"Host": "evil.example:8765"})
+    forged = RequestContext(authority=_AUTHORITY, headers=_headers({"Host": "evil.example:8765"}))
     response = handle_post(
         session, "/pair/0", {"verdict": ["approve"], "token": [session.token]}, forged
     )
