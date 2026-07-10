@@ -101,9 +101,7 @@ def test_session_resumes_from_existing_decisions(tmp_path: Path) -> None:
     view = session.views()[0]
     session.record(view.index, REJECTED)
     # A fresh session over the same run re-attaches the verdict by pair id.
-    resumed = ReviewSession(
-        result, recipe.fields, tmp_path / "decisions.json", reviewer="jordan"
-    )
+    resumed = ReviewSession(result, recipe.fields, tmp_path / "decisions.json", reviewer="jordan")
     same = next(v for v in resumed.views() if v.left_id == view.left_id)
     assert resumed.verdict(same.index) == REJECTED
     # The audit trail survives the resume: the original reviewer is still named.
@@ -119,9 +117,7 @@ def test_session_resumes_from_a_version1_flat_file(tmp_path: Path) -> None:
         json.dumps({"approved": [[view.left_id, view.right_id]], "rejected": []}),
         encoding="utf-8",
     )
-    resumed = ReviewSession(
-        result, recipe.fields, tmp_path / "decisions.json", reviewer="jordan"
-    )
+    resumed = ReviewSession(result, recipe.fields, tmp_path / "decisions.json", reviewer="jordan")
     assert resumed.verdict(view.index) == APPROVED
     assert [entry.reviewer for entry in resumed.audit(view.index)] == ["unrecorded"]
 
@@ -169,7 +165,7 @@ def _synthetic_session(
         for record_id in "ABC"
     }
     result = RunResult(records=records, pairs=pairs, clusters=(), golden=())
-    return ReviewSession(result, fields, tmp_path / "decisions.json")
+    return ReviewSession(result, fields, tmp_path / "decisions.json", reviewer="casey")
 
 
 def _index_of(session: ReviewSession, left: str, right: str) -> int:

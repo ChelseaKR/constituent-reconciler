@@ -161,8 +161,7 @@ def _reviewer_line(session: ReviewSession) -> str:
         else ""
     )
     return (
-        f'<p class="note">Reviewing as <strong>{escape(session.reviewer)}</strong>.'
-        f"{two_person}</p>"
+        f'<p class="note">Reviewing as <strong>{escape(session.reviewer)}</strong>.{two_person}</p>'
     )
 
 
@@ -401,8 +400,7 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
             )
         else:
             note = (
-                " Your approval would complete the merge; "
-                "a rejection keeps the records separate."
+                " Your approval would complete the merge; a rejection keeps the records separate."
             )
         current = (
             '<p class="verdict" role="status">'

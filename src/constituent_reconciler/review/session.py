@@ -381,14 +381,10 @@ class ReviewSession:
                 index = index_of.get(pair_key)
                 if index is not None:
                     self._entries[index] = [
-                        ReviewEntry(
-                            reviewer=UNRECORDED_REVIEWER, verdict=verdict, decided_at=""
-                        )
+                        ReviewEntry(reviewer=UNRECORDED_REVIEWER, verdict=verdict, decided_at="")
                     ]
 
-    def _load_audit(
-        self, audit: dict[str, object], index_of: dict[frozenset[str], int]
-    ) -> None:
+    def _load_audit(self, audit: dict[str, object], index_of: dict[frozenset[str], int]) -> None:
         for key, raw_entries in audit.items():
             ids = key.split("|")
             if len(ids) != 2 or not isinstance(raw_entries, list):
@@ -486,9 +482,7 @@ class ReviewSession:
         """The distinct reviewer names that currently approve the pair."""
 
         return frozenset(
-            entry.reviewer
-            for entry in self._entries.get(index, ())
-            if entry.verdict == APPROVED
+            entry.reviewer for entry in self._entries.get(index, ()) if entry.verdict == APPROVED
         )
 
     def counts(self) -> Counts:
@@ -533,10 +527,10 @@ class ReviewSession:
         """
 
         approved = frozenset(
-            self._pairs[i].key() for i, v in self._verdicts.items() if v == APPROVED
+            self._pairs[i].key() for i in range(len(self._pairs)) if self.verdict(i) == APPROVED
         )
         rejected = frozenset(
-            self._pairs[i].key() for i, v in self._verdicts.items() if v == REJECTED
+            self._pairs[i].key() for i in range(len(self._pairs)) if self.verdict(i) == REJECTED
         )
         adjusted: list[Pair] = []
         for pair in self._result.pairs:
@@ -564,7 +558,7 @@ class ReviewSession:
             if pair.left not in member_set or pair.right not in member_set:
                 continue
             index = key_to_index.get(pair.key())
-            verdict = self._verdicts.get(index) if index is not None else None
+            verdict = self.verdict(index) if index is not None else None
             if verdict == APPROVED:
                 status = "approved"
             elif verdict == REJECTED:
@@ -637,9 +631,9 @@ class ReviewSession:
         if not (0 <= index < len(self._pairs)):
             return None
         pair = self._pairs[index]
-        verdict = self._verdicts.get(index)
+        verdict = self.verdict(index)
         rejected_keys = frozenset(
-            self._pairs[i].key() for i, v in self._verdicts.items() if v == REJECTED
+            self._pairs[i].key() for i in range(len(self._pairs)) if self.verdict(i) == REJECTED
         )
         intends_merge = verdict != REJECTED
 
