@@ -13,6 +13,7 @@ pack requires of any artifact the review step produces.
 from __future__ import annotations
 
 import json
+import secrets
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -283,6 +284,11 @@ class ReviewSession:
         self._fields = fields
         self._decisions_path = decisions_path
         self.privacy_mode = privacy_mode
+        # A per-run secret embedded in every rendered form and checked on every
+        # POST (FIX-01), so a page the reviewer has open elsewhere cannot forge
+        # a verdict against this server: it cannot know a token it never saw.
+        # Regenerated each time a session is constructed, never persisted.
+        self.token = secrets.token_urlsafe(24)
         # The same ordering the review_queue.csv uses, so the two surfaces agree.
         self._pairs: tuple[Pair, ...] = tuple(
             sorted(result.review_pairs, key=lambda p: (-p.probability, p.left, p.right))

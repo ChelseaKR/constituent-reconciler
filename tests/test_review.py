@@ -25,6 +25,7 @@ from constituent_reconciler.models import Band, Pair, Record, RunResult
 from constituent_reconciler.policy import PolicyViolation
 from constituent_reconciler.review.render import render_pair
 from constituent_reconciler.review.server import (
+    RequestContext,
     build_server,
     handle_get,
     handle_post,
@@ -39,6 +40,16 @@ from constituent_reconciler.review.session import (
 )
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "intake-demo"
+
+# The host:port unit tests present as the bound authority. Real values only
+# matter for the end-to-end socket test, which computes its own.
+_AUTHORITY = "127.0.0.1:8765"
+
+
+def _context(**headers: str) -> RequestContext:
+    """A RequestContext with a valid Host header, plus any extra headers."""
+
+    return RequestContext(authority=_AUTHORITY, headers={"Host": _AUTHORITY, **headers})
 
 
 def _session(
@@ -297,7 +308,7 @@ def test_match_rationale_joins_multiple_fields_and_pluralizes() -> None:
 
 def test_handle_get_renders_overview_and_pair(tmp_path: Path) -> None:
     _, _, session = _session(tmp_path)
-    overview = handle_get(session, "/")
+    overview = handle_get(session, "/", _context())
     assert overview.status == HTTPStatus.OK
     assert 'lang="en"' in overview.body
     assert "Review queue" in overview.body
@@ -306,7 +317,7 @@ def test_handle_get_renders_overview_and_pair(tmp_path: Path) -> None:
     # field by construction.
     assert "agree on" in overview.body
 
-    pair = handle_get(session, "/pair/0")
+    pair = handle_get(session, "/pair/0", _context())
     assert pair.status == HTTPStatus.OK
     assert "<table" in pair.body
     # Accessibility: status is conveyed with a text label, not colour alone.
@@ -315,17 +326,29 @@ def test_handle_get_renders_overview_and_pair(tmp_path: Path) -> None:
     # R11: a plain-language rationale sits beside the pair, not source spans alone.
     assert "What matches and what differs" in pair.body
     assert "agree on" in pair.body
+    # FIX-01: the form carries the per-run token so a POST can be checked.
+    assert f'value="{session.token}"' in pair.body
 
 
 def test_handle_get_unknown_pair_is_404(tmp_path: Path) -> None:
     _, _, session = _session(tmp_path)
-    assert handle_get(session, "/pair/99").status == HTTPStatus.NOT_FOUND
-    assert handle_get(session, "/nope").status == HTTPStatus.NOT_FOUND
+    assert handle_get(session, "/pair/99", _context()).status == HTTPStatus.NOT_FOUND
+    assert handle_get(session, "/nope", _context()).status == HTTPStatus.NOT_FOUND
+
+
+def test_handle_get_wrong_host_is_forbidden(tmp_path: Path) -> None:
+    # A hostile page pointed at a rebound hostname would carry a Host header
+    # this server never bound to; refusing it is the DNS-rebinding defense.
+    _, _, session = _session(tmp_path)
+    forged = RequestContext(authority=_AUTHORITY, headers={"Host": "evil.example:8765"})
+    assert handle_get(session, "/", forged).status == HTTPStatus.FORBIDDEN
 
 
 def test_handle_post_records_and_redirects(tmp_path: Path) -> None:
     _, _, session = _session(tmp_path)
-    response = handle_post(session, "/pair/0", {"verdict": ["approve"]})
+    response = handle_post(
+        session, "/pair/0", {"verdict": ["approve"], "token": [session.token]}, _context()
+    )
     assert response.status == HTTPStatus.SEE_OTHER
     assert response.location in ("/pair/1", "/")
     assert session.verdict(0) == APPROVED
@@ -333,8 +356,60 @@ def test_handle_post_records_and_redirects(tmp_path: Path) -> None:
 
 def test_handle_post_bad_verdict_is_400(tmp_path: Path) -> None:
     _, _, session = _session(tmp_path)
-    assert handle_post(session, "/pair/0", {"verdict": ["nope"]}).status == HTTPStatus.BAD_REQUEST
+    response = handle_post(
+        session, "/pair/0", {"verdict": ["nope"], "token": [session.token]}, _context()
+    )
+    assert response.status == HTTPStatus.BAD_REQUEST
     assert session.verdict(0) is None
+
+
+def test_handle_post_without_token_is_forbidden(tmp_path: Path) -> None:
+    # A forged cross-site POST cannot know a token it never saw rendered.
+    _, _, session = _session(tmp_path)
+    response = handle_post(session, "/pair/0", {"verdict": ["approve"]}, _context())
+    assert response.status == HTTPStatus.FORBIDDEN
+    assert session.verdict(0) is None
+
+
+def test_handle_post_with_wrong_token_is_forbidden(tmp_path: Path) -> None:
+    _, _, session = _session(tmp_path)
+    response = handle_post(
+        session, "/pair/0", {"verdict": ["approve"], "token": ["not-the-token"]}, _context()
+    )
+    assert response.status == HTTPStatus.FORBIDDEN
+    assert session.verdict(0) is None
+
+
+def test_handle_post_wrong_host_is_forbidden(tmp_path: Path) -> None:
+    _, _, session = _session(tmp_path)
+    forged = RequestContext(authority=_AUTHORITY, headers={"Host": "evil.example:8765"})
+    response = handle_post(
+        session, "/pair/0", {"verdict": ["approve"], "token": [session.token]}, forged
+    )
+    assert response.status == HTTPStatus.FORBIDDEN
+    assert session.verdict(0) is None
+
+
+def test_handle_post_cross_origin_is_forbidden(tmp_path: Path) -> None:
+    # A same-origin form post carries no Origin header, or one that matches;
+    # a cross-site fetch()/form carries a foreign Origin, and is refused.
+    _, _, session = _session(tmp_path)
+    foreign = _context(Origin="https://evil.example")
+    response = handle_post(
+        session, "/pair/0", {"verdict": ["approve"], "token": [session.token]}, foreign
+    )
+    assert response.status == HTTPStatus.FORBIDDEN
+    assert session.verdict(0) is None
+
+
+def test_handle_post_same_origin_is_allowed(tmp_path: Path) -> None:
+    _, _, session = _session(tmp_path)
+    same_origin = _context(Origin=f"http://{_AUTHORITY}")
+    response = handle_post(
+        session, "/pair/0", {"verdict": ["approve"], "token": [session.token]}, same_origin
+    )
+    assert response.status == HTTPStatus.SEE_OTHER
+    assert session.verdict(0) == APPROVED
 
 
 # -- no-egress / privacy -----------------------------------------------------
@@ -359,6 +434,11 @@ def test_loopback_bind_is_allowed_under_dv(tmp_path: Path) -> None:
 # -- end to end over a real loopback socket ----------------------------------
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args: object, **kwargs: object) -> None:
+        return None
+
+
 def test_server_serves_over_loopback_and_records_a_decision(tmp_path: Path) -> None:
     _, _, session = _session(tmp_path)
     server = build_server(session, "127.0.0.1", 0)
@@ -371,12 +451,10 @@ def test_server_serves_over_loopback_and_records_a_decision(tmp_path: Path) -> N
         index = urllib.request.urlopen(base + "/", timeout=5).read().decode("utf-8")
         assert "Review queue" in index
 
-        data = urllib.parse.urlencode({"verdict": "approve"}).encode("utf-8")
+        data = urllib.parse.urlencode({"verdict": "approve", "token": session.token}).encode(
+            "utf-8"
+        )
         request = urllib.request.Request(base + "/pair/0", data=data, method="POST")
-
-        class _NoRedirect(urllib.request.HTTPRedirectHandler):
-            def redirect_request(self, *args: object, **kwargs: object) -> None:
-                return None
 
         opener = urllib.request.build_opener(_NoRedirect)
         try:
@@ -387,7 +465,33 @@ def test_server_serves_over_loopback_and_records_a_decision(tmp_path: Path) -> N
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
-
-    # The decision made over HTTP landed in the decisions file.
     payload = json.loads((tmp_path / "decisions.json").read_text(encoding="utf-8"))
     assert len(payload["approved"]) == 1
+
+
+def test_server_refuses_a_post_with_no_token_over_a_real_socket(tmp_path: Path) -> None:
+    # FIX-01 end to end: a forged cross-site POST that never saw the rendered
+    # page cannot supply the token, and the server refuses it rather than
+    # recording a verdict.
+    _, _, session = _session(tmp_path)
+    server = build_server(session, "127.0.0.1", 0)
+    host, port = server.socket.getsockname()[:2]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://{host}:{port}"
+    try:
+        data = urllib.parse.urlencode({"verdict": "approve"}).encode("utf-8")
+        request = urllib.request.Request(base + "/pair/0", data=data, method="POST")
+        opener = urllib.request.build_opener(_NoRedirect)
+        try:
+            opener.open(request, timeout=5)
+            raised = False
+        except urllib.error.HTTPError as error:
+            raised = True
+            assert error.code == HTTPStatus.FORBIDDEN
+        assert raised
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    assert session.verdict(0) is None
