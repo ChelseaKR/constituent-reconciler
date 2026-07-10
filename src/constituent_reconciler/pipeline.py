@@ -25,6 +25,7 @@ from constituent_reconciler.connectors.salesforce import Transport as Salesforce
 from constituent_reconciler.extract.base import ExtractedField
 from constituent_reconciler.models import (
     Consent,
+    GoldenRecord,
     Pair,
     Record,
     RunResult,
@@ -555,6 +556,35 @@ class ExportSummary:
         return ", ".join(f"{action}: {n}" for action, n in sorted(counts.items()))
 
 
+def _maybe_export_comparable(
+    recipe: Recipe,
+    exportable: Sequence[GoldenRecord],
+    *,
+    out_dir: Path,
+    dry_run: bool,
+) -> tuple[ComparableReport | None, Path | None]:
+    """Build and (unless dry-run) write the comparable report, if opted in.
+
+    The comparable-database export profile is explicit recipe opt-in (see
+    config.py's ``[comparable]`` section): when set, ``run``/``apply`` write
+    ``comparable_report.json`` alongside ``aggregate_summary.json`` using the
+    same suppressed-report builder the standalone ``export-comparable``
+    command uses (``export_comparable`` below), so the two paths cannot
+    drift.
+    """
+
+    if not recipe.comparable_export:
+        return None, None
+    comparable = suppression.comparable_summary(
+        exportable,
+        threshold=recipe.suppression_threshold,
+        breakdown_fields=recipe.comparable_breakdown_fields,
+        period=recipe.comparable_period,
+    )
+    comparable_path = None if dry_run else _write_comparable_report(comparable, out_dir)
+    return comparable, comparable_path
+
+
 def export(
     result: RunResult,
     recipe: Recipe,
@@ -641,6 +671,10 @@ def export(
         if not dry_run:
             aggregate_path = _write_aggregate_summary(aggregate, out_dir)
 
+    comparable, comparable_path = _maybe_export_comparable(
+        recipe, exportable, out_dir=out_dir, dry_run=dry_run
+    )
+
     return ExportSummary(
         write_results=tuple(write_results),
         withheld=tuple(withheld),
@@ -650,8 +684,8 @@ def export(
         logged=logged,
         aggregate=aggregate,
         aggregate_path=aggregate_path,
-        comparable=None,
-        comparable_path=None,
+        comparable=comparable,
+        comparable_path=comparable_path,
         household_suggestions=household_suggestions,
         household_path=household_path,
     )
@@ -663,7 +697,16 @@ def export_comparable(
     *,
     out_dir: Path,
 ) -> tuple[ComparableReport, Path]:
-    """Write only the suppressed comparable-database report."""
+    """Write only the suppressed comparable-database report.
+
+    Backs the standalone ``reconcile export-comparable`` command: one call,
+    independent of ``recipe.comparable_export`` (which instead controls
+    whether ``export`` above writes this report as a side effect of a normal
+    ``run``/``apply``). Uses the recipe's ``comparable_breakdown_fields`` and
+    ``comparable_period`` the same way ``export`` does, so the standalone
+    command and the recipe-driven path never disagree about what a given
+    recipe's comparable report contains.
+    """
 
     exportable, _ = consent.partition_by_consent(
         result.golden,
@@ -673,5 +716,7 @@ def export_comparable(
     report = suppression.comparable_summary(
         exportable,
         threshold=recipe.suppression_threshold,
+        breakdown_fields=recipe.comparable_breakdown_fields,
+        period=recipe.comparable_period,
     )
     return report, _write_comparable_report(report, out_dir)
