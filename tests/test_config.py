@@ -119,6 +119,7 @@ def test_comparable_section_with_identifying_breakdown_field_rejected_at_load(
             )
         )
 
+
 def test_review_section_defaults_off(tmp_path: Path) -> None:
     recipe = load_recipe(_write_recipe(tmp_path, ""))
     assert recipe.require_second_reviewer is False
