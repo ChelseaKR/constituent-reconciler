@@ -6,6 +6,19 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 ## [Unreleased]
 
+### Security
+- **Standards-conformance remediation (2026-07-10), release_workflow
+  (REL-14)**: added `.github/workflows/release.yml`, a tag-triggered
+  (`v*`) release pipeline that re-verifies the tagged commit (`make
+  verify` + `make security`) independent of the PR's green check, checks
+  tag/`pyproject.toml` version consistency, builds the sdist + wheel,
+  generates a CycloneDX 1.7 SBOM, attests build provenance via keyless
+  OIDC (Sigstore), and publishes a GitHub Release with the matching
+  CHANGELOG section as notes. Closes the SBOM gap (P1-7) previously
+  declared in `docs/RESPONSIBLE-TECH-AUDITS.md`. No PyPI publish stage yet
+  (not published to PyPI); no `v*` tag has been cut, so the workflow is
+  unexercised end-to-end pending the maintainer cutting the first release.
+
 ### Added
 - **Local OCR backend for scanned intake (EXP-04)**: `extract/ocr.py` adds a
   `PdfplumberOcrExtractor`, selected by `[extract] backend = "pdfplumber+ocr"`,
