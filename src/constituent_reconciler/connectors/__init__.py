@@ -47,6 +47,13 @@ from constituent_reconciler.connectors.salesforce import (
 from constituent_reconciler.connectors.salesforce import (
     Transport as SalesforceTransport,
 )
+from constituent_reconciler.connectors.webhook import (
+    Transport as WebhookTransport,
+)
+from constituent_reconciler.connectors.webhook import (
+    WebhookConfig,
+    WebhookConnector,
+)
 
 __all__ = [
     "WRITE_ACTIONS",
@@ -59,8 +66,11 @@ __all__ = [
     "CivicrmConfig",
     "SalesforceConnector",
     "SalesforceConfig",
+    "WebhookConnector",
+    "WebhookConfig",
     "Transport",
     "UrllibTransport",
+    "WebhookTransport",
     "ConnectorFactory",
     "CONNECTOR_REGISTRY",
     "register",
@@ -159,3 +169,21 @@ def _build_salesforce(
     )
     transport = cast("SalesforceTransport | None", transports.get("salesforce"))
     return SalesforceConnector(config, transport=transport)
+
+
+@register("webhook")
+def _build_webhook(
+    output: OutputConfig, out_dir: Path, transports: Mapping[str, object]
+) -> Connector:
+    config = WebhookConfig(
+        endpoint=output.endpoint,
+        auth_header=output.auth_header,
+        auth_scheme=output.auth_scheme,
+        auth_token=os.environ.get(output.auth_env, ""),
+        signing_secret=(
+            os.environ.get(output.signing_secret_env, "") if output.signing_secret_env else ""
+        ),
+        external_id_field=output.external_id_field,
+    )
+    transport = cast("WebhookTransport | None", transports.get("webhook"))
+    return WebhookConnector(config, transport=transport)

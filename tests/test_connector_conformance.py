@@ -35,7 +35,7 @@ from constituent_reconciler.connectors import (
     get_factory,
 )
 from constituent_reconciler.models import Consent, GoldenRecord
-from tests.conftest import FakeCivicrmTransport, FakeSalesforceTransport
+from tests.conftest import FakeCivicrmTransport, FakeSalesforceTransport, FakeWebhookTransport
 
 FIELDS = ("first_name", "last_name", "dob", "email", "phone")
 
@@ -77,6 +77,10 @@ def _output_for(name: str) -> OutputConfig:
         return OutputConfig(
             connector=name, endpoint="https://x.my.salesforce.com", auth_env=AUTH_ENV
         )
+    if name == "webhook":
+        return OutputConfig(
+            connector=name, endpoint="https://example.org/hooks/reconciler", auth_env=AUTH_ENV
+        )
     return OutputConfig(connector=name)
 
 
@@ -114,6 +118,13 @@ def _build(name: str, out_dir: Path, *, live: bool) -> tuple[Connector, list[Any
         sf_fake = FakeSalesforceTransport(sf_responses)
         transports["salesforce"] = sf_fake
         calls = sf_fake.calls
+    elif name == "webhook":
+        wh_responses: list[tuple[int, bytes]] = []
+        if live:
+            wh_responses = [(200, b"") for _ in RECORDS]
+        wh_fake = FakeWebhookTransport(wh_responses)
+        transports["webhook"] = wh_fake
+        calls = wh_fake.calls
     connector = get_factory(name)(_output_for(name), out_dir, transports)
     return connector, calls
 
@@ -131,6 +142,7 @@ def test_registry_covers_the_recipe_connector_names() -> None:
         "civicrm_csv",
         "civicrm",
         "salesforce",
+        "webhook",
     }
 
 

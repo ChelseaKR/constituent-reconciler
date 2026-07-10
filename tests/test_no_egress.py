@@ -49,6 +49,24 @@ def test_dv_pack_refuses_the_salesforce_target_too(tmp_path: Path) -> None:
     assert not (tmp_path / "resolved.csv").exists()
 
 
+def test_dv_pack_refuses_the_webhook_target_too(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    from constituent_reconciler.config import OutputConfig
+
+    base = load_recipe(EXAMPLES / "recipe.toml", policy_pack="dv")
+    recipe = replace(
+        base,
+        output=OutputConfig(connector="webhook", endpoint="https://example.org/hooks/reconciler"),
+    )
+    result = pipeline.run(recipe)
+    with pytest.raises(PolicyViolation, match="non-local write target"):
+        pipeline.export(result, recipe, out_dir=tmp_path)
+    # Nothing was written: the refusal happens before any connector write, so no
+    # network POST was even attempted, let alone one carrying client PII.
+    assert not (tmp_path / "resolved.csv").exists()
+
+
 def test_dv_pack_allows_the_local_csv_target(tmp_path: Path) -> None:
     recipe = load_recipe(EXAMPLES / "recipe-dv.toml")
     result = pipeline.run(recipe)

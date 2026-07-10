@@ -432,6 +432,96 @@ def test_export_via_civicrm_creates_and_logs_provenance(tmp_path: Path) -> None:
         del os.environ["CIVICRM_API_KEY"]
 
 
+class _WebhookTransport:
+    """Fake webhook transport: every POST succeeds with an empty 200."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, str], bytes]] = []
+
+    def post(self, url: str, *, headers: dict[str, str], body: bytes) -> tuple[int, bytes]:
+        self.calls.append((url, headers, body))
+        return 200, b""
+
+
+def test_export_via_webhook_creates_and_logs_provenance(tmp_path: Path) -> None:
+    recipe = replace(
+        load_recipe(EXAMPLES / "recipe.toml"),
+        output=OutputConfig(connector="webhook", endpoint="https://example.org/hooks/reconciler"),
+    )
+    result = pipeline.run(recipe)
+    transport = _WebhookTransport()
+    summary = pipeline.export(result, recipe, out_dir=tmp_path, webhook_transport=transport)
+
+    # Default policy exports all 21 resolved records; the webhook connector
+    # reports each as a plain "written" (no upsert-lookup response to read
+    # created/updated from).
+    assert summary.counts().get("written") == 21
+    assert len(transport.calls) == 21
+    assert summary.provenance_path is not None
+    ok, _ = verify_log(summary.provenance_path)
+    assert ok
+
+
+def _write_scope_fixture(tmp_path: Path) -> Path:
+    """Two records: consent scoped to civicrm only, and consent scoped to webhook."""
+
+    (tmp_path / "incoming.csv").write_text(
+        "id,first,last,dob,consent,scope\n"
+        "X1,Alice,CivicrmOnly,1980-01-01,granted,civicrm\n"
+        'X2,Bob,WebhookToo,1981-02-02,granted,"civicrm,webhook"\n',
+        encoding="utf-8",
+    )
+    recipe_path = tmp_path / "recipe.toml"
+    recipe_path.write_text(
+        "[input]\n"
+        'incoming = "incoming.csv"\n'
+        'id_column = "id"\n'
+        "\n"
+        "[mapping]\n"
+        'first_name = "first"\n'
+        'last_name = "last"\n'
+        'dob = "dob"\n'
+        "\n"
+        "[consent]\n"
+        'column = "consent"\n'
+        'scope = "scope"\n'
+        "require = true\n"
+        "\n"
+        "[output]\n"
+        'connector = "webhook"\n'
+        'endpoint = "https://example.org/hooks/reconciler"\n',
+        encoding="utf-8",
+    )
+    return recipe_path
+
+
+def test_webhook_export_honors_consent_scope_not_just_status(tmp_path: Path) -> None:
+    """A record whose consent is scoped away from 'webhook' is withheld from it.
+
+    This is the same consent lifecycle gate every connector shares
+    (``consent.partition_by_consent``, given ``destination=recipe.output.
+    connector``); the webhook connector adds nothing of its own here, which is
+    the point -- a record explicitly consented to civicrm only must not leak
+    out a newly added network destination just because its status is
+    "granted".
+    """
+
+    recipe = load_recipe(_write_scope_fixture(tmp_path))
+    result = pipeline.run(recipe)
+    transport = _WebhookTransport()
+    summary = pipeline.export(result, recipe, out_dir=tmp_path / "out", webhook_transport=transport)
+
+    assert summary.withheld_path is not None
+    withheld_text = summary.withheld_path.read_text(encoding="utf-8")
+    assert "X1" in withheld_text
+    assert "out-of-scope" in withheld_text
+    assert "X2" not in withheld_text
+
+    sent_external_ids = {json.loads(body)["external_id"] for _, _, body in transport.calls}
+    assert "X1" not in sent_external_ids
+    assert "X2" in sent_external_ids
+
+
 def _write_expiry_fixture(tmp_path: Path) -> Path:
     """Two records: one consent expired yesterday, one still good until tomorrow."""
 

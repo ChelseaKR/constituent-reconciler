@@ -60,6 +60,29 @@ provenance logs remain verifiable as written; only newly appended entries carry
 the new ids. Per the ADR 0006 stability contract this is a pre-1.0 surface
 change, shipped with this changelog entry.
 
+### Added
+- **Generic webhook connector** (`connector = "webhook"`, `connectors/webhook.py`),
+  the self-contained slice of roadmap item E3 (Apricot, Airtable, Sheets,
+  generic webhook): pushes resolved, consented records as one JSON POST per
+  record to any HTTP(S) endpoint, with an optional bearer token and an
+  optional HMAC-SHA256 request signature (`[output] signing_secret_env`) so a
+  receiver can verify authenticity. Registered on the connector registry
+  (`connectors.register`, FIX-09) and passes the same conformance suite
+  every connector does; `is_local = False`, so the `dv` policy pack refuses
+  it as a write target the same way it refuses CiviCRM and Salesforce.
+  Consent, including the destination-scoped lifecycle gate
+  (`Consent.reason(destination=...)`), is enforced upstream by the existing
+  export gate, not reimplemented. Documented payload shape, worked example,
+  and signature verification code: `docs/connectors/webhook.md`. Example
+  recipe: `examples/intake-demo/recipe-webhook.toml`.
+- Design briefs (research, not implementation) for E3's three remaining,
+  proprietary-vendor connectors -- Apricot (Bonterra), Airtable, Google
+  Sheets -- each covering auth model, rate limits, pagination, export shape,
+  and `is_local` classification, cited against each vendor's current API
+  docs: `docs/connectors/{apricot,airtable,sheets}-design.md`. Deferred as
+  implementation pending a priority decision and API credentials this
+  environment does not have.
+
 ### Security
 - **Standards-conformance remediation (2026-07-10), release_workflow
   (REL-14)**: added `.github/workflows/release.yml`, a tag-triggered
