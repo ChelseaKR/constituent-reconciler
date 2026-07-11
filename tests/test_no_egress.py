@@ -16,7 +16,7 @@ import pytest
 from constituent_reconciler import pipeline
 from constituent_reconciler.config import load_recipe
 from constituent_reconciler.consent import partition_by_consent
-from constituent_reconciler.extract.seam import NoOpSeam, make_seam
+from constituent_reconciler.extract.seam import LocalSeam, NoOpSeam, make_seam
 from constituent_reconciler.policy import PolicyViolation
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "intake-demo"
@@ -79,6 +79,29 @@ def test_dv_pack_fuses_the_cloud_extraction_seam_off() -> None:
     seam = make_seam("dv", backend="bedrock")
     assert isinstance(seam, NoOpSeam)
     assert seam.is_enabled() is False
+
+
+def test_dv_pack_fuses_the_local_seam_off_by_default() -> None:
+    # A local model does not egress PII, but that is a separate question from
+    # whether model-assisted extraction is acceptable at all under a given
+    # org's VAWA reading (docs/decisions/0010-local-model-seam.md). The dv
+    # pack has not recorded that analysis, so backend="local" alone still
+    # produces a NoOp seam, same as backend="bedrock".
+    seam = make_seam("dv", backend="local")
+    assert isinstance(seam, NoOpSeam)
+    assert seam.is_enabled() is False
+
+
+def test_dv_pack_local_seam_still_cannot_egress_even_when_explicitly_enabled() -> None:
+    # A deployer whose counsel has cleared model-assisted extraction can opt
+    # in via local_model_override. Even then, the resulting seam is forced
+    # to loopback: this proves that turning on model-assisted extraction
+    # under dv never opens a path to a non-local host, regardless of any
+    # OLLAMA_HOST a deployer's environment might set to something else.
+    seam = make_seam("dv", backend="local", local_model_override=True)
+    assert isinstance(seam, LocalSeam)
+    with pytest.raises(ValueError, match="loopback"):
+        LocalSeam(host="http://not-loopback.example.com:11434")
 
 
 def test_dv_pack_withholds_non_consented_records_without_field_values(tmp_path: Path) -> None:

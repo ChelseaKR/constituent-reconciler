@@ -60,17 +60,34 @@ class Policy:
 
     * ``require_consent`` -> the consent export gate (consent.py)
     * ``forbid_cloud_seam`` -> the extraction seam factory (extract/seam.py)
+    * ``allow_local_seam`` -> the extraction seam factory (extract/seam.py)
     * ``require_local_targets`` -> connector selection (pipeline.build_connector)
     * ``aggregate_export`` -> the aggregate summary writer (pipeline.export)
     * ``require_second_reviewer`` -> the review session (review/session.py):
       a merge decided by a human takes effect only after two distinct
       reviewers approve it. Not a statutory mandate; a separation-of-duties
       control for merges whose consequences are hardest to reverse.
+
+    ``forbid_cloud_seam`` and ``allow_local_seam`` are deliberately separate
+    dimensions, not one inferred from the other. "No cloud calls" (PII must
+    never leave the machine) and "no model at all" (no LLM may touch PII,
+    even one running locally) are different questions with different
+    answers: a local model run entirely on the deployer's own hardware
+    satisfies the first without settling the second. Whether model-assisted
+    extraction of any kind is acceptable under a given org's VAWA or HIPAA
+    reading is that org's counsel's call, not this codebase's to assume. So
+    ``allow_local_seam`` defaults to ``False`` even where ``forbid_cloud_seam``
+    is ``True``; turning it on is either a pack-level decision recorded here
+    once that analysis is written, or a recipe-level
+    ``extract.local_model_override`` a deployer sets explicitly, never
+    implied by requesting the local backend alone. See
+    docs/decisions/0010-local-model-seam.md.
     """
 
     pack: str
     require_consent: bool = False
     forbid_cloud_seam: bool = False
+    allow_local_seam: bool = False
     require_local_targets: bool = False
     aggregate_export: bool = False
     require_second_reviewer: bool = False
@@ -81,8 +98,18 @@ class Policy:
 # turns on consent and fuses the cloud seam off, but its full invariant set
 # (BAAs, the Safe Harbor de-identification method) is not yet specified here, so
 # it deliberately does not claim the dv pack's local-target and aggregate rules.
+#
+# Neither ``dv`` nor ``hipaa`` sets ``allow_local_seam``; both leave it at its
+# False default. That is the deliberate, no-model-until-counsel-says-so
+# posture: a local model does not egress PII, but this codebase has not
+# recorded a legal analysis saying model-assisted extraction itself clears
+# either bar. A deployer whose counsel has done that analysis opts in per
+# recipe via ``extract.local_model_override``, not by editing this table.
 _PACKS: dict[str, Policy] = {
-    "default": Policy(pack="default"),
+    # The default pack permits the cloud seam outright, so the egress-free
+    # local seam is permitted too; requiring an override only where a privacy
+    # pack is active keeps the strictness ordered sensibly.
+    "default": Policy(pack="default", allow_local_seam=True),
     "dv": Policy(
         pack="dv",
         require_consent=True,

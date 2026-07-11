@@ -9,10 +9,14 @@
 # backend = "pdfplumber", the pipeline accepts a directory as `incoming` and
 # routes .csv files through the structured reader and .pdf files through the
 # extractor. Pages with fewer than 5 words or garbled-looking text (avg word >
-# 15 chars) score below 0.5 and are candidates for the cloud seam, but the
-# seam is NoOp by default. Set backend = "bedrock" to enable the Claude on
-# Bedrock seam for low-confidence pages; under policy pack = "dv" the cloud
-# seam is always disabled regardless.
+# 15 chars) score below 0.5 and are candidates for a model-assisted seam, but
+# the seam is NoOp by default. Set backend = "bedrock" to enable the Claude on
+# Bedrock seam for low-confidence pages, or backend = "local" to route them to
+# a model server on this machine (for example Ollama), with zero network
+# egress. Under policy pack = "dv" or "hipaa" the Bedrock seam is always
+# disabled, and the local seam is disabled too unless local_model_override is
+# set explicitly, on the theory that "no cloud calls" and "no model at all"
+# are different questions (see docs/decisions/0010-local-model-seam.md).
 
 [input]
 existing = "existing.csv"

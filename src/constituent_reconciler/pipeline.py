@@ -233,7 +233,12 @@ def read_pdf_records(  # noqa: C901 - branches mirror ingest accounting cases.
         extractor: PdfplumberExtractor | PdfplumberOcrExtractor = PdfplumberOcrExtractor()
     else:
         extractor = PdfplumberExtractor()
-    seam = make_seam(recipe.policy_pack, recipe.extract.backend)
+    seam = make_seam(
+        recipe.policy_pack,
+        recipe.extract.backend,
+        local_model_override=recipe.extract.local_model_override,
+        local_model_id=recipe.extract.local_model_id,
+    )
     extraction = extractor.extract(path)
 
     seen = _seen if _seen is not None else {}

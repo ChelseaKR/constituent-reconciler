@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import dataclasses
+import json
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from constituent_reconciler.extract.seam import BedrockSeam, NoOpSeam, make_seam
+from constituent_reconciler.extract.seam import BedrockSeam, LocalSeam, NoOpSeam, make_seam
 from constituent_reconciler.models import SourceSpan
 
 pdfplumber = pytest.importorskip("pdfplumber", reason="pdfplumber not installed")
@@ -348,3 +353,112 @@ def test_review_queue_includes_span_columns_when_records_have_spans(
     assert "first_name_left_span" in header
     assert "first_name_right_span" in header
     assert "form.pdf:p1" in content
+
+
+# --- LocalSeam: loopback-only, model-assisted extraction without egress ---
+
+
+class _FakeOllamaHandler(BaseHTTPRequestHandler):
+    """Loopback stand-in for Ollama: /api/tags and /api/generate."""
+
+    generate_body: bytes = b"{}"
+
+    def do_GET(self) -> None:  # noqa: N802 - http.server API name.
+        body = b'{"models": []}' if self.path == "/api/tags" else b"{}"
+        self._reply(body)
+
+    def do_POST(self) -> None:  # noqa: N802 - http.server API name.
+        length = int(self.headers.get("Content-Length", "0"))
+        self.rfile.read(length)
+        self._reply(self.generate_body if self.path == "/api/generate" else b"{}")
+
+    def _reply(self, body: bytes) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+        pass
+
+
+@contextmanager
+def _fake_ollama(generate_body: bytes) -> Iterator[str]:
+    handler = type("_Handler", (_FakeOllamaHandler,), {"generate_body": generate_body})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+def test_local_seam_rejects_non_loopback_host() -> None:
+    with pytest.raises(ValueError, match="loopback"):
+        LocalSeam(host="http://model-server.internal:11434")
+
+
+def test_local_seam_accepts_each_loopback_host() -> None:
+    for host in ("http://127.0.0.1:11434", "http://localhost:11434", "http://[::1]:11434"):
+        LocalSeam(host=host)
+
+
+def test_dv_and_hipaa_local_backend_returns_no_op() -> None:
+    assert isinstance(make_seam("dv", backend="local"), NoOpSeam)
+    assert isinstance(make_seam("hipaa", backend="local"), NoOpSeam)
+
+
+def test_dv_local_override_returns_local_seam() -> None:
+    seam = make_seam("dv", backend="local", local_model_override=True)
+    assert isinstance(seam, LocalSeam)
+
+
+def test_default_pack_local_backend_needs_no_override() -> None:
+    assert isinstance(make_seam("default", backend="local"), LocalSeam)
+
+
+def test_local_seam_refine_parses_fields_from_fake_server(intake_pdf: Path) -> None:
+    model_reply = json.dumps(
+        {
+            "response": json.dumps(
+                {
+                    "fields": [
+                        {"name": "first_name", "value": "Alice"},
+                        {"name": "email", "value": " alice@example.org "},
+                        {"name": "not_a_field", "value": "x"},
+                        {"name": "phone", "value": ""},
+                        "not-a-dict",
+                    ]
+                }
+            )
+        }
+    ).encode("utf-8")
+    with _fake_ollama(model_reply) as host:
+        seam = LocalSeam(host=host)
+        assert seam.is_enabled() is True
+        fields = seam.refine(intake_pdf, 1)
+    assert [(f.field_name, f.value) for f in fields] == [
+        ("first_name", "Alice"),
+        ("email", "alice@example.org"),
+    ]
+
+
+def test_local_seam_server_down_is_disabled_and_refine_returns_empty(
+    intake_pdf: Path,
+) -> None:
+    with _fake_ollama(b"{}") as host:
+        pass  # The server is shut down when the context exits.
+    seam = LocalSeam(host=host, timeout=0.5)
+    assert seam.is_enabled() is False
+    assert seam.refine(intake_pdf, 1) == []
+
+
+def test_local_seam_malformed_model_json_returns_empty(intake_pdf: Path) -> None:
+    model_reply = json.dumps({"response": "not json at all {"}).encode("utf-8")
+    with _fake_ollama(model_reply) as host:
+        seam = LocalSeam(host=host)
+        assert seam.refine(intake_pdf, 1) == []
