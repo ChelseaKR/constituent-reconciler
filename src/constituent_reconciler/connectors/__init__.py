@@ -15,6 +15,10 @@ from constituent_reconciler.connectors.civicrm import (
     UrllibTransport,
 )
 from constituent_reconciler.connectors.csv_out import CsvConnector
+from constituent_reconciler.connectors.webhook import (
+    WebhookConfig,
+    WebhookConnector,
+)
 
 __all__ = [
     "WRITE_ACTIONS",
@@ -26,4 +30,6 @@ __all__ = [
     "CivicrmConfig",
     "Transport",
     "UrllibTransport",
+    "WebhookConnector",
+    "WebhookConfig",
 ]

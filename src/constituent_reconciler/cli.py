@@ -1,9 +1,12 @@
 """Command-line interface.
 
-Three commands: ``run`` produces resolved records and a review queue, ``eval``
-scores a run against ground-truth clusters, and ``apply`` carries human review
-decisions back into a fresh run. The CLI uses argparse only, so the package has
-no runtime dependency beyond the matcher.
+The subcommands: ``run`` produces resolved records and a review queue, ``eval``
+scores a run against ground-truth clusters, ``apply`` carries human review
+decisions back into a fresh run, ``review`` serves the local web queue,
+``validate`` checks a recipe without running anything, ``verify`` checks a
+provenance log's hash chain, and ``schema`` prints the declared schema
+versions. The CLI uses argparse only, so the package has no runtime dependency
+beyond the matcher.
 """
 
 from __future__ import annotations
@@ -152,6 +155,42 @@ def _cmd_review(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_validate(args: argparse.Namespace) -> int:
+    """Check a recipe without running anything: shape, files, policy switches."""
+
+    try:
+        recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+    except PolicyViolation as error:
+        print(f"policy error: {error}", file=sys.stderr)
+        return 2
+    except (ValueError, OSError) as error:
+        print(f"invalid recipe: {error}", file=sys.stderr)
+        return 2
+
+    problems: list[str] = []
+    if not recipe.incoming.exists():
+        problems.append(f"incoming source does not exist: {recipe.incoming}")
+    if recipe.existing is not None and not recipe.existing.exists():
+        problems.append(f"existing source does not exist: {recipe.existing}")
+
+    print(f"recipe: {args.config}")
+    print(f"  incoming:         {recipe.incoming}")
+    print(f"  existing:         {recipe.existing if recipe.existing else '(none)'}")
+    print(f"  mapped fields:    {', '.join(recipe.fields)}")
+    print(f"  consent column:   {recipe.consent_column if recipe.consent_column else '(none)'}")
+    print(f"  thresholds:       auto={recipe.auto_threshold} review={recipe.review_threshold}")
+    print(f"  policy pack:      {recipe.policy_pack}")
+    print(f"  require consent:  {recipe.require_consent}")
+    print(f"  local-only write: {recipe.require_local_targets}")
+    print(f"  connector:        {recipe.output.connector}")
+    if problems:
+        for problem in problems:
+            print(f"problem: {problem}", file=sys.stderr)
+        return 1
+    print("recipe is valid")
+    return 0
+
+
 def _cmd_verify(args: argparse.Namespace) -> int:
     ok, message = verify_log(Path(args.provenance))
     print(message)
@@ -228,6 +267,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="override the recipe's policy pack (e.g. dv); fail-closed on unknown",
     )
     review_parser.set_defaults(func=_cmd_review)
+
+    validate_parser = sub.add_parser(
+        "validate", help="check a recipe's shape, files, and policy without running"
+    )
+    validate_parser.add_argument("--config", required=True, help="path to recipe.toml")
+    validate_parser.add_argument(
+        "--policy-pack",
+        default=None,
+        help="override the recipe's policy pack (e.g. dv); fail-closed on unknown",
+    )
+    validate_parser.set_defaults(func=_cmd_validate)
 
     verify_parser = sub.add_parser("verify", help="check a provenance log's hash chain")
     verify_parser.add_argument("--provenance", required=True, help="path to provenance.jsonl")

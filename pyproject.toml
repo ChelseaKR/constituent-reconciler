@@ -90,7 +90,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --strict-markers --strict-config --import-mode=importlib --cov=constituent_reconciler --cov-branch --cov-report=term-missing --cov-fail-under=84"
+addopts = "-q --strict-markers --strict-config --import-mode=importlib --cov=constituent_reconciler --cov-branch --cov-report=term-missing --cov-fail-under=85"
 
 [tool.coverage.run]
 branch = true

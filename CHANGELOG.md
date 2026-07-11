@@ -6,6 +6,26 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 ## [Unreleased]
 
+### Added
+- **Generic webhook connector** (`connector = "webhook"`, `connectors/webhook.py`),
+  the self-contained slice of roadmap item E3 (Apricot, Airtable, Sheets,
+  generic webhook): pushes resolved, consented records as one JSON POST per
+  record to any HTTP(S) endpoint, with an optional bearer token and an
+  optional HMAC-SHA256 request signature (`[output] signing_secret_env`) so a
+  receiver can verify authenticity. `is_local = False`, so the `dv` policy
+  pack refuses it as a write target the same way it refuses CiviCRM and
+  Salesforce; consent is enforced upstream by the existing export gate, not
+  reimplemented. Documented payload shape, worked example, and signature
+  verification code: `docs/connectors/webhook.md`. Example recipe:
+  `examples/intake-demo/recipe-webhook.toml`.
+- Design briefs (research, not implementation) for E3's three remaining,
+  proprietary-vendor connectors — Apricot (Bonterra), Airtable, Google
+  Sheets — each covering auth model, rate limits, pagination, export shape,
+  and `is_local` classification, cited against each vendor's current API
+  docs: `docs/connectors/{apricot,airtable,sheets}-design.md`. Deferred as
+  implementation pending a priority decision and API credentials this
+  environment does not have.
+
 ### Security
 - **Standards-conformance remediation (2026-07-05)**, closing the audit's
   headline gap — this repo held the portfolio's most sensitive PII (DV-survivor
@@ -41,12 +61,9 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
     repo-specific `no-pii-in-logs` rule at `.semgrep/no-pii-in-logs.yml`); a
     `codeql` workflow runs CodeQL for `python` and `actions` on push, PR, and a
     weekly schedule; a `zizmor` job lints the workflow files themselves.
-  - A merge-blocking coverage floor (`--cov-fail-under=84`, branch coverage,
-    `pytest-cov`) closes the gap between the ROADMAP's earlier claimed figure
-    and CI actually enforcing it. Set to 84 rather than the 85 target because
-    this PR excludes a pre-existing, in-progress feature branch (see
-    `docs/ROADMAP.md`'s metrics ledger note); raise it to 85 once that branch
-    lands with its own tests.
+  - A merge-blocking coverage floor (`--cov-fail-under=85`, branch coverage,
+    `pytest-cov`) closes the gap between the ROADMAP's claimed 86% and CI
+    actually enforcing it.
   - `__version__` is now derived from installed package metadata
     (`importlib.metadata.version`) instead of being hand-copied alongside
     `pyproject.toml`'s `version`, so the two can no longer drift (REL-02).

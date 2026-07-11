@@ -146,7 +146,12 @@ def rationale_for(view: PairView) -> MatchRationale:
 
 @dataclass(frozen=True)
 class PairView:
-    """Everything the review screen needs for one candidate pair."""
+    """Everything the review screen needs for one candidate pair.
+
+    ``note`` carries a routing explanation when the pipeline sent the pair to
+    review for a reason beyond its score (a cannot-link constraint elsewhere in
+    its cluster); it is empty for an ordinary uncertain pair.
+    """
 
     index: int
     left_id: str
@@ -155,6 +160,7 @@ class PairView:
     right_source: str
     probability: float
     fields: tuple[FieldCell, ...]
+    note: str = ""
 
 
 @dataclass(frozen=True)
@@ -250,6 +256,7 @@ class ReviewSession:
             right_source=right.source,
             probability=pair.probability,
             fields=tuple(cells),
+            note=pair.note,
         )
 
     def views(self) -> list[PairView]:

@@ -8,13 +8,74 @@ directory, so a recipe and its data can be moved together.
 
 from __future__ import annotations
 
+import difflib
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from constituent_reconciler import defaults
 from constituent_reconciler.models import CANONICAL_FIELDS
 from constituent_reconciler.policy import policy_for
+
+# The declared recipe shape: every section and key a recipe may carry. This is
+# the surface CONFIG_SCHEMA_VERSION in schema.py versions. Anything outside it
+# is refused with the nearest valid name, fail-closed: a misspelled threshold
+# must not silently run at the default.
+RECIPE_SCHEMA: dict[str, frozenset[str]] = {
+    "input": frozenset({"incoming", "existing", "id_column"}),
+    "mapping": frozenset(CANONICAL_FIELDS),
+    "consent": frozenset({"column", "require"}),
+    "thresholds": frozenset({"prior", "auto", "review"}),
+    "policy": frozenset({"pack"}),
+    "normalize": frozenset({"address_backend"}),
+    "extract": frozenset({"backend", "confidence_threshold"}),
+    "output": frozenset(
+        {
+            "connector",
+            "endpoint",
+            "auth_env",
+            "auth_header",
+            "auth_scheme",
+            "external_id_field",
+            "api_version",
+            "object_name",
+            "signing_secret_env",
+        }
+    ),
+}
+
+
+def _nearest(name: str, valid: frozenset[str]) -> str:
+    # A generous cutoff so a compound misspelling ("auto_threshold" for "auto")
+    # still earns a suggestion; the message is a hint, not a guess at intent.
+    matches = difflib.get_close_matches(name, sorted(valid), n=1, cutoff=0.4)
+    return f"; did you mean {matches[0]!r}?" if matches else ""
+
+
+def _validate_shape(data: dict[str, Any]) -> None:
+    """Reject unknown recipe sections and keys, naming the nearest valid one.
+
+    Every other input surface raises on a typo (an unknown policy pack, an
+    unknown address backend); the recipe must too, because it is the one file a
+    non-technical operator edits. Silent acceptance would mean a misspelled
+    section or key quietly changes what the run enforces.
+    """
+
+    for section, content in data.items():
+        if section not in RECIPE_SCHEMA:
+            raise ValueError(
+                f"recipe has unknown section [{section}]"
+                f"{_nearest(section, frozenset(RECIPE_SCHEMA))}"
+            )
+        if not isinstance(content, dict):
+            raise ValueError(f"recipe [{section}] must be a table of keys, not a bare value")
+        valid = RECIPE_SCHEMA[section]
+        for key in content:
+            if key not in valid:
+                raise ValueError(
+                    f"recipe [{section}] has unknown key {key!r}{_nearest(key, valid)}"
+                )
 
 
 @dataclass(frozen=True)
@@ -53,9 +114,13 @@ class OutputConfig:
     """Where resolved records are written. Secrets are never stored here.
 
     ``auth_env`` names the environment variable that holds the credential (a
-    CiviCRM API key, a Salesforce access token); the value is read at write time,
-    not from the recipe. ``api_version`` and ``object_name`` apply to the
-    Salesforce connector; CiviCRM ignores them.
+    CiviCRM API key, a Salesforce access token, or a webhook's bearer token);
+    the value is read at write time, not from the recipe. ``api_version`` and
+    ``object_name`` apply to the Salesforce connector; CiviCRM ignores them.
+    ``signing_secret_env`` names the environment variable holding the webhook
+    connector's HMAC signing secret; other connectors ignore it. Unset, the
+    webhook connector sends no signature header, which is fine for a local
+    test receiver but not recommended for a real deployment.
     """
 
     connector: str = "csv"
@@ -66,6 +131,7 @@ class OutputConfig:
     external_id_field: str = "external_identifier"
     api_version: str = "v60.0"
     object_name: str = "Contact"
+    signing_secret_env: str = ""
 
 
 @dataclass(frozen=True)
@@ -99,13 +165,17 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
 
     The override exists so ``reconcile run --policy-pack dv`` can apply the DV
     posture to any recipe without editing it, which matches how the pack is
-    described to users. An unknown pack raises a PolicyViolation, fail-closed.
+    described to users. An unknown pack raises a PolicyViolation, fail-closed,
+    and an unknown section or key raises a ValueError naming the nearest valid
+    one, so a typo cannot silently fall back to a default.
     """
 
     recipe_path = Path(path)
     base = recipe_path.parent
     with recipe_path.open("rb") as handle:
         data = tomllib.load(handle)
+
+    _validate_shape(data)
 
     input_section = data.get("input", {})
     mapping_section = data.get("mapping", {})
@@ -157,6 +227,7 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
         external_id_field=str(output_section.get("external_id_field", "external_identifier")),
         api_version=str(output_section.get("api_version", "v60.0")),
         object_name=str(output_section.get("object_name", "Contact")),
+        signing_secret_env=str(output_section.get("signing_secret_env", "")),
     )
 
     return Recipe(
