@@ -3,10 +3,11 @@
 The subcommands: ``run`` produces resolved records and a review queue, ``eval``
 scores a run against ground-truth clusters, ``eval-extraction`` scores the PDF
 extractor against labeled fixtures, ``apply`` carries human review decisions
-back into a fresh run, ``review`` serves the local web queue, ``destroy``
-deletes retained artifacts, ``verify`` checks a provenance log's hash chain,
-and ``schema`` prints the declared schema versions. The CLI uses argparse only,
-so the package has no runtime dependency beyond the matcher.
+back into a fresh run, ``review`` serves the local web queue, ``validate``
+checks a recipe without running anything, ``destroy`` deletes retained
+artifacts, ``verify`` checks a provenance log's hash chain, and ``schema``
+prints the declared schema versions. The CLI uses argparse only, so the
+package has no runtime dependency beyond the matcher.
 """
 
 from __future__ import annotations
@@ -18,11 +19,18 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from constituent_reconciler import __version__, pipeline
-from constituent_reconciler.config import Recipe, load_recipe
+from constituent_reconciler.config import Recipe, RecipeError, load_recipe
 from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.consent import partition_by_consent
 from constituent_reconciler.destruction import destroy, parse_retention
-from constituent_reconciler.evaluate import evaluate, extraction_metrics
+from constituent_reconciler.evaluate import (
+    KAPPA_GATE,
+    CalibrationReport,
+    calibrate,
+    evaluate,
+    extraction_metrics,
+)
+from constituent_reconciler.narrative import LANGUAGES, render_narrative
 from constituent_reconciler.pipeline import ExportSummary
 from constituent_reconciler.policy import PolicyViolation
 from constituent_reconciler.provenance import ProvenanceLog, verify_log
@@ -34,20 +42,40 @@ from constituent_reconciler.report import (
 from constituent_reconciler.suppression import render_comparable, render_summary
 
 
-def _load_pairs(path: Path, keys: Sequence[str]) -> list[frozenset[str]]:
-    data = json.loads(path.read_text(encoding="utf-8"))
+def _load_pairs(data: dict[str, object], keys: Sequence[str]) -> list[frozenset[str]]:
     pairs: list[frozenset[str]] = []
     for key in keys:
-        for entry in data.get(key, []):
-            if len(entry) != 2:
+        entries = data.get(key, [])
+        if not isinstance(entries, list):
+            raise ValueError(f"{key} must be a list of [left, right] pairs")
+        for entry in entries:
+            if not isinstance(entry, list) or len(entry) != 2:
                 raise ValueError(f"{key} entries must be 2-element [left, right] lists")
             pairs.append(frozenset((str(entry[0]), str(entry[1]))))
     return pairs
 
 
-def _load_household_ids(path: Path, key: str) -> frozenset[str]:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return frozenset(str(entry) for entry in data.get(key, []))
+def _load_household_ids(data: dict[str, object], key: str) -> frozenset[str]:
+    entries = data.get(key, [])
+    if not isinstance(entries, list):
+        raise ValueError(f"{key} must be a list of household ids")
+    return frozenset(str(entry) for entry in entries)
+
+
+def _pairs_awaiting_second_review(data: dict[str, object]) -> list[str]:
+    """Audit-trail pairs that are neither approved nor rejected yet.
+
+    A version-2 decisions file holds every recorded verdict in its ``audit``
+    section. A pair present there but absent from both top-level lists carries
+    a single approval under two-person review; applying such a file must fail,
+    naming the pairs, rather than silently skipping them.
+    """
+
+    audit = data.get("audit")
+    if not isinstance(audit, dict):
+        return []
+    decided = set(_load_pairs(data, ["approved", "rejected"]))
+    return sorted(key for key in audit if frozenset(str(key).split("|")) not in decided)
 
 
 def _print_export(recipe: Recipe, summary: ExportSummary, *, dry_run: bool) -> None:
@@ -77,7 +105,7 @@ def _print_export(recipe: Recipe, summary: ExportSummary, *, dry_run: bool) -> N
 
 def _cmd_run(args: argparse.Namespace) -> int:
     try:
-        recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+        recipe = load_recipe(args.config, policy_pack=args.policy_pack, tsa_url=args.tsa_url)
     except PolicyViolation as error:
         print(f"policy error: {error}", file=sys.stderr)
         return 2
@@ -96,21 +124,50 @@ def _cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_calibration(path: Path | None) -> CalibrationReport | None:
+    if path is None:
+        return None
+    if not path.is_file():
+        print(f"calibration labels file not found: {path}", file=sys.stderr)
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("calibration labels file must be a JSON object")
+        labels = payload.get("labels", [])
+        if not isinstance(labels, list):
+            raise ValueError("calibration labels must be a list")
+        threshold = payload.get("threshold", KAPPA_GATE)
+        if not isinstance(threshold, int | float):
+            raise ValueError("calibration threshold must be numeric")
+        return calibrate(labels, threshold=float(threshold))
+    except (OSError, json.JSONDecodeError, ValueError) as error:
+        print(f"calibration error: {error}", file=sys.stderr)
+        return None
+
+
 def _cmd_eval(args: argparse.Namespace) -> int:
     recipe = load_recipe(args.config)
     result = pipeline.run(recipe)
     truth = json.loads(Path(args.truth).read_text(encoding="utf-8"))
     clusters = truth.get("clusters", [])
     report = evaluate(result.pairs, clusters, n_records=len(result.records))
+    calibration = _load_calibration(Path(args.calibration) if args.calibration else None)
     markdown = render_eval_markdown(
-        report, dataset=Path(args.config).parent.name, gate_threshold=args.gate
+        report,
+        dataset=Path(args.config).parent.name,
+        gate_threshold=args.gate,
+        calibration=calibration,
     )
     if args.out:
         Path(args.out).write_text(markdown, encoding="utf-8")
         print(f"wrote eval report: {args.out}")
     else:
         print(markdown)
-    return 0 if report.false_merge_rate <= args.gate else 1
+    gates_pass = (
+        report.false_merge_rate <= args.gate and calibration is not None and calibration.passed
+    )
+    return 0 if gates_pass else 1
 
 
 def _cmd_eval_extraction(args: argparse.Namespace) -> int:
@@ -155,19 +212,68 @@ def _cmd_eval_extraction(args: argparse.Namespace) -> int:
     return 0 if met else 1
 
 
+def _load_json_object(path: Path) -> dict[str, object]:
+    data: object = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} must contain a JSON object")
+    return {str(key): value for key, value in data.items()}
+
+
+def _cmd_report(args: argparse.Namespace) -> int:
+    run_dir = Path(args.run_dir)
+    summary_path = run_dir / "run_summary.json"
+    aggregate_path = run_dir / "aggregate_summary.json"
+    if not summary_path.is_file():
+        print(f"report error: run summary not found: {summary_path}", file=sys.stderr)
+        return 2
+    try:
+        result_summary = _load_json_object(summary_path)
+        aggregate = _load_json_object(aggregate_path) if aggregate_path.is_file() else None
+        markdown = render_narrative(result_summary, aggregate, lang=args.lang)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(f"report error: {error}", file=sys.stderr)
+        return 2
+
+    if args.out:
+        Path(args.out).write_text(markdown, encoding="utf-8")
+        print(f"wrote narrative report: {args.out}")
+    else:
+        print(markdown, end="")
+    return 0
+
+
 def _cmd_apply(args: argparse.Namespace) -> int:
     try:
-        recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+        recipe = load_recipe(args.config, policy_pack=args.policy_pack, tsa_url=args.tsa_url)
     except PolicyViolation as error:
         print(f"policy error: {error}", file=sys.stderr)
         return 2
     decisions_path = Path(args.decisions)
-    force_auto = _load_pairs(decisions_path, ["approved"])
-    force_drop = _load_pairs(decisions_path, ["rejected"])
+    decisions_data = json.loads(decisions_path.read_text(encoding="utf-8"))
+    if not isinstance(decisions_data, dict):
+        print(f"error: {decisions_path} is not a decisions JSON object", file=sys.stderr)
+        return 2
+    awaiting = _pairs_awaiting_second_review(decisions_data)
+    if awaiting:
+        print(
+            f"error: {decisions_path} holds {len(awaiting)} pair(s) still awaiting "
+            "a second reviewer; they cannot be applied:",
+            file=sys.stderr,
+        )
+        for key in awaiting:
+            print(f"  {key.replace('|', ' and ')}", file=sys.stderr)
+        print(
+            "Have a second reviewer finish the review "
+            "(reconcile review --reviewer <other-name>), or reject the pairs.",
+            file=sys.stderr,
+        )
+        return 2
+    force_auto = _load_pairs(decisions_data, ["approved"])
+    force_drop = _load_pairs(decisions_data, ["rejected"])
     # "households_confirmed" is a list of household ids copied from an earlier
     # run's household_suggestions.csv by a reviewer; a suggestion never applies
     # to the CRM export column until it appears here (household.py).
-    confirmed_households = _load_household_ids(decisions_path, "households_confirmed")
+    confirmed_households = _load_household_ids(decisions_data, "households_confirmed")
     result = pipeline.run(recipe, force_auto=force_auto, force_drop=force_drop)
     _, withheld = partition_by_consent(result.golden, require_consent=recipe.require_consent)
     print(render_run_summary(result, withheld=len(withheld)))
@@ -225,12 +331,21 @@ def _cmd_review(args: argparse.Namespace) -> int:
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     decisions_path = Path(args.decisions) if args.decisions else out_dir / "decisions.json"
-    session = ReviewSession(
-        result,
-        recipe.fields,
-        decisions_path,
-        privacy_mode=recipe.require_local_targets,
-    )
+    # The flag may turn two-person review on for any pack; it cannot turn off
+    # a pack that requires it (the dv pack defaults it on), fail-closed.
+    require_second = bool(args.require_second_reviewer) or recipe.require_second_reviewer
+    try:
+        session = ReviewSession(
+            result,
+            recipe.fields,
+            decisions_path,
+            reviewer=args.reviewer,
+            privacy_mode=recipe.require_local_targets,
+            require_second_reviewer=require_second,
+        )
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
     print(render_run_summary(result))
     try:
         serve(
@@ -243,10 +358,68 @@ def _cmd_review(args: argparse.Namespace) -> int:
         print(f"\npolicy error: {error}", file=sys.stderr)
         return 2
     counts = session.counts()
-    print(
+    line = (
         f"\nreview saved to {decisions_path}: "
         f"{counts.approved} approved, {counts.rejected} rejected, {counts.pending} pending"
     )
+    if counts.awaiting_second:
+        line += f", {counts.awaiting_second} awaiting a second reviewer"
+    print(line)
+    return 0
+
+
+def _cmd_validate(args: argparse.Namespace) -> int:
+    """Load and shape-check a recipe, and report its active switches.
+
+    Runs nothing: no ingest, no matcher, no connector. Meant as the first step
+    of the adoption-kit flow (E8) and as the fast way to catch a typo'd section
+    or key (FIX-04) before a run.
+    """
+
+    config_path = Path(args.config)
+    try:
+        recipe = load_recipe(config_path, policy_pack=args.policy_pack)
+    except RecipeError as error:
+        print(f"invalid recipe: {error}", file=sys.stderr)
+        return 2
+    except PolicyViolation as error:
+        print(f"policy error: {error}", file=sys.stderr)
+        return 2
+
+    problems: list[str] = []
+    if not recipe.incoming.exists():
+        problems.append(f"input.incoming does not exist: {recipe.incoming}")
+    if recipe.existing is not None and not recipe.existing.exists():
+        problems.append(f"input.existing does not exist: {recipe.existing}")
+
+    print(f"recipe: {config_path}")
+    print(f"  incoming: {recipe.incoming}")
+    if recipe.existing is not None:
+        print(f"  existing: {recipe.existing}")
+    print(f"  mapped fields: {', '.join(recipe.fields)}")
+    print(f"  policy pack: {recipe.policy_pack}")
+    print(
+        "  switches: "
+        f"require_consent={recipe.require_consent}, "
+        f"require_local_targets={recipe.require_local_targets}, "
+        f"aggregate_export={recipe.aggregate_export}, "
+        f"household.enabled={recipe.household.enabled}"
+    )
+    print(
+        "  thresholds: "
+        f"prior={recipe.prior}, auto={recipe.auto_threshold}, review={recipe.review_threshold}"
+    )
+    print(f"  extract backend: {recipe.extract.backend}")
+    print(f"  address backend: {recipe.normalize.address_backend}")
+    print(f"  output connector: {recipe.output.connector}")
+
+    if problems:
+        print("\nproblems:", file=sys.stderr)
+        for problem in problems:
+            print(f"  - {problem}", file=sys.stderr)
+        return 2
+
+    print("\nrecipe is valid.")
     return 0
 
 
@@ -312,6 +485,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="override the recipe's policy pack (e.g. dv); fail-closed on unknown",
     )
+    run_parser.add_argument(
+        "--tsa-url",
+        default=None,
+        help="override [provenance].tsa_url for RFC 3161 trusted timestamps",
+    )
     run_parser.set_defaults(func=_cmd_run)
 
     eval_parser = sub.add_parser("eval", help="score a run against ground-truth clusters")
@@ -320,6 +498,10 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument("--out", help="write the report here instead of stdout")
     eval_parser.add_argument(
         "--gate", type=float, default=0.0, help="max allowed false-merge rate (default 0.0)"
+    )
+    eval_parser.add_argument(
+        "--calibration",
+        help="calibration labels JSON for the fail-closed kappa gate",
     )
     eval_parser.set_defaults(func=_cmd_eval)
 
@@ -347,6 +529,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     exeval_parser.set_defaults(func=_cmd_eval_extraction)
 
+    report_parser = sub.add_parser("report", help="render a count-only run report")
+    report_parser.add_argument(
+        "--run-dir", default="out", help="directory containing run artifacts"
+    )
+    report_parser.add_argument(
+        "--format",
+        choices=("narrative",),
+        default="narrative",
+        help="report format to render",
+    )
+    report_parser.add_argument(
+        "--lang",
+        choices=LANGUAGES,
+        default="en",
+        help="language for narrative reports",
+    )
+    report_parser.add_argument("--out", help="write the report here instead of stdout")
+    report_parser.set_defaults(func=_cmd_report)
+
     apply_parser = sub.add_parser("apply", help="apply review decisions and re-resolve")
     apply_parser.add_argument("--config", required=True, help="path to recipe.toml")
     apply_parser.add_argument("--decisions", required=True, help="decisions JSON")
@@ -355,6 +556,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--policy-pack",
         default=None,
         help="override the recipe's policy pack (e.g. dv); fail-closed on unknown",
+    )
+    apply_parser.add_argument(
+        "--tsa-url",
+        default=None,
+        help="override [provenance].tsa_url for RFC 3161 trusted timestamps",
     )
     apply_parser.set_defaults(func=_cmd_apply)
 
@@ -375,6 +581,19 @@ def build_parser() -> argparse.ArgumentParser:
         "review", help="open the local web review queue for uncertain pairs"
     )
     review_parser.add_argument("--config", required=True, help="path to recipe.toml")
+    review_parser.add_argument(
+        "--reviewer",
+        required=True,
+        help="name recorded with every verdict; the decisions file attributes each decision",
+    )
+    review_parser.add_argument(
+        "--require-second-reviewer",
+        action="store_true",
+        help=(
+            "hold each approval until a second, different reviewer also approves "
+            "(the dv policy pack turns this on by default)"
+        ),
+    )
     review_parser.add_argument("--out", default="out", help="output directory")
     review_parser.add_argument(
         "--decisions", default=None, help="decisions file to write (default <out>/decisions.json)"
@@ -394,6 +613,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="override the recipe's policy pack (e.g. dv); fail-closed on unknown",
     )
     review_parser.set_defaults(func=_cmd_review)
+
+    validate_parser = sub.add_parser(
+        "validate", help="check a recipe's shape and report its switches, without running"
+    )
+    validate_parser.add_argument("--config", required=True, help="path to recipe.toml")
+    validate_parser.add_argument(
+        "--policy-pack",
+        default=None,
+        help="override the recipe's policy pack (e.g. dv); fail-closed on unknown",
+    )
+    validate_parser.set_defaults(func=_cmd_validate)
 
     destroy_parser = sub.add_parser(
         "destroy",

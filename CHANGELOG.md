@@ -6,6 +6,50 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 ## [Unreleased]
 
+### Changed
+- **CiviCRM email and phone write through dedicated entities (R7)**
+  (`connectors/civicrm.py`). Email and phone move off the API v4 join-field
+  shorthand onto the dedicated Email and Phone entities: once the contact id
+  is resolved, the connector updates the contact's primary row when one exists
+  and creates it when none does. A record with no value for a field makes no
+  call for it, so an empty value never blanks a stored row, and
+  `Contact.create` returning no id now raises `ConnectorError` before any
+  entity write instead of reporting a created row without an id. Dry-run
+  payloads and the provenance hash input still carry email and phone. The
+  recorded end-to-end demo against a running CiviCRM stays open in
+  `docs/ROADMAP.md` v0.2.
+- **Record identity is content-derived and collision-safe (FIX-03)**
+  (`pipeline.py`). Generated record ids are now a BLAKE2b digest of the source
+  name and the mapped raw values (for example `N3f9a2c1b0d4`) instead of the
+  row position (`N0001`), for CSV rows, extracted PDF pages, and .txt/.eml
+  bodies alike. Inserting or reordering rows in a source file between
+  `reconcile review` and `reconcile apply` no longer re-binds recorded
+  verdicts to different people; editing a row changes that row's id and no
+  other. Exact-duplicate rows share the digest and carry a deterministic `-2`,
+  `-3`, ... suffix in read order.
+- **User-supplied ids are namespaced by source.** A value read from the
+  recipe's `id_column` becomes `existing:E003` or `incoming:N002`, so the same
+  id in two source files can no longer collide. An id that still appears twice
+  in one run (a duplicated `id_column` value within one source) raises
+  `pipeline.DuplicateIdError` naming the id and source, instead of silently
+  dropping one of the records.
+- **The decisions file is a versioned surface.** `decisions.json` now carries
+  a `decisions_schema` field (`schema.DECISIONS_SCHEMA_VERSION`),
+  reported by `reconcile schema` alongside the other declared versions. A
+  resumed review session warns on stderr when a saved decision references a
+  pair that is not in the current run's review queue, instead of ignoring it
+  silently.
+
+#### Migration note (FIX-03)
+Record ids embedded in artifacts written by earlier versions (decisions files,
+provenance logs, review queues, CRM external-id columns keyed on cluster ids)
+will not match the ids this version mints from the same data. Finish and apply
+any in-flight review with the version that produced it, then re-run
+`reconcile run` under this version before recording new decisions. Existing
+provenance logs remain verifiable as written; only newly appended entries carry
+the new ids. Per the ADR 0006 stability contract this is a pre-1.0 surface
+change, shipped with this changelog entry.
+
 ### Security
 - **Standards-conformance remediation (2026-07-10), release_workflow
   (REL-14)**: added `.github/workflows/release.yml`, a tag-triggered
@@ -19,7 +63,28 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   (not published to PyPI); no `v*` tag has been cut, so the workflow is
   unexercised end-to-end pending the maintainer cutting the first release.
 
+- **Web-boundary hardening for the review server (FIX-01)**: `reconcile
+  review` now checks the `Host` header on every request against the address
+  it actually bound (closing a DNS-rebinding path to the loopback-only
+  server), checks a POST's `Origin` header, if present, against the server's
+  own origin, and requires a per-run session token embedded in every rendered
+  form on every POST. Together these mean a hostile page the reviewer has
+  open elsewhere can no longer forge a verdict or read a pair over the
+  loopback interface by guessing a port. `docs/ideation/02-large-scale-fixes.md`
+  named this the most serious observed gap between the DV pack's stated
+  "cannot become an egress path" claim and the code.
+
 ### Added
+- **Fail-closed recipe validation and `reconcile validate` (FIX-04)**:
+  `config.load_recipe` now rejects an unknown `[section]` or an unknown key
+  inside a known section — naming the nearest valid spelling — instead of
+  silently ignoring it via `dict.get`. A mapping key outside the canonical
+  fields (a typo'd `frist_name`) now raises instead of vanishing from the
+  mapping. A new `reconcile validate --config recipe.toml` command loads and
+  shape-checks a recipe, confirms `incoming`/`existing` point at files that
+  exist, and prints the active policy pack, thresholds, and switches, without
+  running the pipeline. `docs/ADOPTION-KIT.md` gets a "validate before you
+  run" step.
 - **Local OCR backend for scanned intake (EXP-04)**: `extract/ocr.py` adds a
   `PdfplumberOcrExtractor`, selected by `[extract] backend = "pdfplumber+ocr"`,
   that OCRs (via Tesseract, the new optional `ocr` extra) any PDF page with no
@@ -83,6 +148,27 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
     portfolio's other project audits; what remains open here is container
     scanning, the release pipeline, and the branch ruleset actually being
     applied (docs/rulesets/README.md).
+- **Reviewer audit trail** (roadmap E4): every review verdict is attributed.
+  `reconcile review` now requires `--reviewer NAME`, and `decisions.json` grows a
+  versioned shape (`decisions_schema: 2`) with an `audit` section mapping each pair
+  to the reviewers who decided it, their verdicts, and UTC timestamps. The
+  top-level `approved`/`rejected` lists keep the version-1 shape, so
+  `reconcile apply` reads both versions unchanged, and the file still carries no
+  field value of a reviewed record. A blank reviewer name is refused,
+  fail-closed. Sessions resume from either file shape; verdicts from a version-1
+  file resume attributed to `unrecorded`.
+- **Two-person review** for sensitive merges: with
+  `reconcile review --require-second-reviewer`, or
+  `require_second_reviewer = true` in the recipe's new optional `[review]`
+  section (on by default under the `dv` policy pack), a merge only lands in
+  `approved` after two distinct reviewer names approve it. A lone approval is
+  held in the audit section as awaiting a second reviewer, the same name cannot
+  supply both approvals, and any rejection rejects immediately; disagreement
+  never merges. `reconcile apply` refuses a decisions file that still holds
+  half-approved pairs, naming them. The review pages show who is reviewing and
+  which pairs await a second reviewer. A recipe or flag may turn the requirement
+  on under any pack; nothing may turn off a pack that imposes it. 19 new tests
+  (149 total).
 
 ## [0.7.0] — 2026-06-29
 
