@@ -1,4 +1,4 @@
-# 0009 — Local-model extraction seam
+# 0010 — Local-model extraction seam
 
 Status: accepted
 

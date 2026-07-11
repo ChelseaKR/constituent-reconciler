@@ -60,9 +60,14 @@ The smallest version that ships the differentiator.
   seam a production deployment plugs in.
 * The consent gate runs before any connector is touched, so non-consented
   records are withheld and never handed to a destination.
+* Email and phone now write through the dedicated CiviCRM Email and Phone
+  entities rather than the API v4 join-field shorthand (added 2026-07-02): once
+  the contact id is resolved, the connector updates the contact's primary
+  Email/Phone row when one exists and creates it when none does. A record with
+  no value for a field makes no call for it, so an empty value never blanks a
+  stored row.
 * Still open: a recorded demo of messy input landing in a running CiviCRM
-  instance, and email and phone written through dedicated CiviCRM entities
-  rather than the API v4 join-field shorthand.
+  instance.
 
 ## v0.3.0 — The extraction seam (shipped)
 
@@ -157,9 +162,14 @@ the 1.0 milestone named.
   mapped to the CRM's import schema plus an external-id column for an idempotent
   CRM-side upsert. The offline-first default path; the live API push stays opt-in.
   Both are local-file targets, so the DV pack permits them.
-* Still open before the 1.0 accessibility gate: a full axe audit and a
-  screen-reader walkthrough. The structural AA work (table semantics, non-colour
-  status, keyboard-complete controls, no-JS fallback) is in place.
+* Still open before the 1.0 accessibility gate: a screen-reader walkthrough.
+  The structural AA work (table semantics, non-colour status,
+  keyboard-complete controls, no-JS fallback) is in place, and an automated
+  axe-core audit of the review queue's rendered HTML now runs as a CI job
+  (`accessibility` in `.github/workflows/ci.yml`; `make axe` locally; see
+  docs/decisions/0009-automated-axe-audit.md). The walkthrough is a manual
+  pass with real assistive technology, tracked with a checklist in
+  docs/reviews/SCREEN-READER-WALKTHROUGH.md, not yet performed.
 
 ## v1.0.0 — Stability commitments
 
@@ -200,7 +210,7 @@ shared standard.
 | Matching pairwise precision and recall | Auto-merge precision 100% (a false merge fails the gate); auto+review coverage recall at least 95%, reported with Wilson CIs | REVIEW |
 | Extraction field precision and recall | At least 0.95 precision and 0.90 recall on a labeled extraction fixture; target only, the fixture and its measurement are not landed | REVIEW |
 | LLM field-judge calibration (Cohen's kappa) | Kappa at least 0.60, fail-closed on drift, the 0.6 line `evaluate.cohen_kappa` documents; wired into the eval in R10 | AUTO |
-| Review queue accessibility | WCAG 2.2 AA, axe clean, screen-reader walkthrough | AUTO + REVIEW |
+| Review queue accessibility | WCAG 2.2 AA; axe clean (automated, `accessibility` CI job, 2026-07-07) and screen-reader walkthrough (manual, not yet performed — docs/reviews/SCREEN-READER-WALKTHROUGH.md) | AUTO + REVIEW |
 | i18n parity (EN, ES) | key and placeholder parity | AUTO |
 | Supply chain | SBOM, Sigstore, SHA-pinned actions, OIDC | AUTO |
 | DV policy-pack invariants | PII non-egress, consent-gated write | AUTO |
@@ -221,7 +231,10 @@ well. The secret-scan
 and dependency-vulnerability items are also merge-blocking CI jobs now
 (`secrets`, `security` in `ci.yml`); SAST, container scanning, and SBOM/signing
 remain committed targets not yet wired (see the remediation plan's P1-2,
-P1-4, P1-7). The kappa drift gate and the i18n parity check land with the
+P1-4, P1-7). The new `accessibility` job (axe-core over jsdom against the
+rendered review queue) runs on every PR the same way, but like `sast`,
+`zizmor`, and `container-scan` it is not yet in docs/rulesets/main.json's
+required-status-checks list, so a red run there does not block a merge today. The kappa drift gate and the i18n parity check land with the
 phases named beside them (the kappa gate with R10, EN/ES parity with R1). The
 matching and extraction precision and recall figures are REVIEW metrics a
 person reads from the eval report rather than pass-or-fail gates.

@@ -1,4 +1,4 @@
-.PHONY: install verify format-check lint type test security eval eval-extraction eval-large run docker bundle clean
+.PHONY: install verify format-check lint type test security axe-fixtures axe eval eval-extraction eval-large run docker bundle clean
 
 # Reproduce the full local toolchain. CI mirrors `make verify` byte for byte.
 # `uv sync --frozen` refuses to run (and exits non-zero) if uv.lock is stale
@@ -34,11 +34,24 @@ security:
 
 verify: format-check lint type test
 
+# Automated axe-core audit of the review queue's actual rendered HTML
+# (docs/decisions/0009-automated-axe-audit.md). Not part of `verify`, so a
+# contributor without Node installed is not blocked from the Python checks;
+# CI runs it as its own job. Requires `npm ci` once.
+axe-fixtures:
+	rm -rf .axe-fixtures
+	.venv/bin/python scripts/render_axe_fixtures.py --out .axe-fixtures
+
+axe: axe-fixtures
+	node scripts/axe_audit.mjs .axe-fixtures
+
 # Regenerate the committed eval report. Run after any change to matching.
+# The calibration flag arms the fail-closed kappa gate for the LLM field judge.
 eval:
 	.venv/bin/reconcile eval \
 		--config examples/intake-demo/recipe.toml \
 		--truth examples/intake-demo/ground_truth.json \
+		--calibration examples/intake-demo/calibration_labels.json \
 		--out eval/report.md
 
 # Regenerate the committed extraction eval report. Run after any change to the
@@ -95,4 +108,4 @@ bundle:
 	@echo "bundle written to $(BUNDLE)"
 
 clean:
-	rm -rf out out-dv dist .pytest_cache .mypy_cache .ruff_cache .coverage
+	rm -rf out out-dv dist .pytest_cache .mypy_cache .ruff_cache .coverage .axe-fixtures

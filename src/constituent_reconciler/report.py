@@ -9,8 +9,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from constituent_reconciler.evaluate import EvalReport, ExtractionReport
-from constituent_reconciler.models import RunResult
+from constituent_reconciler.evaluate import (
+    KAPPA_GATE,
+    CalibrationReport,
+    EvalReport,
+    ExtractionReport,
+)
+from constituent_reconciler.models import IngestReport, RunResult
 from constituent_reconciler.quality import SourceQuality
 from constituent_reconciler.suppression import SUPPRESSED
 
@@ -28,6 +33,7 @@ def render_run_summary(result: RunResult, *, withheld: int = 0) -> str:
     ]
     if withheld:
         lines.append(f"withheld (no consent): {withheld}")
+    lines += _render_ingest(result.ingest)
     return "\n".join(lines)
 
 
@@ -99,6 +105,34 @@ def render_source_quality(sources: Sequence[SourceQuality]) -> str:
     return "\n".join(lines)
 
 
+def _render_ingest(ingest: IngestReport) -> list[str]:
+    """Render the ingest accounting: every file, page, and failure answered for.
+
+    Empty when there is nothing to report (a result built without ingest
+    accounting), so summaries for hand-built results stay unchanged.
+    """
+
+    if not ingest.files_read and not ingest.files_skipped:
+        return []
+    lines = ["", "ingest:", f"  files read:        {len(ingest.files_read)}"]
+    lines += [f"    {path}" for path in ingest.files_read]
+    if ingest.files_skipped:
+        lines.append(f"  files skipped:     {len(ingest.files_skipped)}")
+        lines += [f"    {skipped.path} ({skipped.reason})" for skipped in ingest.files_skipped]
+    if ingest.pages_extracted or ingest.pages_dropped:
+        lines.append(
+            f"  pdf pages:         {ingest.pages_extracted} extracted, "
+            f"{ingest.pages_dropped} dropped (no name found)"
+        )
+    if ingest.normalization_failures:
+        lines.append("  normalization failures (value present, nothing parseable):")
+        for field_name in sorted(ingest.normalization_failures):
+            per_source = ingest.normalization_failures[field_name]
+            counts = ", ".join(f"{source}: {count}" for source, count in sorted(per_source.items()))
+            lines.append(f"    {field_name}: {counts}")
+    return lines
+
+
 def _pct(value: float) -> str:
     return f"{value * 100:.1f}%"
 
@@ -108,7 +142,42 @@ def _ci(interval: tuple[float, float]) -> str:
     return f"[{_pct(low)}, {_pct(high)}]"
 
 
-def render_eval_markdown(report: EvalReport, *, dataset: str, gate_threshold: float = 0.0) -> str:
+def _calibration_lines(calibration: CalibrationReport | None) -> list[str]:
+    lines = [
+        "",
+        "## Calibration (LLM field judge)",
+        "",
+        "Cohen's kappa measures agreement between the extractor's confidence "
+        "verdicts and human field labels on a committed calibration fixture. "
+        "Kappa below 0.60 means confidence scores are not tracking accuracy "
+        "well enough to trust, so the gate fails.",
+        "",
+    ]
+    if calibration is None:
+        lines += [
+            "No calibration labels were supplied. The gate is fail-closed: "
+            "absent or unreadable labels count as a failure, not a skip.",
+            "",
+            f"Kappa gate at {KAPPA_GATE:.2f}: **FAIL** (no labels).",
+        ]
+    else:
+        gate_word = "PASS" if calibration.passed else "FAIL"
+        lines += [
+            f"Cohen's kappa: **{calibration.kappa:.2f}** over {calibration.n_labels} labels.",
+            "",
+            f"Kappa gate at {calibration.threshold:.2f}: **{gate_word}** "
+            f"(observed {calibration.kappa:.2f}).",
+        ]
+    return lines
+
+
+def render_eval_markdown(
+    report: EvalReport,
+    *,
+    dataset: str,
+    gate_threshold: float = 0.0,
+    calibration: CalibrationReport | None = None,
+) -> str:
     gate_pass = report.false_merge_rate <= gate_threshold
     gate_word = "PASS" if gate_pass else "FAIL"
 
@@ -157,6 +226,7 @@ def render_eval_markdown(report: EvalReport, *, dataset: str, gate_threshold: fl
         "auto+review coverage recall is the share of true duplicates the system "
         "surfaces to a human one way or another.",
     ]
+    lines += _calibration_lines(calibration)
     return "\n".join(lines) + "\n"
 
 

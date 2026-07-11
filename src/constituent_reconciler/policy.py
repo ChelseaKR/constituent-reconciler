@@ -63,6 +63,10 @@ class Policy:
     * ``allow_local_seam`` -> the extraction seam factory (extract/seam.py)
     * ``require_local_targets`` -> connector selection (pipeline.build_connector)
     * ``aggregate_export`` -> the aggregate summary writer (pipeline.export)
+    * ``require_second_reviewer`` -> the review session (review/session.py):
+      a merge decided by a human takes effect only after two distinct
+      reviewers approve it. Not a statutory mandate; a separation-of-duties
+      control for merges whose consequences are hardest to reverse.
 
     ``forbid_cloud_seam`` and ``allow_local_seam`` are deliberately separate
     dimensions, not one inferred from the other. "No cloud calls" (PII must
@@ -77,7 +81,7 @@ class Policy:
     once that analysis is written, or a recipe-level
     ``extract.local_model_override`` a deployer sets explicitly, never
     implied by requesting the local backend alone. See
-    docs/decisions/0009-local-model-seam.md.
+    docs/decisions/0010-local-model-seam.md.
     """
 
     pack: str
@@ -86,6 +90,7 @@ class Policy:
     allow_local_seam: bool = False
     require_local_targets: bool = False
     aggregate_export: bool = False
+    require_second_reviewer: bool = False
     suppression_threshold: int = DEFAULT_SUPPRESSION_THRESHOLD
 
 
@@ -101,13 +106,17 @@ class Policy:
 # either bar. A deployer whose counsel has done that analysis opts in per
 # recipe via ``extract.local_model_override``, not by editing this table.
 _PACKS: dict[str, Policy] = {
-    "default": Policy(pack="default"),
+    # The default pack permits the cloud seam outright, so the egress-free
+    # local seam is permitted too; requiring an override only where a privacy
+    # pack is active keeps the strictness ordered sensibly.
+    "default": Policy(pack="default", allow_local_seam=True),
     "dv": Policy(
         pack="dv",
         require_consent=True,
         forbid_cloud_seam=True,
         require_local_targets=True,
         aggregate_export=True,
+        require_second_reviewer=True,
     ),
     "hipaa": Policy(
         pack="hipaa",

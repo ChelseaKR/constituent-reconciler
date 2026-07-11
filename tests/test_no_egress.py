@@ -58,6 +58,21 @@ def test_dv_pack_allows_the_local_csv_target(tmp_path: Path) -> None:
     assert summary.aggregate is not None
 
 
+def test_dv_pack_refuses_a_network_timestamp_authority(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    # The RFC 3161 request sends a hash derived from written client fields to
+    # the TSA. VAWA/FVPSA guidance treats hashed client information as still
+    # protected, so the DV pack refuses the network authority before any write.
+    base = load_recipe(EXAMPLES / "recipe-dv.toml")
+    recipe = replace(base, tsa_url="https://tsa.example/tsr")
+    result = pipeline.run(recipe)
+    with pytest.raises(PolicyViolation, match="timestamp"):
+        pipeline.export(result, recipe, out_dir=tmp_path)
+    assert not (tmp_path / "resolved.csv").exists()
+    assert not (tmp_path / "provenance.jsonl").exists()
+
+
 def test_dv_pack_fuses_the_cloud_extraction_seam_off() -> None:
     # Even if a recipe asks for the Bedrock backend, the DV pack returns a NoOp
     # seam: no page image, no field value, leaves the machine.
@@ -69,7 +84,7 @@ def test_dv_pack_fuses_the_cloud_extraction_seam_off() -> None:
 def test_dv_pack_fuses_the_local_seam_off_by_default() -> None:
     # A local model does not egress PII, but that is a separate question from
     # whether model-assisted extraction is acceptable at all under a given
-    # org's VAWA reading (docs/decisions/0009-local-model-seam.md). The dv
+    # org's VAWA reading (docs/decisions/0010-local-model-seam.md). The dv
     # pack has not recorded that analysis, so backend="local" alone still
     # produces a NoOp seam, same as backend="bedrock".
     seam = make_seam("dv", backend="local")
@@ -97,7 +112,7 @@ def test_dv_pack_withholds_non_consented_records_without_field_values(tmp_path: 
     )
     # N009 (consent revoked) is withheld.
     withheld_members = {m for entry in withheld for m in entry.members}
-    assert "N009" in withheld_members
+    assert "incoming:N009" in withheld_members
 
     summary = pipeline.export(result, recipe, out_dir=tmp_path)
     assert summary.withheld_path is not None
@@ -105,7 +120,9 @@ def test_dv_pack_withholds_non_consented_records_without_field_values(tmp_path: 
     # The withheld record is recorded by id and reason only; no field value of a
     # non-consented person appears in the artifact. The reason distinguishes an
     # explicit revocation from a merely absent consent.
-    assert "N009" in withheld_text or any("N009" in w.members for w in summary.withheld)
+    assert "incoming:N009" in withheld_text or any(
+        "incoming:N009" in w.members for w in summary.withheld
+    )
     assert "revoked" in withheld_text
 
 

@@ -30,6 +30,11 @@ from constituent_reconciler.normalize import (
     normalize_phone,
 )
 
+#: Minimum Cohen's kappa for the LLM field-judge calibration gate. Below this,
+#: extraction confidence is not tracking human-labeled accuracy well enough to
+#: trust, so the eval gate fails.
+KAPPA_GATE = 0.60
+
 
 def wilson_interval(successes: int, trials: int, z: float = 1.96) -> tuple[float, float]:
     """Wilson score interval for a binomial proportion.
@@ -116,6 +121,50 @@ def cohen_kappa(predicted: list[bool], actual: list[bool]) -> float:
         return 0.0
 
     return (p_agree - p_expected) / (1.0 - p_expected)
+
+
+@dataclass(frozen=True)
+class CalibrationReport:
+    n_labels: int
+    kappa: float
+    threshold: float
+    passed: bool
+
+
+def _label_flag(label: Mapping[str, object], key: str) -> bool:
+    value = label.get(key)
+    if not isinstance(value, bool):
+        raise ValueError(f"calibration label {key!r} must be true or false, got {value!r}")
+    return value
+
+
+def calibrate(
+    labels: Iterable[Mapping[str, object]], *, threshold: float = KAPPA_GATE
+) -> CalibrationReport:
+    """Score extractor confidence against human labels with Cohen's kappa.
+
+    Each label carries ``predicted`` (the extractor's confidence for the field
+    cleared the confidence threshold) and ``actual`` (a human annotator
+    confirmed the field was correctly extracted). The gate passes only when
+    kappa is at least ``threshold``.
+
+    Raises ``ValueError`` on an empty or malformed label set, so a broken
+    fixture cannot slip past the gate as a pass.
+    """
+
+    entries = list(labels)
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            raise ValueError(f"calibration labels must be objects, got {entry!r}")
+    predicted = [_label_flag(entry, "predicted") for entry in entries]
+    actual = [_label_flag(entry, "actual") for entry in entries]
+    kappa = cohen_kappa(predicted, actual)
+    return CalibrationReport(
+        n_labels=len(entries),
+        kappa=kappa,
+        threshold=threshold,
+        passed=kappa >= threshold,
+    )
 
 
 def evaluate(

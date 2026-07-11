@@ -28,3 +28,11 @@ A false merge joins two different people and can corrupt a record irreversibly. 
 False-merge gate at threshold 0.0%: **PASS** (observed 0.0%).
 
 Recall at the auto level is intentionally below 100%: pairs the matcher is unsure about are not auto-merged, they are sent to review. The auto+review coverage recall is the share of true duplicates the system surfaces to a human one way or another.
+
+## Calibration (LLM field judge)
+
+Cohen's kappa measures agreement between the extractor's confidence verdicts and human field labels on a committed calibration fixture. Kappa below 0.60 means confidence scores are not tracking accuracy well enough to trust, so the gate fails.
+
+Cohen's kappa: **0.80** over 20 labels.
+
+Kappa gate at 0.60: **PASS** (observed 0.80).

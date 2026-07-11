@@ -111,6 +111,12 @@ mid-review.
 leaves every verdict attached to the same people; a test that duplicate ids
 raise; unchanged demo eval.
 
+**Status:** Done (2026-07-11). Content-derived BLAKE2b ids for generated
+records across CSV/PDF/text readers, source-namespaced user ids,
+`pipeline.DuplicateIdError` on residual collisions, versioned decisions file
+(`decisions_schema`), and a stderr warning on stale decisions. Migration note
+in CHANGELOG.md per ADR 0006.
+
 ---
 
 ## FIX-04 — Fail-closed recipe validation

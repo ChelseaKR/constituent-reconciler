@@ -113,10 +113,19 @@ The review queue is the human surface. As of v0.7 it is a local web UI
 (`reconcile review`) built to the WCAG 2.2 AA structural bar: a comparison table
 with scoped headers, status carried by text and a symbol rather than colour
 alone, decision controls that work with the keyboard and with no JavaScript, and
-no external asset fetch. The axe AUTO-GATE and the screen-reader walkthrough
-REVIEW-GATE are not yet run, and EN/ES parity for the UI copy is not yet done;
-both stay open before the 1.0 accessibility claim. TODO: run axe in CI, complete
-the screen-reader walkthrough, add the ES copy, and commit the ACR.
+no external asset fetch. The axe AUTO-GATE now runs (`accessibility` job in
+`.github/workflows/ci.yml`, an axe-core scan over jsdom of the review queue's
+real rendered HTML; docs/decisions/0009-automated-axe-audit.md), zero
+violations against the current markup as of 2026-07-07. Its one honest gap is
+`color-contrast`, which jsdom cannot evaluate (no canvas); every color pair in
+the stylesheet was checked by hand against the WCAG formula instead and clears
+the bar with margin (worst case 4.59:1 against a 3:1 non-text requirement). The
+screen-reader walkthrough REVIEW-GATE is not yet run — it needs a human
+tester with real assistive technology, not something a script can complete —
+and EN/ES parity for the UI copy is not yet done; both stay open before the
+1.0 accessibility claim. TODO: complete the screen-reader walkthrough
+(checklist at docs/reviews/SCREEN-READER-WALKTHROUGH.md), add the ES copy, and
+commit the ACR.
 
 ## Security
 
@@ -145,14 +154,18 @@ table rather than left blank:
   (`.github/workflows/codeql.yml`) runs CodeQL for both the `python` and
   `actions` languages on push, PR, and a weekly schedule. A `zizmor` job
   additionally lints the workflow files themselves (CICD-19).
-* **Container scan:** Applies (Dockerfile ships a self-host image) — gap,
-  tracked locally pending a filed issue (no Trivy/Grype job in CI yet; see
-  P1-4). The base image is pinned to a mutable `python:3.12-slim` tag today,
-  not yet a digest.
-* **SBOM:** Applies (release-producing repo) — gap, tracked locally pending a
-  filed issue (no SBOM generation on release yet; see P1-7).
-* **VEX:** N/A today — no SBOM yet to accompany a VEX statement; revisit with
-  P1-7.
+* **Container scan:** Applies (Dockerfile ships a self-host image) —
+  enforced. A `container-scan` CI job builds the image (`make docker`) and
+  runs Trivy, blocking on any fixed CRITICAL/HIGH finding; the base image is
+  pinned by digest (`python:3.12-slim@sha256:...`), not just tag.
+* **SBOM:** Applies (release-producing repo) — enforced as of
+  `.github/workflows/release.yml` (2026-07-10, closes P1-7): a CycloneDX 1.7
+  SBOM of the released environment is generated and attached to every
+  GitHub Release, alongside a keyless build-provenance attestation. Not yet
+  exercised end-to-end — no `v*` tag has been cut yet.
+* **VEX:** N/A today — no disclosed vulnerability in a shipped release yet to
+  accompany with a VEX statement; revisit once the SBOM above has been
+  exercised by a real release.
 * **Secret management:** N/A for this repo's own operation — it holds no
   service secrets itself; CRM API keys/tokens are supplied by the *operator*
   through their own environment (`CIVICRM_API_KEY`, `SF_TOKEN`) and are never
