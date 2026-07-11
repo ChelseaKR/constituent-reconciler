@@ -21,6 +21,8 @@ the review step produces.
 from __future__ import annotations
 
 import json
+import secrets
+import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -28,6 +30,7 @@ from pathlib import Path
 
 from constituent_reconciler import decisions
 from constituent_reconciler.models import Band, Cluster, Pair, Record, RunResult
+from constituent_reconciler.schema import DECISIONS_SCHEMA_VERSION
 
 APPROVED = "approved"
 REJECTED = "rejected"
@@ -35,6 +38,14 @@ REJECTED = "rejected"
 # approval under two-person mode and is waiting on a second, distinct name.
 AWAITING_SECOND = "awaiting_second_reviewer"
 _VERDICTS = frozenset({APPROVED, REJECTED})
+
+
+def _warn_stale_pair(left: str, right: str) -> None:
+    print(
+        f"decision pair {left!r}, {right!r} is not in this run's review queue",
+        file=sys.stderr,
+    )
+
 
 # Shown when merging the pair on screen would contradict a rejection recorded
 # elsewhere in the same group of records: the same cannot-link problem
@@ -46,11 +57,6 @@ CONFLICT_NOTE = (
     "reviewer kept apart. Nothing merges until that conflict is resolved: "
     "revisit the rejected pair, or reject this one too."
 )
-
-# The decisions.json shape. Version 2 added the "audit" section (who decided
-# each pair, and when) beside the version-1 "approved"/"rejected" lists, which
-# are kept as-is so ``reconcile apply`` reads both versions unchanged.
-DECISIONS_SCHEMA_VERSION = 2
 
 # Plain-language labels for the canonical fields, so the rationale and the
 # comparison table read the way a caseworker speaks rather than the way the
@@ -339,6 +345,11 @@ class ReviewSession:
         self.reviewer = _clean_reviewer(reviewer)
         self.privacy_mode = privacy_mode
         self.require_second_reviewer = require_second_reviewer
+        # A per-run secret embedded in every rendered form and checked on every
+        # POST (FIX-01), so a page the reviewer has open elsewhere cannot forge
+        # a verdict against this server: it cannot know a token it never saw.
+        # Regenerated each time a session is constructed, never persisted.
+        self.token = secrets.token_urlsafe(24)
         # The same ordering the review_queue.csv uses, so the two surfaces agree.
         self._pairs: tuple[Pair, ...] = tuple(
             sorted(result.review_pairs, key=lambda p: (-p.probability, p.left, p.right))
@@ -356,7 +367,8 @@ class ReviewSession:
 
         Decisions are keyed by the unordered pair of record ids, so a resumed
         verdict re-attaches to the same candidate even if the pair ordering
-        differs. Unknown pairs in the file are ignored rather than raising.
+        differs. Unknown pairs in the file are reported and skipped; a stale
+        decision should not fail a review session, but it should be visible.
         Both shapes are read: the version-2 ``audit`` section with attributed
         verdicts, and the version-1 flat ``approved``/``rejected`` lists, whose
         verdicts resume attributed to ``unrecorded``.
@@ -383,6 +395,8 @@ class ReviewSession:
                     self._entries[index] = [
                         ReviewEntry(reviewer=UNRECORDED_REVIEWER, verdict=verdict, decided_at="")
                     ]
+                else:
+                    _warn_stale_pair(str(entry[0]), str(entry[1]))
 
     def _load_audit(self, audit: dict[str, object], index_of: dict[frozenset[str], int]) -> None:
         for key, raw_entries in audit.items():
@@ -391,6 +405,7 @@ class ReviewSession:
                 continue
             index = index_of.get(frozenset(ids))
             if index is None:
+                _warn_stale_pair(ids[0], ids[1])
                 continue
             entries: list[ReviewEntry] = []
             for raw in raw_entries:
@@ -734,7 +749,7 @@ class ReviewSession:
                 for entry in self._entries[index]
             ]
         return {
-            "schema_version": DECISIONS_SCHEMA_VERSION,
+            "decisions_schema": DECISIONS_SCHEMA_VERSION,
             "approved": approved,
             "rejected": rejected,
             "audit": audit,

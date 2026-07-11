@@ -209,12 +209,12 @@ def test_pipeline_merges_records_with_address_format_variation() -> None:
     # The two writings of each address normalize to the same standardized form,
     # so the address agrees and the true duplicates auto-merge.
     auto = {pair.key() for pair in result.auto_pairs}
-    assert frozenset(("A001", "B001")) in auto
-    assert frozenset(("A002", "B002")) in auto
+    assert frozenset(("existing:A001", "incoming:B001")) in auto
+    assert frozenset(("existing:A002", "incoming:B002")) in auto
 
     # The normalized address on the merged records is the standardized form.
-    a001 = result.records["A001"]
-    b001 = result.records["B001"]
+    a001 = result.records["existing:A001"]
+    b001 = result.records["incoming:B001"]
     assert a001.normalized["address"] == b001.normalized["address"] == "123 N MAIN ST"
 
 
@@ -228,4 +228,4 @@ def test_pipeline_does_not_merge_distinct_person_with_different_address() -> Non
     # B003 shares only a surname with A003: different dob, email, phone, address.
     # It must not auto-merge.
     auto = {pair.key() for pair in result.auto_pairs}
-    assert frozenset(("A003", "B003")) not in auto
+    assert frozenset(("existing:A003", "incoming:B003")) not in auto

@@ -193,7 +193,11 @@ def test_read_text_records_produces_record_with_text_spans(tmp_path: Path) -> No
     rec = records[0]
     assert rec.raw.get("first_name") == "Ada"
     assert rec.raw.get("last_name") == "Lovelace"
-    assert rec.unique_id == "N0001"
+    # FIX-03: generated ids derive from content, not position, so re-reading
+    # the same body yields the same id.
+    assert rec.unique_id.startswith("N")
+    rereads = read_text_records(path, "incoming", recipe=_demo_recipe(), id_prefix="N")
+    assert rereads[0].unique_id == rec.unique_id
     assert isinstance(rec.spans.get("first_name"), TextSpan)
 
 
@@ -213,7 +217,10 @@ def test_ingest_source_routes_txt_and_eml_in_directory(tmp_path: Path) -> None:
 
     records = _ingest_source(folder, "incoming", recipe=_demo_recipe(), id_prefix="N")
     assert [r.raw.get("first_name") for r in records] == ["Ada", "Grace"]
-    assert [r.unique_id for r in records] == ["N0001", "N0002"]
+    # FIX-03: ids are content-derived, distinct, and prefixed per source.
+    ids = [r.unique_id for r in records]
+    assert len(set(ids)) == 2
+    assert all(record_id.startswith("N") for record_id in ids)
 
 
 def test_ingest_source_routes_single_eml_file(tmp_path: Path) -> None:
