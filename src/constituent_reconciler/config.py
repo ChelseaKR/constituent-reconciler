@@ -4,18 +4,96 @@ A run is configured by a small TOML file: which CSVs to read, how their columns
 map onto the canonical fields, where consent lives, and the thresholds and policy
 pack to apply. File paths in the recipe are resolved relative to the recipe's own
 directory, so a recipe and its data can be moved together.
+
+Loading is fail-closed on the shape of the file itself (FIX-01): an unknown
+section or an unknown key inside a known section raises, naming the nearest
+valid spelling, rather than being silently ignored by ``dict.get``. This is
+the one input surface that used to fail open; a misspelled ``auto_threshold``
+or a typo'd ``[consnet]`` section used to run at a default instead of raising,
+which is exactly backwards for the one file a non-technical operator hand-edits
+(``CLAUDE.md``'s personas B1 and A4).
 """
 
 from __future__ import annotations
 
+import difflib
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from constituent_reconciler import defaults
 from constituent_reconciler.models import CANONICAL_FIELDS
 from constituent_reconciler.policy import policy_for
 from constituent_reconciler.suppression import ensure_non_identifying
+
+# The declared recipe shape (what schema.CONFIG_SCHEMA_VERSION versions):
+# section name to the set of keys that section accepts. "mapping" is not
+# listed here because its keys are the canonical field names themselves,
+# checked separately against CANONICAL_FIELDS.
+_SECTION_KEYS: dict[str, frozenset[str]] = {
+    "input": frozenset({"incoming", "existing", "id_column"}),
+    "mapping": frozenset(CANONICAL_FIELDS),
+    "consent": frozenset({"column", "date", "expires", "scope", "require"}),
+    "thresholds": frozenset({"prior", "auto", "review"}),
+    "policy": frozenset({"pack"}),
+    "normalize": frozenset({"address_backend"}),
+    "extract": frozenset({"backend", "confidence_threshold"}),
+    "output": frozenset(
+        {
+            "connector",
+            "endpoint",
+            "auth_env",
+            "auth_header",
+            "auth_scheme",
+            "external_id_field",
+            "api_version",
+            "object_name",
+        }
+    ),
+    "household": frozenset({"enabled"}),
+    "comparable": frozenset({"export", "breakdown_fields", "period"}),
+}
+
+_KNOWN_SECTIONS = frozenset(_SECTION_KEYS)
+
+
+class RecipeError(ValueError):
+    """A recipe failed validation: an unknown section, an unknown key, or a
+    missing required value. Fail-closed, named after the exact spelling.
+    """
+
+
+def _nearest(name: str, candidates: frozenset[str]) -> str:
+    """A "did you mean" suffix naming the closest valid spelling, if any."""
+
+    matches = difflib.get_close_matches(name, sorted(candidates), n=1)
+    return f" (did you mean {matches[0]!r}?)" if matches else ""
+
+
+def _validate_shape(data: dict[str, Any]) -> None:
+    """Raise on any section or key the declared recipe schema does not know.
+
+    Runs before any section is read, so a typo anywhere in the file is
+    reported once, by name, rather than silently taking a default.
+    """
+
+    for section_name, section_body in data.items():
+        if section_name not in _KNOWN_SECTIONS:
+            raise RecipeError(
+                f"recipe has an unknown section [{section_name}]"
+                f"{_nearest(section_name, _KNOWN_SECTIONS)}"
+            )
+        if not isinstance(section_body, dict):
+            raise RecipeError(f"recipe section [{section_name}] must be a table")
+        known_keys = _SECTION_KEYS[section_name]
+        for key in section_body:
+            if key not in known_keys:
+                kind = "canonical field" if section_name == "mapping" else "key"
+                raise RecipeError(
+                    f"recipe [{section_name}] has an unknown {kind} {key!r}"
+                    f"{_nearest(key, known_keys)}"
+                )
 
 
 @dataclass(frozen=True)
@@ -155,6 +233,7 @@ def load_recipe(
     base = recipe_path.parent
     with recipe_path.open("rb") as handle:
         data = tomllib.load(handle)
+    _validate_shape(data)
 
     input_section = data.get("input", {})
     mapping_section = data.get("mapping", {})
@@ -169,18 +248,16 @@ def load_recipe(
     provenance_section = data.get("provenance", {})
 
     if "incoming" not in input_section:
-        raise ValueError("recipe [input] must set 'incoming'")
+        raise RecipeError("recipe [input] must set 'incoming'")
     if not mapping_section:
-        raise ValueError("recipe [mapping] must map at least first_name and last_name")
+        raise RecipeError("recipe [mapping] must map at least first_name and last_name")
 
-    mapping = {
-        canonical: str(source)
-        for canonical, source in mapping_section.items()
-        if canonical in CANONICAL_FIELDS
-    }
+    # _validate_shape already rejected any mapping key outside CANONICAL_FIELDS,
+    # so every key here is a real canonical field.
+    mapping = {canonical: str(source) for canonical, source in mapping_section.items()}
     active_fields = tuple(f for f in CANONICAL_FIELDS if f in mapping)
     if "first_name" not in mapping or "last_name" not in mapping:
-        raise ValueError("recipe [mapping] must include first_name and last_name")
+        raise RecipeError("recipe [mapping] must include first_name and last_name")
 
     pack = policy_pack if policy_pack is not None else str(policy_section.get("pack", "default"))
     policy = policy_for(pack)
