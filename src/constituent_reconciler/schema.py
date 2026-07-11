@@ -28,7 +28,9 @@ REPORT_SCHEMA_VERSION = 2
 
 # The decisions.json shape: approved/rejected lists of [left, right] record-id
 # pairs, written by the review session and consumed by ``reconcile apply``.
-DECISIONS_SCHEMA_VERSION = 1
+# Version 2 added the "audit" section (who decided each pair, and when) beside
+# the version-1 lists, which are kept as-is so ``apply`` reads both versions.
+DECISIONS_SCHEMA_VERSION = 2
 
 
 def versions() -> dict[str, int]:

@@ -34,7 +34,7 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   `pipeline.DuplicateIdError` naming the id and source, instead of silently
   dropping one of the records.
 - **The decisions file is a versioned surface.** `decisions.json` now carries
-  a `decisions_schema` field (`schema.DECISIONS_SCHEMA_VERSION`, currently 1),
+  a `decisions_schema` field (`schema.DECISIONS_SCHEMA_VERSION`),
   reported by `reconcile schema` alongside the other declared versions. A
   resumed review session warns on stderr when a saved decision references a
   pair that is not in the current run's review queue, instead of ignoring it
@@ -148,6 +148,27 @@ change, shipped with this changelog entry.
     portfolio's other project audits; what remains open here is container
     scanning, the release pipeline, and the branch ruleset actually being
     applied (docs/rulesets/README.md).
+- **Reviewer audit trail** (roadmap E4): every review verdict is attributed.
+  `reconcile review` now requires `--reviewer NAME`, and `decisions.json` grows a
+  versioned shape (`decisions_schema: 2`) with an `audit` section mapping each pair
+  to the reviewers who decided it, their verdicts, and UTC timestamps. The
+  top-level `approved`/`rejected` lists keep the version-1 shape, so
+  `reconcile apply` reads both versions unchanged, and the file still carries no
+  field value of a reviewed record. A blank reviewer name is refused,
+  fail-closed. Sessions resume from either file shape; verdicts from a version-1
+  file resume attributed to `unrecorded`.
+- **Two-person review** for sensitive merges: with
+  `reconcile review --require-second-reviewer`, or
+  `require_second_reviewer = true` in the recipe's new optional `[review]`
+  section (on by default under the `dv` policy pack), a merge only lands in
+  `approved` after two distinct reviewer names approve it. A lone approval is
+  held in the audit section as awaiting a second reviewer, the same name cannot
+  supply both approvals, and any rejection rejects immediately; disagreement
+  never merges. `reconcile apply` refuses a decisions file that still holds
+  half-approved pairs, naming them. The review pages show who is reviewing and
+  which pairs await a second reviewer. A recipe or flag may turn the requirement
+  on under any pack; nothing may turn off a pack that imposes it. 19 new tests
+  (149 total).
 
 ## [0.7.0] — 2026-06-29
 

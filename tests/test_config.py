@@ -1,5 +1,5 @@
-"""Tests for recipe loading: the consent lifecycle columns and FIX-04's
-fail-closed shape validation.
+"""Tests for recipe loading: the consent lifecycle columns, the [review]
+two-person settings, and FIX-04's fail-closed shape validation.
 
 FIX-06 extends the recipe's [consent] section with optional ``date``,
 ``expires``, and ``scope`` columns on top of the existing ``column`` and
@@ -22,6 +22,8 @@ import pytest
 from constituent_reconciler.config import RecipeError, load_recipe
 from constituent_reconciler.policy import PolicyViolation
 
+EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "intake-demo"
+
 MINIMAL_INPUT = (
     '[input]\nincoming = "incoming.csv"\n\n[mapping]\nfirst_name = "First"\nlast_name = "Last"\n'
 )
@@ -31,6 +33,21 @@ def _write(tmp_path: Path, body: str) -> Path:
     path = tmp_path / "recipe.toml"
     path.write_text(body, encoding="utf-8")
     (tmp_path / "incoming.csv").write_text("First,Last\n", encoding="utf-8")
+    return path
+
+
+def _write_recipe(tmp_path: Path, extra: str) -> Path:
+    body = (
+        "[input]\n"
+        f'incoming = "{EXAMPLES / "incoming.csv"}"\n'
+        'id_column = "id"\n\n'
+        "[mapping]\n"
+        'first_name = "First Name"\n'
+        'last_name = "Last Name"\n\n'
+        f"{extra}"
+    )
+    path = tmp_path / "recipe.toml"
+    path.write_text(body, encoding="utf-8")
     return path
 
 
@@ -114,6 +131,38 @@ def test_comparable_section_with_identifying_breakdown_field_rejected_at_load(
                 MINIMAL_INPUT + '\n[comparable]\nbreakdown_fields = ["last_name"]\n',
             )
         )
+
+
+# -- E4: two-person review settings -------------------------------------------
+
+
+def test_review_section_defaults_off(tmp_path: Path) -> None:
+    recipe = load_recipe(_write_recipe(tmp_path, ""))
+    assert recipe.require_second_reviewer is False
+
+
+def test_review_section_turns_two_person_review_on(tmp_path: Path) -> None:
+    recipe = load_recipe(_write_recipe(tmp_path, "[review]\nrequire_second_reviewer = true\n"))
+    assert recipe.require_second_reviewer is True
+
+
+def test_recipe_cannot_turn_off_the_dv_packs_requirement(tmp_path: Path) -> None:
+    path = _write_recipe(
+        tmp_path,
+        '[policy]\npack = "dv"\n\n[review]\nrequire_second_reviewer = false\n',
+    )
+    recipe = load_recipe(path)
+    assert recipe.require_second_reviewer is True
+
+
+def test_dv_pack_defaults_two_person_review_on() -> None:
+    recipe = load_recipe(EXAMPLES / "recipe-dv.toml")
+    assert recipe.require_second_reviewer is True
+
+
+def test_default_pack_leaves_two_person_review_off() -> None:
+    recipe = load_recipe(EXAMPLES / "recipe.toml")
+    assert recipe.require_second_reviewer is False
 
 
 # -- FIX-04: fail-closed shape validation ------------------------------------

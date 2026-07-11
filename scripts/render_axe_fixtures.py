@@ -39,6 +39,7 @@ def _session(tmp_path: Path, *, privacy: bool) -> ReviewSession:
         result,
         recipe.fields,
         tmp_path / "decisions.json",
+        reviewer="axe-fixture",
         privacy_mode=privacy,
     )
 

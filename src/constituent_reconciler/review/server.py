@@ -35,7 +35,12 @@ from urllib.parse import parse_qs, urlparse
 
 from constituent_reconciler.policy import PolicyViolation
 from constituent_reconciler.review import render
-from constituent_reconciler.review.session import APPROVED, REJECTED, ReviewSession
+from constituent_reconciler.review.session import (
+    APPROVED,
+    AWAITING_SECOND,
+    REJECTED,
+    ReviewSession,
+)
 
 # Interfaces that keep traffic on the machine. A non-loopback bind under the DV
 # pack is refused, mirroring the connector local-target gate.
@@ -161,6 +166,18 @@ def handle_post(
     verdict = _VERDICT_FORM.get(raw)
     if verdict is None:
         return _Response(HTTPStatus.BAD_REQUEST, "Unknown verdict")
+    if (
+        verdict == APPROVED
+        and session.verdict(index) == AWAITING_SECOND
+        and session.reviewer in session.approvers(index)
+    ):
+        # Two-person mode: the same name cannot supply both approvals. The
+        # held approval stays held until a different reviewer confirms it.
+        return _Response(
+            HTTPStatus.CONFLICT,
+            f"You ({session.reviewer}) already approved this pair. A different "
+            "reviewer must provide the second approval before it can merge.",
+        )
     session.record(index, verdict)
 
     nxt = session.next_undecided(after=index)
@@ -257,6 +274,12 @@ def serve(
     sockname = server.socket.getsockname()
     url = f"http://{sockname[0]}:{sockname[1]}/"
     print(f"Review server running at {url}")
+    print(f"  Reviewing as {session.reviewer}.")
+    if session.require_second_reviewer:
+        print(
+            "  Two-person review is on: a merge takes effect only after two "
+            "different reviewers approve it."
+        )
     print(f"  {session.total} pair(s) to review; decisions save to {session.decisions_path}")
     print("  This server is local only and sends no data over the network.")
     print("  Press Ctrl-C to stop.")
