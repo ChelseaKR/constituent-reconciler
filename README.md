@@ -153,6 +153,18 @@ pip install -e ".[extract]"
 a registry install. See [docs/ROADMAP.md](docs/ROADMAP.md) for the Trusted
 Publishing plan.)
 
+Before pointing the tool at your own data, check a recipe's shape without
+resolving anything:
+
+```sh
+reconcile validate --config recipe.toml
+```
+
+An unknown section or a misspelled key (a typo'd `[consnet]`, an `auto_threshold`
+that should be `auto`) is rejected by name instead of silently running at a
+default; `reconcile validate` also checks that the input files it points at
+exist and prints the active policy pack and switches.
+
 Run the bundled demo, which resolves an incoming intake batch against an existing
 record set:
 
