@@ -19,6 +19,17 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   (not published to PyPI); no `v*` tag has been cut, so the workflow is
   unexercised end-to-end pending the maintainer cutting the first release.
 
+- **Web-boundary hardening for the review server (FIX-01)**: `reconcile
+  review` now checks the `Host` header on every request against the address
+  it actually bound (closing a DNS-rebinding path to the loopback-only
+  server), checks a POST's `Origin` header, if present, against the server's
+  own origin, and requires a per-run session token embedded in every rendered
+  form on every POST. Together these mean a hostile page the reviewer has
+  open elsewhere can no longer forge a verdict or read a pair over the
+  loopback interface by guessing a port. `docs/ideation/02-large-scale-fixes.md`
+  named this the most serious observed gap between the DV pack's stated
+  "cannot become an egress path" claim and the code.
+
 ### Added
 - **Local OCR backend for scanned intake (EXP-04)**: `extract/ocr.py` adds a
   `PdfplumberOcrExtractor`, selected by `[extract] backend = "pdfplumber+ocr"`,
