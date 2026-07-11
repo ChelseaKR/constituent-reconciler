@@ -113,6 +113,28 @@ citations and the honest scope of each claim in
 This is a reference implementation, not legal advice. An organization adopting it
 needs its own review against its own obligations.
 
+### The comparable-database export profile
+
+A provider that keeps clients out of HMIS still owes its funders CoC-shaped
+aggregate reporting from its comparable database. One command emits exactly
+that and nothing else — no CRM write, no resolved records on disk:
+
+```sh
+reconcile export-comparable --config examples/intake-demo/recipe-dv.toml --out out-dv
+```
+
+It writes `comparable_report.json` (profile `coc-comparable`): a report-period
+label, a generated-at timestamp, the suppression threshold applied, and
+suppressed category counts. Every breakdown passes through the same CMS-style
+small-cell suppression as `aggregate_summary.json` (counts of 1-10 suppressed,
+complementary suppression within each breakdown, true zeros preserved), and no
+record id, member list, or field value appears in the file. A recipe can opt
+into extra breakdowns over non-identifying categorical fields, and into writing
+the report during a normal `reconcile run`, with a `[comparable]` section
+(`export`, `breakdown_fields`, `period`); the identifying canonical fields
+(name, DOB, email, phone, address) are refused as breakdown fields,
+fail-closed, at recipe load.
+
 ## Usage
 
 Install (Python 3.12+):
@@ -394,9 +416,9 @@ locally (this table plus the linked doc) pending a filed issue. Last reviewed:
 |---|---|---|---|
 | Quality & Metrics | Applies | Enforced — suite green (130/130), ≥84% branch coverage a merge-blocking `pytest` gate (target 85%; see ROADMAP note) | [docs/ROADMAP.md](docs/ROADMAP.md) metrics ledger |
 | Code Quality | Applies | Enforced — `ruff` (incl. `S`, `C90`), `ruff format`, `mypy --strict`, `pytest --strict-markers`, `uv.lock` committed, `uv sync --frozen` | `pyproject.toml`, `Makefile` |
-| Security & Supply-Chain | Applies — ASVS L2 (handles DV-survivor PII) | Partial — secret scan, dependency-vuln scan, and SAST (Semgrep + CodeQL + zizmor) enforced; container scan and SBOM/signing are gaps | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Security |
+| Security & Supply-Chain | Applies — ASVS L2 (handles DV-survivor PII) | Partial — secret scan, dependency-vuln scan, SAST (Semgrep + CodeQL + zizmor), and a release-time CycloneDX SBOM + keyless build-provenance attestation (`release.yml`) enforced; container scan (Trivy) is enforced in CI; VEX is still a gap | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Security |
 | CI/CD | Applies | Partial — SHA-pinned actions, least-privilege tokens, `make verify` parity, `secrets`+`security` jobs, CODEOWNERS, and a solo-maintainer review waiver (ADR 0008) all in place; the matching branch ruleset is a committed artifact (`docs/rulesets/main.json`) but not yet applied to the live repo (a repository-settings action) | `.github/workflows/ci.yml`, [docs/decisions/0008-solo-maintainer-review-waiver.md](docs/decisions/0008-solo-maintainer-review-waiver.md), [docs/rulesets/](docs/rulesets/) |
-| Release & Versioning | Applies (release-producing: 0.1.0-0.7.0) | Gap — no git tags exist yet despite cut versions; no release workflow | [CHANGELOG.md](CHANGELOG.md) |
+| Release & Versioning | Applies (release-producing: 0.1.0-0.7.0) | Partial — `.github/workflows/release.yml` is tag-triggered (`v*`), re-verifies at the tagged commit, checks tag/`pyproject.toml` version consistency, builds sdist+wheel, generates a CycloneDX SBOM, attests build provenance (keyless OIDC), and publishes a GitHub Release with the matching CHANGELOG section; gap — no `v*` tag has been cut yet, so the workflow is unexercised, and there is no PyPI publish stage (not yet published to PyPI) | [.github/workflows/release.yml](.github/workflows/release.yml), [CHANGELOG.md](CHANGELOG.md) |
 | Accessibility | Applies (`reconcile review` web UI) | Partial — structural WCAG 2.2 AA design in place; axe/pa11y automated gate and screen-reader walkthrough not yet run | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Accessibility |
 | Observability | Applies — Tier C (library/CLI) | Declared — no hosted-service surface; no-PII-in-logs enforced by tests | [docs/ROADMAP.md](docs/ROADMAP.md) § Observability |
 | Internationalization | Applies — deferred to 1.0 | Declared — EN/ES parity is a real commitment, not yet built (no catalog infra) | [docs/I18N.md](docs/I18N.md) |

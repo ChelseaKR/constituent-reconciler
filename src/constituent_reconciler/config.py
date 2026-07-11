@@ -15,6 +15,7 @@ from pathlib import Path
 from constituent_reconciler import defaults
 from constituent_reconciler.models import CANONICAL_FIELDS
 from constituent_reconciler.policy import policy_for
+from constituent_reconciler.suppression import ensure_non_identifying
 
 
 @dataclass(frozen=True)
@@ -114,6 +115,13 @@ class Recipe:
     require_local_targets: bool = False
     aggregate_export: bool = False
     suppression_threshold: int = 11
+    # The comparable-database export profile is explicit opt-in: no breakdown
+    # beyond the base consent/resolution counts is emitted unless the recipe
+    # names non-identifying fields, and identifying canonical fields are
+    # refused, fail-closed, at load time (see ``load_recipe``).
+    comparable_export: bool = False
+    comparable_breakdown_fields: tuple[str, ...] = ()
+    comparable_period: str = ""
     prior: float = defaults.DEFAULT_PRIOR
     auto_threshold: float = defaults.DEFAULT_AUTO_THRESHOLD
     review_threshold: float = defaults.DEFAULT_REVIEW_THRESHOLD
@@ -151,6 +159,7 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
     extract_section = data.get("extract", {})
     output_section = data.get("output", {})
     household_section = data.get("household", {})
+    comparable_section = data.get("comparable", {})
 
     if "incoming" not in input_section:
         raise ValueError("recipe [input] must set 'incoming'")
@@ -190,6 +199,16 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
     # the only source of "enabled" is the recipe itself.
     household = HouseholdConfig(enabled=bool(household_section.get("enabled", False)))
 
+    # Comparable-export settings. The identifying-field check runs here, at
+    # load time, so a bad recipe fails before any record is read, not only
+    # when the report is actually built (comparable_summary re-checks too, as
+    # defense in depth for any caller that builds a Recipe outside this
+    # loader).
+    comparable_breakdown_fields = tuple(
+        str(f) for f in comparable_section.get("breakdown_fields", [])
+    )
+    ensure_non_identifying(comparable_breakdown_fields)
+
     output = OutputConfig(
         connector=str(output_section.get("connector", "csv")),
         endpoint=str(output_section.get("endpoint", "")),
@@ -219,6 +238,9 @@ def load_recipe(path: str | Path, *, policy_pack: str | None = None) -> Recipe:
         require_local_targets=policy.require_local_targets,
         aggregate_export=policy.aggregate_export,
         suppression_threshold=policy.suppression_threshold,
+        comparable_export=bool(comparable_section.get("export", False)),
+        comparable_breakdown_fields=comparable_breakdown_fields,
+        comparable_period=str(comparable_section.get("period", "")),
         prior=float(thresholds_section.get("prior", defaults.DEFAULT_PRIOR)),
         auto_threshold=float(thresholds_section.get("auto", defaults.DEFAULT_AUTO_THRESHOLD)),
         review_threshold=float(thresholds_section.get("review", defaults.DEFAULT_REVIEW_THRESHOLD)),

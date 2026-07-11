@@ -7,10 +7,20 @@ subtraction from a published total.
 
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from constituent_reconciler.models import Consent, GoldenRecord
+from constituent_reconciler.policy import PolicyViolation
+from constituent_reconciler.schema import REPORT_SCHEMA_VERSION
 from constituent_reconciler.suppression import (
+    COMPARABLE_PROFILE,
+    MISSING_CATEGORY,
     SUPPRESSED,
     aggregate_summary,
+    comparable_payload,
+    comparable_summary,
     suppress_cells,
 )
 
@@ -22,6 +32,16 @@ def _golden(cluster_id: str, members: tuple[str, ...], consent: bool) -> GoldenR
         fields={},
         primary=members[0],
         consent=Consent(status="granted") if consent else Consent(),
+    )
+
+
+def _golden_with_fields(cluster_id: str, fields: dict[str, str]) -> GoldenRecord:
+    return GoldenRecord(
+        cluster_id=cluster_id,
+        members=(cluster_id,),
+        fields=fields,
+        primary=cluster_id,
+        consent=Consent(status="granted"),
     )
 
 
@@ -124,3 +144,81 @@ def test_aggregate_summary_emits_no_field_values() -> None:
     # field value from the records.
     serialized = repr(summary)
     assert "c1" not in serialized
+
+
+# ---------------------------------------------------------------------------
+# Comparable-database report
+# ---------------------------------------------------------------------------
+
+
+def test_comparable_breakdown_counts_distinct_field_values() -> None:
+    records = [
+        *[_golden_with_fields(f"a{i}", {"county": "Alder"}) for i in range(12)],
+        *[_golden_with_fields(f"b{i}", {"county": "Birch"}) for i in range(15)],
+    ]
+    report = comparable_summary(records, threshold=11, breakdown_fields=("county",))
+    by_name = {b.name: b.cells for b in report.breakdowns}
+    assert by_name["county"] == {"Alder": 12, "Birch": 15}
+    assert report.total == 27
+
+
+def test_comparable_breakdown_gets_primary_and_complementary_suppression() -> None:
+    records = [
+        *[_golden_with_fields(f"a{i}", {"county": "Alder"}) for i in range(3)],
+        *[_golden_with_fields(f"b{i}", {"county": "Birch"}) for i in range(20)],
+        *[_golden_with_fields(f"c{i}", {"county": "Cedar"}) for i in range(90)],
+    ]
+    report = comparable_summary(records, threshold=11, breakdown_fields=("county",))
+    by_name = {b.name: b.cells for b in report.breakdowns}
+    # Only Alder falls below the threshold; publishing Birch would make Alder
+    # recoverable by subtraction from the total, so Birch is suppressed too.
+    assert by_name["county"]["Alder"] == SUPPRESSED
+    assert by_name["county"]["Birch"] == SUPPRESSED
+    assert by_name["county"]["Cedar"] == 90
+
+
+def test_comparable_missing_field_value_is_its_own_category() -> None:
+    records = [
+        *[_golden_with_fields(f"a{i}", {"county": "Alder"}) for i in range(12)],
+        *[_golden_with_fields(f"m{i}", {}) for i in range(13)],
+    ]
+    report = comparable_summary(records, threshold=11, breakdown_fields=("county",))
+    by_name = {b.name: b.cells for b in report.breakdowns}
+    # Dropping the empty-valued records would make cells disagree with the
+    # published total, so "data not collected" is counted as a category.
+    assert by_name["county"] == {"Alder": 12, MISSING_CATEGORY: 13}
+
+
+def test_comparable_report_preserves_true_zero() -> None:
+    records = [_golden_with_fields(f"a{i}", {}) for i in range(20)]
+    report = comparable_summary(records, threshold=11)
+    by_name = {b.name: b.cells for b in report.breakdowns}
+    # All 20 consented: granted survives, withheld=0 stays a true zero.
+    assert by_name["consent"]["granted"] == 20
+    assert by_name["consent"]["withheld"] == 0
+
+
+def test_comparable_refuses_identifying_fields_fail_closed() -> None:
+    with pytest.raises(PolicyViolation, match="identifying"):
+        comparable_summary([], breakdown_fields=("last_name",))
+
+
+def test_comparable_payload_carries_metadata_and_no_ids() -> None:
+    records = [
+        _golden_with_fields("cluster-alpha", {"program": "Housing"}),
+        *[_golden_with_fields(f"rec-x{i}", {"program": "Housing"}) for i in range(19)],
+    ]
+    report = comparable_summary(
+        records, threshold=11, breakdown_fields=("program",), period="FY2026 Q3"
+    )
+    payload = comparable_payload(report)
+    assert payload["schema_version"] == REPORT_SCHEMA_VERSION
+    assert payload["profile"] == COMPARABLE_PROFILE
+    assert payload["period"] == "FY2026 Q3"
+    assert payload["suppression_threshold"] == 11
+    assert payload["generated_at"]
+    assert payload["total_resolved"] == 20
+    # Only category labels and counts: no record id or member list survives.
+    serialized = json.dumps(payload)
+    assert "cluster-alpha" not in serialized
+    assert "rec-x" not in serialized

@@ -1,0 +1,177 @@
+name: release
+
+# Tag-triggered release (REL-14, RELEASE-AND-VERSIONING-STANDARD.md §4). A
+# push of a `vX.Y.Z` tag re-verifies the tagged commit from scratch (this
+# repo's PR green check on `ci.yml` is never trusted for a release — main can
+# drift after a PR merges), builds the sdist/wheel, generates a CycloneDX SBOM
+# (closing the P1-7 gap declared in docs/RESPONSIBLE-TECH-AUDITS.md), attests
+# build provenance via keyless OIDC (Sigstore), and publishes a GitHub Release
+# with the matching CHANGELOG section as notes.
+#
+# Not yet published to PyPI (see README) — no `pypa/gh-action-pypi-publish`
+# stage. When this repo does publish, add a `publish` job gated on the
+# `pypi` environment using Trusted Publishing (OIDC), per
+# RELEASE-AND-VERSIONING-STANDARD.md §5.1; do not add a stored PyPI token.
+#
+# No `v*` tag exists yet — this workflow is prepared ahead of the first
+# release so cutting `v0.1.0` doesn't also require writing release CI from
+# scratch. Cutting the first tag is a maintainer decision, not something this
+# remediation pass performs.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+# A release publishes a GitHub Release — never race two tag pushes against
+# each other; a re-run queues instead of running concurrently.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # The tag must match pyproject.toml's version exactly (REL-02 / §2 tag <->
+  # metadata consistency). `__version__` already derives from installed
+  # package metadata, so checking the tag against pyproject.toml is checking
+  # the single source of truth.
+  version-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Tag matches pyproject.toml version
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          pkg_version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          echo "tag=$tag_version pyproject=$pkg_version"
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match pyproject.toml version $pkg_version"
+            exit 1
+          fi
+
+  # Never publish untested code: re-run the merge-blocking gates at the
+  # tagged commit, not the PR's stale green check.
+  release-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
+        with:
+          enable-cache: false
+      - name: Install (locked, mirrors make install)
+        run: make install
+      - name: Verify (ruff format --check, ruff check, mypy --strict, pytest+coverage)
+        run: make verify
+      - name: Dependency-vulnerability gate (pip-audit + osv-scanner)
+        run: |
+          set -eu
+          curl -sSfL -o osv-scanner \
+            https://github.com/google/osv-scanner/releases/download/v2.4.0/osv-scanner_linux_amd64
+          echo "15314940c10d26af9c6649f150b8a47c1262e8fc7e17b1d1029b0e479e8ed8a0  osv-scanner" | sha256sum -c -
+          chmod +x osv-scanner
+          sudo mv osv-scanner /usr/local/bin/osv-scanner
+          make security
+
+  # REL-10: the tag must have a matching CHANGELOG section — extracted
+  # verbatim into the GitHub Release body. A missing section fails the
+  # release before anything is built or published.
+  changelog-section:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Extract this version's CHANGELOG section
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v ver="$version" '
+            $0 ~ ("^## \\[" ver "\\]") { found=1; print; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::CHANGELOG.md has no '## [$version]' section (REL-10) — add one before tagging" >&2
+            exit 1
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-notes
+          path: release-notes.md
+
+  # Build the distribution, generate its SBOM, and attest build provenance —
+  # no caching (CI-CD-STANDARD: a cache hit is an unverified input into an
+  # artifact we're about to publish and attest).
+  build:
+    needs: [version-check, release-tests, changelog-section]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # keyless OIDC identity for build provenance attestation
+      attestations: write # publish the attestation to the repo's attestation store
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
+        with:
+          enable-cache: false
+      - name: Sync locked runtime + extract extra (matches the shipped wheel's deps)
+        run: uv sync --frozen --python 3.12 --extra extract
+      - name: Build sdist + wheel
+        run: uv build
+      # SBOM (SECURITY-AND-SUPPLY-CHAIN-STANDARD §6.2): CycloneDX 1.7 of the
+      # exact locked environment the released wheel was built against. Closes
+      # the "no SBOM generation on release yet" gap declared in
+      # docs/RESPONSIBLE-TECH-AUDITS.md (P1-7).
+      - name: Generate CycloneDX SBOM
+        run: |
+          uvx --from cyclonedx-bom==7.3.0 cyclonedx-py environment .venv \
+            --sv 1.7 --of JSON --pyproject pyproject.toml \
+            --output-reproducible --validate -o dist/sbom.cdx.json
+      # Keyless build provenance: an OIDC-backed GitHub attestation binding
+      # this workflow run to the built artifacts, verifiable with
+      # `gh attestation verify`. No signing key is stored anywhere.
+      - name: Attest build provenance (SLSA, keyless OIDC)
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: "dist/*"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: dist
+          path: dist/
+
+  # Create the GitHub Release with the built artifacts, SBOM, and the
+  # matching CHANGELOG section as release notes.
+  github-release:
+    needs: [build, changelog-section]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub Release and upload assets
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: dist
+          path: dist/
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-notes
+      # `gh` ships preinstalled on GitHub-hosted runners — prefer it over a
+      # third-party action (zizmor superfluous-actions) for the one
+      # built-in-covered step.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
+            --verify-tag \
+            dist/*

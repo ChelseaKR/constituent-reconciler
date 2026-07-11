@@ -6,6 +6,30 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 ## [Unreleased]
 
+### Security
+- **Standards-conformance remediation (2026-07-10), release_workflow
+  (REL-14)**: added `.github/workflows/release.yml`, a tag-triggered
+  (`v*`) release pipeline that re-verifies the tagged commit (`make
+  verify` + `make security`) independent of the PR's green check, checks
+  tag/`pyproject.toml` version consistency, builds the sdist + wheel,
+  generates a CycloneDX 1.7 SBOM, attests build provenance via keyless
+  OIDC (Sigstore), and publishes a GitHub Release with the matching
+  CHANGELOG section as notes. Closes the SBOM gap (P1-7) previously
+  declared in `docs/RESPONSIBLE-TECH-AUDITS.md`. No PyPI publish stage yet
+  (not published to PyPI); no `v*` tag has been cut, so the workflow is
+  unexercised end-to-end pending the maintainer cutting the first release.
+
+- **Web-boundary hardening for the review server (FIX-01)**: `reconcile
+  review` now checks the `Host` header on every request against the address
+  it actually bound (closing a DNS-rebinding path to the loopback-only
+  server), checks a POST's `Origin` header, if present, against the server's
+  own origin, and requires a per-run session token embedded in every rendered
+  form on every POST. Together these mean a hostile page the reviewer has
+  open elsewhere can no longer forge a verdict or read a pair over the
+  loopback interface by guessing a port. `docs/ideation/02-large-scale-fixes.md`
+  named this the most serious observed gap between the DV pack's stated
+  "cannot become an egress path" claim and the code.
+
 ### Added
 - **Local OCR backend for scanned intake (EXP-04)**: `extract/ocr.py` adds a
   `PdfplumberOcrExtractor`, selected by `[extract] backend = "pdfplumber+ocr"`,

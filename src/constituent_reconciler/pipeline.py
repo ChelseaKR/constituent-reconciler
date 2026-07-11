@@ -25,6 +25,7 @@ from constituent_reconciler.connectors.salesforce import Transport as Salesforce
 from constituent_reconciler.extract.base import ExtractedField
 from constituent_reconciler.models import (
     Consent,
+    GoldenRecord,
     Pair,
     Record,
     RunResult,
@@ -34,7 +35,7 @@ from constituent_reconciler.models import (
 from constituent_reconciler.normalize import normalize_record
 from constituent_reconciler.policy import PolicyViolation
 from constituent_reconciler.provenance import ProvenanceLog, TimestampAuthority
-from constituent_reconciler.suppression import AggregateSummary
+from constituent_reconciler.suppression import AggregateSummary, ComparableReport
 
 
 def read_records(
@@ -436,6 +437,18 @@ def _write_aggregate_summary(summary: AggregateSummary, out_dir: Path) -> Path:
     return summary_path
 
 
+def _write_comparable_report(report: ComparableReport, out_dir: Path) -> Path:
+    """Write the CoC-shaped comparable-database report as JSON."""
+
+    import json
+
+    report_path = out_dir / "comparable_report.json"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    payload = suppression.comparable_payload(report)
+    report_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return report_path
+
+
 def _write_household_suggestions(
     suggestions: Sequence[household.HouseholdSuggestion],
     confirmed: frozenset[str],
@@ -525,6 +538,8 @@ class ExportSummary:
     logged: int
     aggregate: AggregateSummary | None = None
     aggregate_path: Path | None = None
+    comparable: ComparableReport | None = None
+    comparable_path: Path | None = None
     household_suggestions: tuple[household.HouseholdSuggestion, ...] = ()
     household_path: Path | None = None
 
@@ -539,6 +554,35 @@ class ExportSummary:
         if not counts:
             return "no records to write"
         return ", ".join(f"{action}: {n}" for action, n in sorted(counts.items()))
+
+
+def _maybe_export_comparable(
+    recipe: Recipe,
+    exportable: Sequence[GoldenRecord],
+    *,
+    out_dir: Path,
+    dry_run: bool,
+) -> tuple[ComparableReport | None, Path | None]:
+    """Build and (unless dry-run) write the comparable report, if opted in.
+
+    The comparable-database export profile is explicit recipe opt-in (see
+    config.py's ``[comparable]`` section): when set, ``run``/``apply`` write
+    ``comparable_report.json`` alongside ``aggregate_summary.json`` using the
+    same suppressed-report builder the standalone ``export-comparable``
+    command uses (``export_comparable`` below), so the two paths cannot
+    drift.
+    """
+
+    if not recipe.comparable_export:
+        return None, None
+    comparable = suppression.comparable_summary(
+        exportable,
+        threshold=recipe.suppression_threshold,
+        breakdown_fields=recipe.comparable_breakdown_fields,
+        period=recipe.comparable_period,
+    )
+    comparable_path = None if dry_run else _write_comparable_report(comparable, out_dir)
+    return comparable, comparable_path
 
 
 def export(
@@ -627,6 +671,10 @@ def export(
         if not dry_run:
             aggregate_path = _write_aggregate_summary(aggregate, out_dir)
 
+    comparable, comparable_path = _maybe_export_comparable(
+        recipe, exportable, out_dir=out_dir, dry_run=dry_run
+    )
+
     return ExportSummary(
         write_results=tuple(write_results),
         withheld=tuple(withheld),
@@ -636,6 +684,39 @@ def export(
         logged=logged,
         aggregate=aggregate,
         aggregate_path=aggregate_path,
+        comparable=comparable,
+        comparable_path=comparable_path,
         household_suggestions=household_suggestions,
         household_path=household_path,
     )
+
+
+def export_comparable(
+    result: RunResult,
+    recipe: Recipe,
+    *,
+    out_dir: Path,
+) -> tuple[ComparableReport, Path]:
+    """Write only the suppressed comparable-database report.
+
+    Backs the standalone ``reconcile export-comparable`` command: one call,
+    independent of ``recipe.comparable_export`` (which instead controls
+    whether ``export`` above writes this report as a side effect of a normal
+    ``run``/``apply``). Uses the recipe's ``comparable_breakdown_fields`` and
+    ``comparable_period`` the same way ``export`` does, so the standalone
+    command and the recipe-driven path never disagree about what a given
+    recipe's comparable report contains.
+    """
+
+    exportable, _ = consent.partition_by_consent(
+        result.golden,
+        require_consent=recipe.require_consent,
+        destination=recipe.output.connector,
+    )
+    report = suppression.comparable_summary(
+        exportable,
+        threshold=recipe.suppression_threshold,
+        breakdown_fields=recipe.comparable_breakdown_fields,
+        period=recipe.comparable_period,
+    )
+    return report, _write_comparable_report(report, out_dir)
