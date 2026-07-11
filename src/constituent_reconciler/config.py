@@ -37,7 +37,7 @@ _SECTION_KEYS: dict[str, frozenset[str]] = {
     "mapping": frozenset(CANONICAL_FIELDS),
     "consent": frozenset({"column", "date", "expires", "scope", "require"}),
     "thresholds": frozenset({"prior", "auto", "review"}),
-    "policy": frozenset({"pack"}),
+    "policy": frozenset({"pack", "fill", "fill_policy"}),
     "normalize": frozenset({"address_backend"}),
     "extract": frozenset({"backend", "confidence_threshold"}),
     "output": frozenset(

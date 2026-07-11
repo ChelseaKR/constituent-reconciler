@@ -160,7 +160,7 @@ def _planted_run() -> RunResult:
                 "email": "zephyrine.quandt@example.test",
             },
             "Z0001",
-            Consent(status="granted"),
+            consent=Consent(status="granted"),
         ),
         GoldenRecord(
             "c-0002",
@@ -171,7 +171,7 @@ def _planted_run() -> RunResult:
                 "email": "balthazar.okonkwo@example.test",
             },
             "Z0003",
-            Consent(status="granted"),
+            consent=Consent(status="granted"),
         ),
         GoldenRecord(
             "c-0003",
@@ -182,7 +182,7 @@ def _planted_run() -> RunResult:
                 "email": "wilhelmina.f@example.test",
             },
             "Z0004",
-            Consent(),
+            consent=Consent(),
         ),
     )
     return RunResult(records=records, pairs=pairs, clusters=clusters, golden=golden)

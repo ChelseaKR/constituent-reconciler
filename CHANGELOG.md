@@ -7,6 +7,16 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Changed
+- **Field-level lineage and a named survivorship fill policy (FIX-07)**
+  (`models.py`, `decisions.py`, `config.py`, `pipeline.py`, `provenance.py`,
+  `schema.py`). Every golden record now carries `field_sources`, mapping each
+  non-empty merged field to the member record id that supplied its value, and
+  blank-fill order is a named policy (`[policy] fill` in the recipe, default
+  `survivor-then-lowest-id`, the previous implicit behavior) validated at
+  load time. Provenance entries record the lineage as member ids only, never
+  field values, and `aggregate_summary.json` names the active policy.
+  `REPORT_SCHEMA_VERSION` bumps 2 to 3 for the new keys; version-2 artifacts
+  still verify unchanged.
 - **CiviCRM email and phone write through dedicated entities (R7)**
   (`connectors/civicrm.py`). Email and phone move off the API v4 join-field
   shorthand onto the dedicated Email and Phone entities: once the contact id
