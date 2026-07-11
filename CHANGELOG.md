@@ -6,6 +6,39 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 ## [Unreleased]
 
+### Changed
+- **Record identity is content-derived and collision-safe (FIX-03)**
+  (`pipeline.py`). Generated record ids are now a BLAKE2b digest of the source
+  name and the mapped raw values (for example `N3f9a2c1b0d4`) instead of the
+  row position (`N0001`), for CSV rows, extracted PDF pages, and .txt/.eml
+  bodies alike. Inserting or reordering rows in a source file between
+  `reconcile review` and `reconcile apply` no longer re-binds recorded
+  verdicts to different people; editing a row changes that row's id and no
+  other. Exact-duplicate rows share the digest and carry a deterministic `-2`,
+  `-3`, ... suffix in read order.
+- **User-supplied ids are namespaced by source.** A value read from the
+  recipe's `id_column` becomes `existing:E003` or `incoming:N002`, so the same
+  id in two source files can no longer collide. An id that still appears twice
+  in one run (a duplicated `id_column` value within one source) raises
+  `pipeline.DuplicateIdError` naming the id and source, instead of silently
+  dropping one of the records.
+- **The decisions file is a versioned surface.** `decisions.json` now carries
+  a `decisions_schema` field (`schema.DECISIONS_SCHEMA_VERSION`, currently 1),
+  reported by `reconcile schema` alongside the other declared versions. A
+  resumed review session warns on stderr when a saved decision references a
+  pair that is not in the current run's review queue, instead of ignoring it
+  silently.
+
+#### Migration note (FIX-03)
+Record ids embedded in artifacts written by earlier versions (decisions files,
+provenance logs, review queues, CRM external-id columns keyed on cluster ids)
+will not match the ids this version mints from the same data. Finish and apply
+any in-flight review with the version that produced it, then re-run
+`reconcile run` under this version before recording new decisions. Existing
+provenance logs remain verifiable as written; only newly appended entries carry
+the new ids. Per the ADR 0006 stability contract this is a pre-1.0 surface
+change, shipped with this changelog entry.
+
 ### Security
 - **Standards-conformance remediation (2026-07-10), release_workflow
   (REL-14)**: added `.github/workflows/release.yml`, a tag-triggered
