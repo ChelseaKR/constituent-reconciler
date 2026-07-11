@@ -1,28 +1,51 @@
 """Review session state and decision persistence.
 
 A ``ReviewSession`` wraps a finished pipeline run and exposes the review pairs in
-a stable order, tracks one verdict per pair, and writes those verdicts to a
+a stable order, tracks the verdicts on each pair, and writes those verdicts to a
 decisions file. The session holds no socket and renders no HTML, so its logic is
 unit-testable on its own; the server and the renderer build on it.
 
-The decisions file is the session's only side effect, and it carries record ids
-and verdicts only. No field value is written, which is the minimization the DV
-pack requires of any artifact the review step produces.
+Every verdict is attributed: the session is opened by a named reviewer, and each
+decision carries that name and a timestamp into the decisions file's ``audit``
+section, so who decided each pair is answerable after the fact. Under two-person
+mode (the DV pack's default) a merge only lands in the ``approved`` list once two
+distinct reviewers have approved it; a lone approval is held as awaiting a second
+reviewer, and any rejection rejects immediately, fail-closed.
+
+The decisions file is the session's only side effect, and it carries record ids,
+verdicts, reviewer names, and timestamps only. No field value of a reviewed
+record is written, which is the minimization the DV pack requires of any artifact
+the review step produces.
 """
 
 from __future__ import annotations
 
 import json
+import secrets
+import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from constituent_reconciler import decisions
 from constituent_reconciler.models import Band, Cluster, Pair, Record, RunResult
+from constituent_reconciler.schema import DECISIONS_SCHEMA_VERSION
 
 APPROVED = "approved"
 REJECTED = "rejected"
+# Not a verdict a reviewer can record: the derived state of a pair that has one
+# approval under two-person mode and is waiting on a second, distinct name.
+AWAITING_SECOND = "awaiting_second_reviewer"
 _VERDICTS = frozenset({APPROVED, REJECTED})
+
+
+def _warn_stale_pair(left: str, right: str) -> None:
+    print(
+        f"decision pair {left!r}, {right!r} is not in this run's review queue",
+        file=sys.stderr,
+    )
+
 
 # Shown when merging the pair on screen would contradict a rejection recorded
 # elsewhere in the same group of records: the same cannot-link problem
@@ -174,6 +197,35 @@ class Counts:
     approved: int
     rejected: int
     pending: int
+    awaiting_second: int = 0
+
+
+@dataclass(frozen=True)
+class ReviewEntry:
+    """One reviewer's recorded verdict on one pair, with when it was made."""
+
+    reviewer: str
+    verdict: str
+    decided_at: str
+
+
+def _clean_reviewer(name: str) -> str:
+    """Validate a reviewer name. Blank is refused, fail-closed.
+
+    An unattributed verdict would defeat the audit trail, so an empty or
+    whitespace-only name raises rather than being stored.
+    """
+
+    cleaned = name.strip()
+    if not cleaned:
+        raise ValueError("reviewer name must not be blank; every verdict is attributed")
+    return cleaned
+
+
+# The reviewer name attached to verdicts resumed from a version-1 decisions
+# file, which carried no attribution. Under two-person mode such an approval
+# counts as one name, so a real second reviewer is still required, fail-closed.
+UNRECORDED_REVIEWER = "unrecorded"
 
 
 @dataclass(frozen=True)
@@ -269,7 +321,13 @@ def _field_sources(
 
 
 class ReviewSession:
-    """Stateful review over a run's uncertain pairs, persisted to a file."""
+    """Stateful review over a run's uncertain pairs, persisted to a file.
+
+    The session is opened by one named reviewer; every verdict it records is
+    attributed to that name (or to an explicit ``reviewer`` argument) with a
+    UTC timestamp. With ``require_second_reviewer`` a pair only becomes
+    approved once two distinct reviewer names have approved it.
+    """
 
     def __init__(
         self,
@@ -277,17 +335,26 @@ class ReviewSession:
         fields: tuple[str, ...],
         decisions_path: Path,
         *,
+        reviewer: str,
         privacy_mode: bool = False,
+        require_second_reviewer: bool = False,
     ) -> None:
         self._result = result
         self._fields = fields
         self._decisions_path = decisions_path
+        self.reviewer = _clean_reviewer(reviewer)
         self.privacy_mode = privacy_mode
+        self.require_second_reviewer = require_second_reviewer
+        # A per-run secret embedded in every rendered form and checked on every
+        # POST (FIX-01), so a page the reviewer has open elsewhere cannot forge
+        # a verdict against this server: it cannot know a token it never saw.
+        # Regenerated each time a session is constructed, never persisted.
+        self.token = secrets.token_urlsafe(24)
         # The same ordering the review_queue.csv uses, so the two surfaces agree.
         self._pairs: tuple[Pair, ...] = tuple(
             sorted(result.review_pairs, key=lambda p: (-p.probability, p.left, p.right))
         )
-        self._verdicts: dict[int, str] = {}
+        self._entries: dict[int, list[ReviewEntry]] = {}
         self._load_existing()
 
     # -- construction helpers ------------------------------------------------
@@ -300,7 +367,11 @@ class ReviewSession:
 
         Decisions are keyed by the unordered pair of record ids, so a resumed
         verdict re-attaches to the same candidate even if the pair ordering
-        differs. Unknown pairs in the file are ignored rather than raising.
+        differs. Unknown pairs in the file are reported and skipped; a stale
+        decision should not fail a review session, but it should be visible.
+        Both shapes are read: the version-2 ``audit`` section with attributed
+        verdicts, and the version-1 flat ``approved``/``rejected`` lists, whose
+        verdicts resume attributed to ``unrecorded``.
         """
 
         if not self._decisions_path.exists():
@@ -310,6 +381,10 @@ class ReviewSession:
         except (json.JSONDecodeError, OSError):
             return
         index_of = self._key_to_index()
+        audit = data.get("audit")
+        if isinstance(audit, dict):
+            self._load_audit(audit, index_of)
+            return
         for verdict, key in ((APPROVED, "approved"), (REJECTED, "rejected")):
             for entry in data.get(key, []):
                 if not isinstance(entry, list) or len(entry) != 2:
@@ -317,7 +392,38 @@ class ReviewSession:
                 pair_key = frozenset((str(entry[0]), str(entry[1])))
                 index = index_of.get(pair_key)
                 if index is not None:
-                    self._verdicts[index] = verdict
+                    self._entries[index] = [
+                        ReviewEntry(reviewer=UNRECORDED_REVIEWER, verdict=verdict, decided_at="")
+                    ]
+                else:
+                    _warn_stale_pair(str(entry[0]), str(entry[1]))
+
+    def _load_audit(self, audit: dict[str, object], index_of: dict[frozenset[str], int]) -> None:
+        for key, raw_entries in audit.items():
+            ids = key.split("|")
+            if len(ids) != 2 or not isinstance(raw_entries, list):
+                continue
+            index = index_of.get(frozenset(ids))
+            if index is None:
+                _warn_stale_pair(ids[0], ids[1])
+                continue
+            entries: list[ReviewEntry] = []
+            for raw in raw_entries:
+                if not isinstance(raw, dict):
+                    continue
+                name = str(raw.get("reviewer", "")).strip()
+                verdict = str(raw.get("verdict", ""))
+                if not name or verdict not in _VERDICTS:
+                    continue
+                entries.append(
+                    ReviewEntry(
+                        reviewer=name,
+                        verdict=verdict,
+                        decided_at=str(raw.get("decided_at", "")),
+                    )
+                )
+            if entries:
+                self._entries[index] = entries
 
     # -- read access ---------------------------------------------------------
 
@@ -365,27 +471,62 @@ class ReviewSession:
         return None
 
     def verdict(self, index: int) -> str | None:
-        return self._verdicts.get(index)
+        """The pair's effective state: approved, rejected, awaiting, or None.
+
+        A rejection by any reviewer rejects the pair outright; disagreement
+        never merges. Under two-person mode an approval only becomes
+        ``approved`` once two distinct reviewer names have approved, and until
+        then the pair reads as awaiting a second reviewer.
+        """
+
+        entries = self._entries.get(index)
+        if not entries:
+            return None
+        if any(entry.verdict == REJECTED for entry in entries):
+            return REJECTED
+        if self.require_second_reviewer and len(self.approvers(index)) < 2:
+            return AWAITING_SECOND
+        return APPROVED
+
+    def audit(self, index: int) -> tuple[ReviewEntry, ...]:
+        """Every recorded verdict on the pair, in the order they were made."""
+
+        return tuple(self._entries.get(index, ()))
+
+    def approvers(self, index: int) -> frozenset[str]:
+        """The distinct reviewer names that currently approve the pair."""
+
+        return frozenset(
+            entry.reviewer for entry in self._entries.get(index, ()) if entry.verdict == APPROVED
+        )
 
     def counts(self) -> Counts:
-        approved = sum(1 for v in self._verdicts.values() if v == APPROVED)
-        rejected = sum(1 for v in self._verdicts.values() if v == REJECTED)
+        states = [self.verdict(index) for index in range(len(self._pairs))]
+        approved = states.count(APPROVED)
+        rejected = states.count(REJECTED)
+        awaiting = states.count(AWAITING_SECOND)
         return Counts(
             approved=approved,
             rejected=rejected,
-            pending=len(self._pairs) - approved - rejected,
+            pending=len(self._pairs) - approved - rejected - awaiting,
+            awaiting_second=awaiting,
         )
 
     def next_undecided(self, after: int = -1) -> int | None:
-        """Index of the first undecided pair strictly after ``after``, if any.
+        """Index of the first pair still open for this reviewer after ``after``.
 
         Wraps once to the start so a reviewer who jumps around still lands on an
-        outstanding pair. Returns None when every pair has a verdict.
+        outstanding pair. A pair is open when it has no effective verdict, or
+        when it awaits a second reviewer and this session's reviewer is not the
+        one who already approved it. Returns None when nothing is left.
         """
 
         order = list(range(after + 1, len(self._pairs))) + list(range(0, after + 1))
         for index in order:
-            if index not in self._verdicts:
+            state = self.verdict(index)
+            if state is None:
+                return index
+            if state == AWAITING_SECOND and self.reviewer not in self.approvers(index):
                 return index
         return None
 
@@ -401,10 +542,10 @@ class ReviewSession:
         """
 
         approved = frozenset(
-            self._pairs[i].key() for i, v in self._verdicts.items() if v == APPROVED
+            self._pairs[i].key() for i in range(len(self._pairs)) if self.verdict(i) == APPROVED
         )
         rejected = frozenset(
-            self._pairs[i].key() for i, v in self._verdicts.items() if v == REJECTED
+            self._pairs[i].key() for i in range(len(self._pairs)) if self.verdict(i) == REJECTED
         )
         adjusted: list[Pair] = []
         for pair in self._result.pairs:
@@ -432,7 +573,7 @@ class ReviewSession:
             if pair.left not in member_set or pair.right not in member_set:
                 continue
             index = key_to_index.get(pair.key())
-            verdict = self._verdicts.get(index) if index is not None else None
+            verdict = self.verdict(index) if index is not None else None
             if verdict == APPROVED:
                 status = "approved"
             elif verdict == REJECTED:
@@ -505,9 +646,9 @@ class ReviewSession:
         if not (0 <= index < len(self._pairs)):
             return None
         pair = self._pairs[index]
-        verdict = self._verdicts.get(index)
+        verdict = self.verdict(index)
         rejected_keys = frozenset(
-            self._pairs[i].key() for i, v in self._verdicts.items() if v == REJECTED
+            self._pairs[i].key() for i in range(len(self._pairs)) if self.verdict(i) == REJECTED
         )
         intends_merge = verdict != REJECTED
 
@@ -540,41 +681,79 @@ class ReviewSession:
 
     # -- write access --------------------------------------------------------
 
-    def record(self, index: int, verdict: str) -> None:
-        """Record a verdict for one pair and write the decisions file through.
+    def record(self, index: int, verdict: str, reviewer: str | None = None) -> None:
+        """Record one reviewer's verdict on a pair and write the file through.
 
-        Writing through on every decision means a reviewer who closes the browser
-        keeps their progress. An unknown verdict raises rather than being stored,
-        fail-closed.
+        The verdict is attributed to ``reviewer`` (the session's reviewer when
+        omitted) with a UTC timestamp. A reviewer who records on a pair they
+        already decided overwrites their own entry; a different reviewer's
+        entry is appended, which is how the second approval of two-person mode
+        arrives. Writing through on every decision means a reviewer who closes
+        the browser keeps their progress. An unknown verdict or a blank
+        reviewer raises rather than being stored, fail-closed.
         """
 
         if not (0 <= index < len(self._pairs)):
             raise IndexError(f"pair index {index} out of range")
         if verdict not in _VERDICTS:
             raise ValueError(f"unknown verdict {verdict!r}; expected approved or rejected")
-        self._verdicts[index] = verdict
+        name = self.reviewer if reviewer is None else _clean_reviewer(reviewer)
+        entry = ReviewEntry(
+            reviewer=name,
+            verdict=verdict,
+            decided_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        )
+        entries = [e for e in self._entries.get(index, []) if e.reviewer != name]
+        entries.append(entry)
+        self._entries[index] = entries
         self.save()
 
     def clear(self, index: int) -> None:
-        """Reset a pair to undecided (the reviewer changed their mind)."""
+        """Reset a pair to undecided, clearing every reviewer's entry on it."""
 
-        if self._verdicts.pop(index, None) is not None:
+        if self._entries.pop(index, None) is not None:
             self.save()
 
-    def to_decisions(self) -> dict[str, list[list[str]]]:
+    def _pair_key(self, index: int) -> str:
+        pair = self._pairs[index]
+        return "|".join(sorted((pair.left, pair.right)))
+
+    def to_decisions(self) -> dict[str, object]:
         """The decisions payload in the shape ``reconcile apply`` consumes.
 
-        Record ids and verdicts only; no field value is included, so the artifact
-        carries no PII. This is the same JSON the CLI's ``apply`` reads.
+        The top-level ``approved`` and ``rejected`` lists keep the version-1
+        shape, and ``approved`` holds only pairs whose approval is complete, so
+        ``apply`` cannot merge a pair still awaiting its second reviewer. The
+        ``audit`` section maps ``left|right`` to every recorded verdict with
+        its reviewer and timestamp, including held single approvals. Record
+        ids, verdicts, reviewer names, and timestamps only; no field value of
+        a reviewed record is included, so the artifact carries no client PII.
         """
 
         approved: list[list[str]] = []
         rejected: list[list[str]] = []
-        for index, verdict in sorted(self._verdicts.items()):
+        audit: dict[str, list[dict[str, str]]] = {}
+        for index in sorted(self._entries):
             pair = self._pairs[index]
-            bucket = approved if verdict == APPROVED else rejected
-            bucket.append([pair.left, pair.right])
-        return {"approved": approved, "rejected": rejected}
+            state = self.verdict(index)
+            if state == APPROVED:
+                approved.append([pair.left, pair.right])
+            elif state == REJECTED:
+                rejected.append([pair.left, pair.right])
+            audit[self._pair_key(index)] = [
+                {
+                    "reviewer": entry.reviewer,
+                    "verdict": entry.verdict,
+                    "decided_at": entry.decided_at,
+                }
+                for entry in self._entries[index]
+            ]
+        return {
+            "decisions_schema": DECISIONS_SCHEMA_VERSION,
+            "approved": approved,
+            "rejected": rejected,
+            "audit": audit,
+        }
 
     def save(self) -> None:
         self._decisions_path.parent.mkdir(parents=True, exist_ok=True)

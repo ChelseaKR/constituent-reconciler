@@ -18,6 +18,7 @@ def test_default_pack_enforces_nothing() -> None:
     assert policy.forbid_cloud_seam is False
     assert policy.require_local_targets is False
     assert policy.aggregate_export is False
+    assert policy.require_second_reviewer is False
 
 
 def test_dv_pack_enforces_the_full_posture() -> None:
@@ -26,6 +27,7 @@ def test_dv_pack_enforces_the_full_posture() -> None:
     assert policy.forbid_cloud_seam is True
     assert policy.require_local_targets is True
     assert policy.aggregate_export is True
+    assert policy.require_second_reviewer is True
 
 
 def test_hipaa_pack_requires_consent_and_no_cloud_but_not_dv_extras() -> None:
@@ -33,9 +35,10 @@ def test_hipaa_pack_requires_consent_and_no_cloud_but_not_dv_extras() -> None:
     assert policy.require_consent is True
     assert policy.forbid_cloud_seam is True
     # HIPAA's full invariant set is not specified here, so it does not claim the
-    # DV pack's local-target and aggregate rules.
+    # DV pack's local-target, aggregate, and two-person-review rules.
     assert policy.require_local_targets is False
     assert policy.aggregate_export is False
+    assert policy.require_second_reviewer is False
 
 
 def test_unknown_pack_raises_fail_closed() -> None:

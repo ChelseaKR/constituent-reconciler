@@ -91,11 +91,18 @@ def _build(name: str, out_dir: Path, *, live: bool) -> tuple[Connector, list[Any
     transports: dict[str, object] = {}
     calls: list[Any] = []
     if name == "civicrm":
-        # Per record: a lookup that finds nothing, then a create.
+        # Per record: Contact lookup/create, then Email/Phone lookup/create
+        # for whichever dedicated detail entities have values.
         responses: list[tuple[int, dict[str, object]]] = []
         if live:
-            for i, _ in enumerate(RECORDS, start=1):
+            for i, record in enumerate(RECORDS, start=1):
                 responses += [(200, {"values": []}), (200, {"values": [{"id": i}]})]
+                for field_name in ("email", "phone"):
+                    if record.fields.get(field_name):
+                        responses += [
+                            (200, {"values": []}),
+                            (200, {"values": [{"id": f"{i}-{field_name}"}]}),
+                        ]
         civicrm_fake = FakeCivicrmTransport(responses)
         transports["civicrm"] = civicrm_fake
         calls = civicrm_fake.calls

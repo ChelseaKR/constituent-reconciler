@@ -9,7 +9,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from constituent_reconciler.evaluate import EvalReport, ExtractionReport
+from constituent_reconciler.evaluate import (
+    KAPPA_GATE,
+    CalibrationReport,
+    EvalReport,
+    ExtractionReport,
+)
 from constituent_reconciler.models import IngestReport, RunResult
 from constituent_reconciler.quality import SourceQuality
 from constituent_reconciler.suppression import SUPPRESSED
@@ -137,7 +142,42 @@ def _ci(interval: tuple[float, float]) -> str:
     return f"[{_pct(low)}, {_pct(high)}]"
 
 
-def render_eval_markdown(report: EvalReport, *, dataset: str, gate_threshold: float = 0.0) -> str:
+def _calibration_lines(calibration: CalibrationReport | None) -> list[str]:
+    lines = [
+        "",
+        "## Calibration (LLM field judge)",
+        "",
+        "Cohen's kappa measures agreement between the extractor's confidence "
+        "verdicts and human field labels on a committed calibration fixture. "
+        "Kappa below 0.60 means confidence scores are not tracking accuracy "
+        "well enough to trust, so the gate fails.",
+        "",
+    ]
+    if calibration is None:
+        lines += [
+            "No calibration labels were supplied. The gate is fail-closed: "
+            "absent or unreadable labels count as a failure, not a skip.",
+            "",
+            f"Kappa gate at {KAPPA_GATE:.2f}: **FAIL** (no labels).",
+        ]
+    else:
+        gate_word = "PASS" if calibration.passed else "FAIL"
+        lines += [
+            f"Cohen's kappa: **{calibration.kappa:.2f}** over {calibration.n_labels} labels.",
+            "",
+            f"Kappa gate at {calibration.threshold:.2f}: **{gate_word}** "
+            f"(observed {calibration.kappa:.2f}).",
+        ]
+    return lines
+
+
+def render_eval_markdown(
+    report: EvalReport,
+    *,
+    dataset: str,
+    gate_threshold: float = 0.0,
+    calibration: CalibrationReport | None = None,
+) -> str:
     gate_pass = report.false_merge_rate <= gate_threshold
     gate_word = "PASS" if gate_pass else "FAIL"
 
@@ -186,6 +226,7 @@ def render_eval_markdown(report: EvalReport, *, dataset: str, gate_threshold: fl
         "auto+review coverage recall is the share of true duplicates the system "
         "surfaces to a human one way or another.",
     ]
+    lines += _calibration_lines(calibration)
     return "\n".join(lines) + "\n"
 
 

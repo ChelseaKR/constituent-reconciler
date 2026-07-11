@@ -166,15 +166,8 @@ class Record:
     source: str
     raw: dict[str, str]
     normalized: dict[str, str] = field(default_factory=dict)
-    consent_status: str = ""
     consent: Consent = field(default_factory=Consent)
     spans: dict[str, SourceSpan | TextSpan] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if self.consent_status and not self.consent.status:
-            object.__setattr__(self, "consent", Consent(status=self.consent_status))
-        elif self.consent.status and self.consent_status != self.consent.status:
-            object.__setattr__(self, "consent_status", self.consent.status)
 
     def has_consent(self, *, as_of: date | None = None) -> bool:
         """Whether this record's consent is currently active, unscoped.
