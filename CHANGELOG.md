@@ -7,6 +7,17 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Changed
+- **CiviCRM email and phone write through dedicated entities (R7)**
+  (`connectors/civicrm.py`). Email and phone move off the API v4 join-field
+  shorthand onto the dedicated Email and Phone entities: once the contact id
+  is resolved, the connector updates the contact's primary row when one exists
+  and creates it when none does. A record with no value for a field makes no
+  call for it, so an empty value never blanks a stored row, and
+  `Contact.create` returning no id now raises `ConnectorError` before any
+  entity write instead of reporting a created row without an id. Dry-run
+  payloads and the provenance hash input still carry email and phone. The
+  recorded end-to-end demo against a running CiviCRM stays open in
+  `docs/ROADMAP.md` v0.2.
 - **Record identity is content-derived and collision-safe (FIX-03)**
   (`pipeline.py`). Generated record ids are now a BLAKE2b digest of the source
   name and the mapped raw values (for example `N3f9a2c1b0d4`) instead of the
