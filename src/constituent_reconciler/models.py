@@ -225,6 +225,34 @@ class GoldenRecord:
 
 
 @dataclass(frozen=True)
+class SkippedFile:
+    """A file the ingest step saw but did not read, with the reason why."""
+
+    path: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class IngestReport:
+    """Accounting for everything ingestion saw: no row, page, or file is silent.
+
+    ``files_read`` and ``files_skipped`` together cover every path the ingest
+    step encountered, so an operator can answer "did the tool see all my
+    files?" without diffing directories. ``pages_extracted`` counts PDF pages
+    that yielded a record; ``pages_dropped`` counts pages that yielded no name
+    and were discarded. ``normalization_failures`` maps a canonical field name
+    to per-source counts of nonempty raw values that normalized to ``""``
+    (which the matcher treats as no evidence), e.g. an unparseable date.
+    """
+
+    files_read: tuple[str, ...] = ()
+    files_skipped: tuple[SkippedFile, ...] = ()
+    pages_extracted: int = 0
+    pages_dropped: int = 0
+    normalization_failures: dict[str, dict[str, int]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class RunResult:
     """The full output of a pipeline run, before any file is written."""
 
@@ -232,6 +260,7 @@ class RunResult:
     pairs: tuple[Pair, ...]
     clusters: tuple[Cluster, ...]
     golden: tuple[GoldenRecord, ...]
+    ingest: IngestReport = field(default_factory=IngestReport)
 
     @property
     def auto_pairs(self) -> tuple[Pair, ...]:

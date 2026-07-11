@@ -30,6 +30,7 @@ from constituent_reconciler.evaluate import (
     evaluate,
     extraction_metrics,
 )
+from constituent_reconciler.models import RunResult
 from constituent_reconciler.narrative import LANGUAGES, render_narrative
 from constituent_reconciler.pipeline import ExportSummary
 from constituent_reconciler.policy import PolicyViolation
@@ -39,6 +40,7 @@ from constituent_reconciler.report import (
     render_extraction_markdown,
     render_run_summary,
 )
+from constituent_reconciler.schema import REPORT_SCHEMA_VERSION
 from constituent_reconciler.suppression import render_comparable, render_summary
 
 
@@ -103,6 +105,25 @@ def _print_export(recipe: Recipe, summary: ExportSummary, *, dry_run: bool) -> N
         print(render_comparable(summary.comparable))
 
 
+def _write_run_report(result: RunResult, out_dir: Path) -> Path:
+    ingest = result.ingest
+    path = out_dir / "run_report.json"
+    payload = {
+        "schema_version": REPORT_SCHEMA_VERSION,
+        "ingest": {
+            "files_read": list(ingest.files_read),
+            "files_skipped": [
+                {"path": skipped.path, "reason": skipped.reason} for skipped in ingest.files_skipped
+            ],
+            "pages_extracted": ingest.pages_extracted,
+            "pages_dropped": ingest.pages_dropped,
+            "normalization_failures": ingest.normalization_failures,
+        },
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     try:
         recipe = load_recipe(args.config, policy_pack=args.policy_pack, tsa_url=args.tsa_url)
@@ -113,7 +134,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
     _, withheld = partition_by_consent(result.golden, require_consent=recipe.require_consent)
     print(render_run_summary(result, withheld=len(withheld)))
     try:
-        summary = pipeline.export(result, recipe, out_dir=Path(args.out), dry_run=args.dry_run)
+        out_dir = Path(args.out)
+        summary = pipeline.export(result, recipe, out_dir=out_dir, dry_run=args.dry_run)
     except PolicyViolation as error:
         print(f"\npolicy error: {error}", file=sys.stderr)
         return 2
@@ -121,6 +143,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print(f"\nconnector error: {error}", file=sys.stderr)
         return 2
     _print_export(recipe, summary, dry_run=args.dry_run)
+    if not args.dry_run:
+        print(f"  run report:   {_write_run_report(result, out_dir)}")
     return 0
 
 
