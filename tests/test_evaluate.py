@@ -8,6 +8,7 @@ import pytest
 from constituent_reconciler.decisions import band_pairs
 from constituent_reconciler.evaluate import (
     ExtractionReport,
+    calibrate,
     cohen_kappa,
     evaluate,
     extraction_metrics,
@@ -16,6 +17,13 @@ from constituent_reconciler.evaluate import (
     wilson_interval,
 )
 from constituent_reconciler.extract.base import ExtractedField
+
+
+def _labels(pairs: list[tuple[bool, bool]]) -> list[dict[str, object]]:
+    return [
+        {"record_id": f"R{i:03d}", "field": "email", "predicted": p, "actual": a}
+        for i, (p, a) in enumerate(pairs)
+    ]
 
 
 def test_wilson_zero_successes() -> None:
@@ -71,6 +79,42 @@ def test_cohen_kappa_length_mismatch_raises() -> None:
 def test_cohen_kappa_empty_raises() -> None:
     with pytest.raises(ValueError):
         cohen_kappa([], [])
+
+
+def test_calibrate_passes_above_gate() -> None:
+    # 9 true agreements, 9 false agreements, 2 disagreements: kappa = 0.80.
+    pairs = [(True, True)] * 9 + [(False, False)] * 9 + [(True, False), (False, True)]
+    report = calibrate(_labels(pairs))
+    assert report.n_labels == 20
+    assert report.kappa == pytest.approx(0.80)
+    assert report.threshold == pytest.approx(0.60)
+    assert report.passed
+
+
+def test_calibrate_fails_below_gate() -> None:
+    # 6 true agreements, 6 false agreements, 8 disagreements: kappa = 0.20.
+    pairs = [(True, True)] * 6 + [(False, False)] * 6 + [(True, False), (False, True)] * 4
+    report = calibrate(_labels(pairs))
+    assert report.kappa == pytest.approx(0.20)
+    assert not report.passed
+
+
+def test_calibrate_boundary_kappa_at_gate_passes() -> None:
+    # 8 true agreements, 8 false agreements, 4 disagreements: kappa = 0.60 exactly.
+    pairs = [(True, True)] * 8 + [(False, False)] * 8 + [(True, False), (False, True)] * 2
+    report = calibrate(_labels(pairs))
+    assert report.kappa == pytest.approx(0.60)
+    assert report.passed
+
+
+def test_calibrate_empty_labels_raises() -> None:
+    with pytest.raises(ValueError):
+        calibrate([])
+
+
+def test_calibrate_malformed_label_raises() -> None:
+    with pytest.raises(ValueError):
+        calibrate([{"record_id": "R001", "field": "email", "predicted": "yes", "actual": True}])
 
 
 def test_evaluate_counts_false_merge_and_coverage() -> None:
