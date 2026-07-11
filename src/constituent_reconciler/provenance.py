@@ -31,7 +31,7 @@ import secrets
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
@@ -371,6 +371,8 @@ class ProvenanceLog:
         consent: bool,
         payload: dict[str, str],
         external_id: str | None = None,
+        field_sources: Mapping[str, str] | None = None,
+        fill_policy: str = "",
     ) -> dict[str, object]:
         return self._append(
             action=action,
@@ -379,6 +381,8 @@ class ProvenanceLog:
             consent=consent,
             digest=content_hash(payload),
             external_id=external_id,
+            field_sources=field_sources,
+            fill_policy=fill_policy,
         )
 
     def append_run_start(self, manifest_hash: str) -> dict[str, object]:
@@ -397,6 +401,8 @@ class ProvenanceLog:
             consent=None,
             digest=manifest_hash,
             external_id=None,
+            field_sources=None,
+            fill_policy="",
         )
 
     def _append(
@@ -408,6 +414,8 @@ class ProvenanceLog:
         consent: bool | None,
         digest: str,
         external_id: str | None,
+        field_sources: Mapping[str, str] | None,
+        fill_policy: str,
     ) -> dict[str, object]:
         entry: dict[str, object] = {
             "seq": self._seq,
@@ -418,6 +426,10 @@ class ProvenanceLog:
             "members": list(members),
             "consent": consent,
             "external_id": external_id,
+            # Field-level lineage: canonical field name -> the member record id
+            # that supplied the written value. Ids only, never field values.
+            "field_sources": dict(field_sources or {}),
+            "fill_policy": fill_policy,
             "content_hash": digest,
             "prev_hash": self._prev_hash,
         }

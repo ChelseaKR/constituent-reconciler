@@ -30,6 +30,7 @@ def _golden(cluster_id: str, members: tuple[str, ...], consent: bool) -> GoldenR
         cluster_id=cluster_id,
         members=members,
         fields={},
+        field_sources={},
         primary=members[0],
         consent=Consent(status="granted") if consent else Consent(),
     )

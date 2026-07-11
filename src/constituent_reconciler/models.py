@@ -206,10 +206,12 @@ class Cluster:
 class GoldenRecord:
     """The single merged record a cluster resolves to.
 
-    ``fields`` are the surviving canonical values, ``primary`` is the record id
-    chosen as the survivor, and ``consent`` is the survivor's ``Consent``
-    lifecycle, carried through unevaluated. The export gate
-    (``consent.partition_by_consent``) is what turns this into a granted or
+    ``fields`` are the surviving canonical values. ``field_sources`` is the
+    field-level lineage: for each non-empty merged field, the id of the member
+    record that supplied its value (fields that merged to empty have no entry).
+    ``primary`` is the record id chosen as the survivor, and ``consent`` is the
+    survivor's ``Consent`` lifecycle, carried through unevaluated. The export
+    gate (``consent.partition_by_consent``) is what turns this into a granted or
     withheld decision, because only it knows the actual write destination and
     the run's ``as_of`` date; a golden record on its own does not decide.
     """
@@ -218,6 +220,7 @@ class GoldenRecord:
     members: tuple[str, ...]
     fields: dict[str, str]
     primary: str
+    field_sources: dict[str, str] = field(default_factory=dict)
     consent: Consent = field(default_factory=Consent)
 
 

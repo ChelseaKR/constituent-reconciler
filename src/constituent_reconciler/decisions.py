@@ -13,6 +13,14 @@ from collections.abc import Iterable, Mapping
 from constituent_reconciler import defaults
 from constituent_reconciler.models import Band, Cluster, GoldenRecord, Pair, Record
 
+# Survivorship fill policies golden_records() understands. The policy names how
+# empty survivor fields are completed from the rest of the cluster. Only one is
+# implemented today; "most-recent-wins" is reserved for when records carry a
+# usable date. An unknown name raises, fail-closed, so a typo in a recipe can
+# never silently fall back to a different merge behavior.
+DEFAULT_FILL_POLICY = "survivor-then-lowest-id"
+FILL_POLICIES: tuple[str, ...] = (DEFAULT_FILL_POLICY,)
+
 
 def band_pairs(
     scored: Iterable[tuple[str, str, float]],
@@ -120,35 +128,52 @@ def golden_records(
     clusters: Iterable[Cluster],
     records: Mapping[str, Record],
     fields: tuple[str, ...],
+    *,
+    fill_policy: str = DEFAULT_FILL_POLICY,
 ) -> list[GoldenRecord]:
     """Reduce each cluster to one merged record.
 
-    The survivor supplies the identity. Empty survivor fields are filled from
-    other members of the cluster (most-recent-wins is left to a later version;
-    v0.1 fills blanks deterministically by member id order). Consent on the
-    merged record is the survivor's ``Consent`` lifecycle, carried through
-    unevaluated -- the export gate decides granted-or-withheld later, once it
-    knows the write destination and the run's date.
+    The survivor supplies the identity. ``fill_policy`` names how empty survivor
+    fields are completed: under ``"survivor-then-lowest-id"`` (the only policy
+    implemented; ``"most-recent-wins"`` is reserved for when records carry a
+    date) blanks are filled deterministically from the other members in
+    ascending id order. An unknown policy name raises ValueError, fail-closed.
+    Each non-empty merged field records the member that supplied its value in
+    ``field_sources``. Consent on the merged record is the survivor's
+    ``Consent`` lifecycle, carried through unevaluated -- the export gate decides
+    granted-or-withheld later, once it knows the write destination and run date.
     """
 
+    if fill_policy not in FILL_POLICIES:
+        raise ValueError(
+            f"unknown fill policy {fill_policy!r}; supported: {', '.join(FILL_POLICIES)}"
+        )
     out: list[GoldenRecord] = []
     for cluster in clusters:
         primary = _choose_primary(cluster.members, records)
         merged: dict[str, str] = {}
+        field_sources: dict[str, str] = {}
         for field_name in fields:
             value = records[primary].normalized.get(field_name, "")
+            source = primary
             if not value:
+                # cluster.members is sorted, so this is the lowest-id member
+                # that carries a value: the "survivor-then-lowest-id" policy.
                 for member in cluster.members:
                     candidate = records[member].normalized.get(field_name, "")
                     if candidate:
                         value = candidate
+                        source = member
                         break
             merged[field_name] = value
+            if value:
+                field_sources[field_name] = source
         out.append(
             GoldenRecord(
                 cluster_id=cluster.cluster_id,
                 members=cluster.members,
                 fields=merged,
+                field_sources=field_sources,
                 primary=primary,
                 consent=records[primary].consent,
             )
