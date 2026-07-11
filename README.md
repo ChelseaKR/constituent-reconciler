@@ -254,7 +254,9 @@ reconcile report --run-dir out-dv --lang es --out out-dv/narrative-es.md
 
 Omit `--out` to print to stdout. The command reads `run_summary.json` (counts
 the run writes next to the review queue) and, when the policy pack produced
-one, `aggregate_summary.json`.
+one, `aggregate_summary.json`. The Spanish strings are a machine-drafted
+translation awaiting review by a native speaker; treat the English page as
+authoritative until then.
 
 ### Reading from PDFs
 
