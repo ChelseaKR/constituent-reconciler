@@ -381,6 +381,10 @@ def _write_csv(path: Path, rows: list[dict[str, str]]) -> None:
         writer.writerows(rows)
 
 
+def _namespaced_clusters(clusters: list[list[str]]) -> list[list[str]]:
+    return [[f"existing:{left}", f"incoming:{right}"] for left, right in clusters]
+
+
 def write_corpus(corpus: Corpus, out_dir: Path, *, seed: int, total_records: int) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     _write_csv(out_dir / "existing.csv", corpus.existing_rows)
@@ -393,9 +397,10 @@ def write_corpus(corpus: Corpus, out_dir: Path, *, seed: int, total_records: int
             "personal data. Each cluster is a planted duplicate pair; decoy "
             "pairs (same name, different date of birth) are recorded in "
             "labels.json with kind='decoy' and are deliberately NOT here, "
-            "the way the demo fixture's look-alike Marias are not."
+            "the way the demo fixture's look-alike Marias are not. Record ids "
+            "in this file are namespaced by source to match pipeline ingestion."
         ),
-        "clusters": corpus.clusters,
+        "clusters": _namespaced_clusters(corpus.clusters),
     }
     (out_dir / "ground_truth.json").write_text(
         json.dumps(ground_truth, indent=2) + "\n", encoding="utf-8"

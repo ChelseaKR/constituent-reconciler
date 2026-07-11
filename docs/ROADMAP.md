@@ -60,9 +60,14 @@ The smallest version that ships the differentiator.
   seam a production deployment plugs in.
 * The consent gate runs before any connector is touched, so non-consented
   records are withheld and never handed to a destination.
+* Email and phone now write through the dedicated CiviCRM Email and Phone
+  entities rather than the API v4 join-field shorthand (added 2026-07-02): once
+  the contact id is resolved, the connector updates the contact's primary
+  Email/Phone row when one exists and creates it when none does. A record with
+  no value for a field makes no call for it, so an empty value never blanks a
+  stored row.
 * Still open: a recorded demo of messy input landing in a running CiviCRM
-  instance, and email and phone written through dedicated CiviCRM entities
-  rather than the API v4 join-field shorthand.
+  instance.
 
 ## v0.3.0 — The extraction seam (shipped)
 

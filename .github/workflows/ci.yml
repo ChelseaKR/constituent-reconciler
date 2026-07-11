@@ -228,5 +228,9 @@ jobs:
         run: |
           make install
           uv pip install --python .venv/bin/python postal
+      # --no-cov overrides the repo-wide --cov-fail-under=84 from addopts: this
+      # job runs a narrow `-k libpostal` subset, so whole-package coverage is
+      # never going to clear 84% here and the gate is meaningless noise on top
+      # of the actual libpostal-path assertions this job exists to run.
       - name: Run libpostal-path tests
-        run: .venv/bin/python -m pytest -k libpostal
+        run: .venv/bin/python -m pytest -k libpostal --no-cov

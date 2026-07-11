@@ -26,6 +26,10 @@ CONNECTOR_INTERFACE_VERSION = 1
 # boolean; version-1 logs still verify unchanged.
 REPORT_SCHEMA_VERSION = 2
 
+# The decisions.json shape: approved/rejected lists of [left, right] record-id
+# pairs, written by the review session and consumed by ``reconcile apply``.
+DECISIONS_SCHEMA_VERSION = 1
+
 
 def versions() -> dict[str, int]:
     """Return the declared schema versions as a mapping."""
@@ -34,4 +38,5 @@ def versions() -> dict[str, int]:
         "config_schema": CONFIG_SCHEMA_VERSION,
         "connector_interface": CONNECTOR_INTERFACE_VERSION,
         "report_schema": REPORT_SCHEMA_VERSION,
+        "decisions_schema": DECISIONS_SCHEMA_VERSION,
     }

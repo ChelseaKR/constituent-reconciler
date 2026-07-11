@@ -137,7 +137,19 @@ The pack sets the privacy posture for the whole run.
 If you are unsure whether your program falls under survivor-confidentiality rules,
 treat that as a question for your counsel before the pilot, not after.
 
-## Step 4: Dry-run, then read the review queue
+## Step 4: Validate, dry-run, then read the review queue
+
+Before the first real run, check the recipe's shape without resolving anything:
+
+```sh
+reconcile validate --config recipe.toml
+```
+
+It loads the recipe, rejects an unknown section or a misspelled key by name
+(a typo'd `[consnet]` or `auto_threshold` used to run quietly at a default
+instead of raising), checks that `incoming` and `existing` point at files that
+exist, and prints the active policy pack, thresholds, and switches so you can
+eyeball them before anything runs.
 
 Run the pipeline without writing anything:
 

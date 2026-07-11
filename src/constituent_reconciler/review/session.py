@@ -13,12 +13,15 @@ pack requires of any artifact the review step produces.
 from __future__ import annotations
 
 import json
+import secrets
+import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from constituent_reconciler import decisions
 from constituent_reconciler.models import Band, Cluster, Pair, Record, RunResult
+from constituent_reconciler.schema import DECISIONS_SCHEMA_VERSION
 
 APPROVED = "approved"
 REJECTED = "rejected"
@@ -283,6 +286,11 @@ class ReviewSession:
         self._fields = fields
         self._decisions_path = decisions_path
         self.privacy_mode = privacy_mode
+        # A per-run secret embedded in every rendered form and checked on every
+        # POST (FIX-01), so a page the reviewer has open elsewhere cannot forge
+        # a verdict against this server: it cannot know a token it never saw.
+        # Regenerated each time a session is constructed, never persisted.
+        self.token = secrets.token_urlsafe(24)
         # The same ordering the review_queue.csv uses, so the two surfaces agree.
         self._pairs: tuple[Pair, ...] = tuple(
             sorted(result.review_pairs, key=lambda p: (-p.probability, p.left, p.right))
@@ -300,7 +308,8 @@ class ReviewSession:
 
         Decisions are keyed by the unordered pair of record ids, so a resumed
         verdict re-attaches to the same candidate even if the pair ordering
-        differs. Unknown pairs in the file are ignored rather than raising.
+        differs. Unknown pairs in the file are reported and skipped; a stale
+        decision should not fail a review session, but it should be visible.
         """
 
         if not self._decisions_path.exists():
@@ -318,6 +327,12 @@ class ReviewSession:
                 index = index_of.get(pair_key)
                 if index is not None:
                     self._verdicts[index] = verdict
+                else:
+                    print(
+                        f"decision pair {str(entry[0])!r}, {str(entry[1])!r} "
+                        "is not in this run's review queue",
+                        file=sys.stderr,
+                    )
 
     # -- read access ---------------------------------------------------------
 
@@ -561,7 +576,7 @@ class ReviewSession:
         if self._verdicts.pop(index, None) is not None:
             self.save()
 
-    def to_decisions(self) -> dict[str, list[list[str]]]:
+    def to_decisions(self) -> dict[str, object]:
         """The decisions payload in the shape ``reconcile apply`` consumes.
 
         Record ids and verdicts only; no field value is included, so the artifact
@@ -574,7 +589,11 @@ class ReviewSession:
             pair = self._pairs[index]
             bucket = approved if verdict == APPROVED else rejected
             bucket.append([pair.left, pair.right])
-        return {"approved": approved, "rejected": rejected}
+        return {
+            "decisions_schema": DECISIONS_SCHEMA_VERSION,
+            "approved": approved,
+            "rejected": rejected,
+        }
 
     def save(self) -> None:
         self._decisions_path.parent.mkdir(parents=True, exist_ok=True)
