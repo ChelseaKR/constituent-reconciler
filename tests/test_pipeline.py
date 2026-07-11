@@ -6,22 +6,24 @@ from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
 
+import pytest
+
 from constituent_reconciler import pipeline
-from constituent_reconciler.config import HouseholdConfig, OutputConfig, load_recipe
+from constituent_reconciler.config import HouseholdConfig, OutputConfig, Recipe, load_recipe
 from constituent_reconciler.consent import partition_by_consent
 from constituent_reconciler.evaluate import evaluate
-from constituent_reconciler.models import Consent, GoldenRecord
+from constituent_reconciler.models import Consent, GoldenRecord, Record
 from constituent_reconciler.provenance import verify_log
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "intake-demo"
 
 EXPECTED_AUTO = {
-    frozenset(("E003", "N002")),
-    frozenset(("E005", "N006")),
-    frozenset(("E007", "N005")),
-    frozenset(("E010", "N008")),
-    frozenset(("E012", "N010")),
-    frozenset(("N003", "N011")),
+    frozenset(("existing:E003", "incoming:N002")),
+    frozenset(("existing:E005", "incoming:N006")),
+    frozenset(("existing:E007", "incoming:N005")),
+    frozenset(("existing:E010", "incoming:N008")),
+    frozenset(("existing:E012", "incoming:N010")),
+    frozenset(("incoming:N003", "incoming:N011")),
 }
 
 
@@ -33,8 +35,8 @@ def test_pipeline_auto_merges_and_routes_lookalikes_to_review() -> None:
     assert auto == EXPECTED_AUTO
     # A real duplicate with a DOB typo, and a genuine non-duplicate with the same
     # name, both land in review rather than being auto-merged.
-    assert frozenset(("E002", "N004")) in review
-    assert frozenset(("E008", "N007")) in review
+    assert frozenset(("existing:E002", "incoming:N004")) in review
+    assert frozenset(("existing:E008", "incoming:N007")) in review
 
 
 def test_pipeline_eval_gate_is_clean_on_fixtures() -> None:
@@ -58,18 +60,18 @@ def test_dv_policy_pack_withholds_revoked_record() -> None:
     result = pipeline.run(recipe)
     _, withheld = partition_by_consent(result.golden, require_consent=recipe.require_consent)
     withheld_members = {member for entry in withheld for member in entry.members}
-    assert "N009" in withheld_members
+    assert "incoming:N009" in withheld_members
     by_members = {entry.members: entry for entry in withheld}
-    n009 = next(entry for members, entry in by_members.items() if "N009" in members)
+    n009 = next(entry for members, entry in by_members.items() if "incoming:N009" in members)
     assert n009.reason == "revoked"
 
 
 def test_apply_approved_review_pair_merges_cluster() -> None:
     recipe = load_recipe(EXAMPLES / "recipe.toml")
     base = pipeline.run(recipe)
-    applied = pipeline.run(recipe, force_auto=[frozenset(("E002", "N004"))])
+    applied = pipeline.run(recipe, force_auto=[frozenset(("existing:E002", "incoming:N004"))])
     assert len(applied.clusters) == len(base.clusters) - 1
-    merged = [c for c in applied.clusters if set(c.members) == {"E002", "N004"}]
+    merged = [c for c in applied.clusters if set(c.members) == {"existing:E002", "incoming:N004"}]
     assert merged
 
 
@@ -310,6 +312,56 @@ def test_export_via_salesforce_creates_and_logs_provenance(tmp_path: Path) -> No
         del os.environ["SF_TOKEN"]
 
 
+def test_recipe_provenance_section_sets_tsa_url_and_flag_overrides(tmp_path: Path) -> None:
+    recipe_path = tmp_path / "recipe.toml"
+    recipe_path.write_text(
+        '[input]\nincoming = "in.csv"\n\n'
+        '[mapping]\nfirst_name = "first"\nlast_name = "last"\n\n'
+        '[provenance]\ntsa_url = "https://tsa.example/tsr"\n',
+        encoding="utf-8",
+    )
+    assert load_recipe(recipe_path).tsa_url == "https://tsa.example/tsr"
+    # The --tsa-url flag overrides the recipe, same pattern as --policy-pack.
+    overridden = load_recipe(recipe_path, tsa_url="https://other.example/tsr")
+    assert overridden.tsa_url == "https://other.example/tsr"
+    # A recipe with no [provenance] section keeps the local-clock default.
+    assert load_recipe(EXAMPLES / "recipe.toml").tsa_url == ""
+
+
+class _RecordedAuthority:
+    name = "rfc3161:test"
+
+    def __init__(self) -> None:
+        self.stamped: list[str] = []
+
+    def stamp(self, digest: str) -> str:
+        self.stamped.append(digest)
+        return "2026-01-01T00:00:00+00:00"
+
+
+def test_export_constructs_rfc3161_authority_from_tsa_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    built: list[str] = []
+    stamper = _RecordedAuthority()
+
+    def _fake_authority(url: str) -> _RecordedAuthority:
+        built.append(url)
+        return stamper
+
+    monkeypatch.setattr(pipeline, "Rfc3161Authority", _fake_authority)
+    recipe = replace(load_recipe(EXAMPLES / "recipe.toml"), tsa_url="https://tsa.example/tsr")
+    result = pipeline.run(recipe)
+    summary = pipeline.export(result, recipe, out_dir=tmp_path)
+    assert built == ["https://tsa.example/tsr"]
+    assert len(stamper.stamped) == summary.logged == 21
+    assert summary.provenance_path is not None
+    first = json.loads(summary.provenance_path.read_text(encoding="utf-8").splitlines()[0])
+    assert first["authority"] == "rfc3161:test"
+    ok, _ = verify_log(summary.provenance_path)
+    assert ok
+
+
 def test_export_via_civicrm_creates_and_logs_provenance(tmp_path: Path) -> None:
     import os
 
@@ -382,3 +434,86 @@ def test_expired_consent_is_withheld_end_to_end(tmp_path: Path) -> None:
     resolved_text = (tmp_path / "out" / "resolved.csv").read_text(encoding="utf-8")
     assert "X2" in resolved_text
     assert "X1" not in resolved_text
+
+
+# -- record identity ----------------------------------------------------------
+
+_ID_MAPPING = {"first_name": "First Name", "last_name": "Last Name"}
+
+
+def _read_for_ids(path: Path, *, id_column: str | None = None) -> list[Record]:
+    return pipeline.read_records(
+        path,
+        "incoming",
+        mapping=_ID_MAPPING,
+        id_column=id_column,
+        consent_column=None,
+        id_prefix="N",
+    )
+
+
+def test_inserting_a_row_leaves_other_generated_ids_unchanged(tmp_path: Path) -> None:
+    # The failure this guards against: a row inserted into a CSV between
+    # `reconcile review` and `reconcile apply` must not re-bind recorded
+    # verdicts to different people. Ids derive from content, not position.
+    before = tmp_path / "before.csv"
+    before.write_text("First Name,Last Name\nAda,Lovelace\nGrace,Hopper\n", encoding="utf-8")
+    after = tmp_path / "after.csv"
+    after.write_text(
+        "First Name,Last Name\nAda,Lovelace\nNew,Person\nGrace,Hopper\n",
+        encoding="utf-8",
+    )
+    ids_before = {r.raw["first_name"]: r.unique_id for r in _read_for_ids(before)}
+    ids_after = {r.raw["first_name"]: r.unique_id for r in _read_for_ids(after)}
+    assert ids_after["Ada"] == ids_before["Ada"]
+    assert ids_after["Grace"] == ids_before["Grace"]
+    assert ids_after["New"] not in ids_before.values()
+
+
+def test_exact_duplicate_rows_get_distinct_deterministic_ids(tmp_path: Path) -> None:
+    path = tmp_path / "dupes.csv"
+    path.write_text(
+        "First Name,Last Name\nAda,Lovelace\nAda,Lovelace\nAda,Lovelace\n",
+        encoding="utf-8",
+    )
+    first = [r.unique_id for r in _read_for_ids(path)]
+    second = [r.unique_id for r in _read_for_ids(path)]
+    assert len(set(first)) == 3
+    assert first == second
+    assert first[1] == f"{first[0]}-2"
+    assert first[2] == f"{first[0]}-3"
+
+
+def _identity_recipe(tmp_path: Path) -> Recipe:
+    return Recipe(
+        incoming=tmp_path / "incoming.csv",
+        existing=tmp_path / "existing.csv",
+        mapping=_ID_MAPPING,
+        id_column="id",
+        fields=("first_name", "last_name"),
+    )
+
+
+def test_duplicate_user_supplied_ids_within_one_source_raise(tmp_path: Path) -> None:
+    (tmp_path / "existing.csv").write_text(
+        "id,First Name,Last Name\nX001,Ada,Lovelace\nX001,Grace,Hopper\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "incoming.csv").write_text(
+        "id,First Name,Last Name\nY001,Jean,Bartik\n", encoding="utf-8"
+    )
+    with pytest.raises(pipeline.DuplicateIdError, match="existing:X001"):
+        pipeline.run(_identity_recipe(tmp_path))
+
+
+def test_identical_ids_across_sources_do_not_collide(tmp_path: Path) -> None:
+    # The same id column value in both files used to overwrite one record with
+    # the other in the run's record map. Namespacing keeps both.
+    (tmp_path / "existing.csv").write_text(
+        "id,First Name,Last Name\nX001,Ada,Lovelace\n", encoding="utf-8"
+    )
+    (tmp_path / "incoming.csv").write_text(
+        "id,First Name,Last Name\nX001,Grace,Hopper\n", encoding="utf-8"
+    )
+    result = pipeline.run(_identity_recipe(tmp_path))
+    assert set(result.records) == {"existing:X001", "incoming:X001"}

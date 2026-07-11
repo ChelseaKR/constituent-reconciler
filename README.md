@@ -153,6 +153,18 @@ pip install -e ".[extract]"
 a registry install. See [docs/ROADMAP.md](docs/ROADMAP.md) for the Trusted
 Publishing plan.)
 
+Before pointing the tool at your own data, check a recipe's shape without
+resolving anything:
+
+```sh
+reconcile validate --config recipe.toml
+```
+
+An unknown section or a misspelled key (a typo'd `[consnet]`, an `auto_threshold`
+that should be `auto`) is rejected by name instead of silently running at a
+default; `reconcile validate` also checks that the input files it points at
+exist and prints the active policy pack and switches.
+
 Run the bundled demo, which resolves an incoming intake batch against an existing
 record set:
 
@@ -183,22 +195,30 @@ source spans, and approves the merge or rejects it, with no jargon and no
 spreadsheet:
 
 ```sh
-reconcile review --config examples/intake-demo/recipe.toml --out out
+reconcile review --config examples/intake-demo/recipe.toml --reviewer "your name" --out out
 ```
 
 It runs the pipeline, starts a server on `http://127.0.0.1:8765/`, and opens a
-browser. Each decision is saved as you go to `out/decisions.json`, so you can stop
-and resume. When you are done, apply the decisions:
+browser. Each decision is saved as you go to `out/decisions.json`, attributed to
+the `--reviewer` name with a timestamp, so you can stop and resume and so who
+decided each pair is answerable later. When you are done, apply the decisions:
 
 ```sh
 reconcile apply --config examples/intake-demo/recipe.toml --decisions out/decisions.json --out out
 ```
 
+With `--require-second-reviewer` (on by default under the `dv` policy pack) a
+merge takes effect only after two different reviewers approve the same pair: the
+first approval is held as awaiting a second reviewer, a second reviewer resumes
+the same decisions file under their own `--reviewer` name to confirm or reject,
+and `reconcile apply` refuses a file that still holds half-approved pairs. Any
+rejection keeps the records separate immediately.
+
 The server is offline by construction: it binds the loopback interface only,
 loads no external asset, and writes no field value to disk (the decisions file
-carries record ids and verdicts only). Under the `dv` policy pack it refuses any
-non-loopback bind, fail-closed, so the review surface cannot become an egress
-path for client information. The pages are built for WCAG 2.2 AA: a real
+carries record ids, verdicts, reviewer names, and timestamps only). Under the
+`dv` policy pack it refuses any non-loopback bind, fail-closed, so the review
+surface cannot become an egress path for client information. The pages are built for WCAG 2.2 AA: a real
 comparison table, status shown by text and not colour alone, and decision buttons
 that work with the keyboard and with no JavaScript (`A` approve, `R` reject, `J`
 and `K` to move between pairs). Pass `--no-browser` to skip opening a window, or

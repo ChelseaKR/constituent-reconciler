@@ -137,7 +137,19 @@ The pack sets the privacy posture for the whole run.
 If you are unsure whether your program falls under survivor-confidentiality rules,
 treat that as a question for your counsel before the pilot, not after.
 
-## Step 4: Dry-run, then read the review queue
+## Step 4: Validate, dry-run, then read the review queue
+
+Before the first real run, check the recipe's shape without resolving anything:
+
+```sh
+reconcile validate --config recipe.toml
+```
+
+It loads the recipe, rejects an unknown section or a misspelled key by name
+(a typo'd `[consnet]` or `auto_threshold` used to run quietly at a default
+instead of raising), checks that `incoming` and `existing` point at files that
+exist, and prints the active policy pack, thresholds, and switches so you can
+eyeball them before anything runs.
 
 Run the pipeline without writing anything:
 
@@ -154,15 +166,18 @@ look at.
 Open the queue in a browser:
 
 ```sh
-reconcile review --config recipe.toml --out out
+reconcile review --config recipe.toml --reviewer "your name" --out out
 ```
 
 Each uncertain pair shows the two records side by side, with a plain-language line
 that says what they agree on, what they differ on, and what could not be compared
 because a field was blank. A colleague decides approve or reject with the keyboard
-or the mouse, and the decisions save as they go. The server stays on your machine
-and writes no field value to disk. Under the DV pack it refuses any non-loopback
-bind, so the review surface cannot become a way for client data to leave.
+or the mouse, and the decisions save as they go, each attributed to the
+`--reviewer` name. The server stays on your machine and writes no field value to
+disk. Under the DV pack it refuses any non-loopback bind, so the review surface
+cannot become a way for client data to leave, and two-person review is on: a
+merge only takes effect after a second reviewer, under their own name, also
+approves it.
 
 Carry the decisions back in:
 
