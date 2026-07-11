@@ -513,6 +513,36 @@ def _write_comparable_report(report: ComparableReport, out_dir: Path) -> Path:
     return report_path
 
 
+def _write_run_summary(
+    result: RunResult,
+    recipe: Recipe,
+    withheld: Sequence[consent.Withheld],
+    out_dir: Path,
+) -> Path:
+    """Write a count-only summary that can feed the narrative report."""
+
+    import json
+
+    from constituent_reconciler.schema import REPORT_SCHEMA_VERSION
+
+    summary_path = out_dir / "run_summary.json"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": REPORT_SCHEMA_VERSION,
+        "policy_pack": recipe.policy_pack,
+        "consent_required": recipe.require_consent,
+        "records_in": len(result.records),
+        "candidate_pairs": len(result.pairs),
+        "auto_merged_pairs": len(result.auto_pairs),
+        "review_pairs": len(result.review_pairs),
+        "resolved_records": len(result.golden),
+        "merged_records": sum(max(len(record.members) - 1, 0) for record in result.golden),
+        "withheld_no_consent": len(withheld),
+    }
+    summary_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return summary_path
+
+
 def _write_household_suggestions(
     suggestions: Sequence[household.HouseholdSuggestion],
     confirmed: frozenset[str],
@@ -749,6 +779,8 @@ def export(
         )
         if not dry_run:
             aggregate_path = _write_aggregate_summary(aggregate, out_dir)
+    if not dry_run:
+        _write_run_summary(result, recipe, withheld, out_dir)
 
     comparable, comparable_path = _maybe_export_comparable(
         recipe, exportable, out_dir=out_dir, dry_run=dry_run

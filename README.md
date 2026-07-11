@@ -237,6 +237,27 @@ human at the auto or review level. The gated metric is the false-merge rate
 because a wrong merge is the expensive, sometimes irreversible error; a missed
 match only leaves a duplicate.
 
+### A one-page summary for a board or funder
+
+`reconcile report` renders the artifacts of a completed run as a one-page,
+plain-language Markdown summary an executive director can hand to a board:
+what came in, what merged automatically, what a person reviewed, and what was
+withheld and why. The page carries counts only, with small groups suppressed
+the same way `aggregate_summary.json` suppresses them; no name or record
+identifier appears. English and Spanish render from the same data:
+
+```sh
+reconcile run --config examples/intake-demo/recipe-dv.toml --out out-dv
+reconcile report --run-dir out-dv --lang en --out out-dv/narrative-en.md
+reconcile report --run-dir out-dv --lang es --out out-dv/narrative-es.md
+```
+
+Omit `--out` to print to stdout. The command reads `run_summary.json` (counts
+the run writes next to the review queue) and, when the policy pack produced
+one, `aggregate_summary.json`. The Spanish strings are a machine-drafted
+translation awaiting review by a native speaker; treat the English page as
+authoritative until then.
+
 ### Reading from PDFs
 
 With the `extract` extra installed, point the recipe's `incoming` at a folder
