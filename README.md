@@ -113,6 +113,28 @@ citations and the honest scope of each claim in
 This is a reference implementation, not legal advice. An organization adopting it
 needs its own review against its own obligations.
 
+### The comparable-database export profile
+
+A provider that keeps clients out of HMIS still owes its funders CoC-shaped
+aggregate reporting from its comparable database. One command emits exactly
+that and nothing else — no CRM write, no resolved records on disk:
+
+```sh
+reconcile export-comparable --config examples/intake-demo/recipe-dv.toml --out out-dv
+```
+
+It writes `comparable_report.json` (profile `coc-comparable`): a report-period
+label, a generated-at timestamp, the suppression threshold applied, and
+suppressed category counts. Every breakdown passes through the same CMS-style
+small-cell suppression as `aggregate_summary.json` (counts of 1-10 suppressed,
+complementary suppression within each breakdown, true zeros preserved), and no
+record id, member list, or field value appears in the file. A recipe can opt
+into extra breakdowns over non-identifying categorical fields, and into writing
+the report during a normal `reconcile run`, with a `[comparable]` section
+(`export`, `breakdown_fields`, `period`); the identifying canonical fields
+(name, DOB, email, phone, address) are refused as breakdown fields,
+fail-closed, at recipe load.
+
 ## Usage
 
 Install (Python 3.12+):
@@ -130,6 +152,18 @@ pip install -e ".[extract]"
 (Not yet published to PyPI — `pip install` above is a local editable install, not
 a registry install. See [docs/ROADMAP.md](docs/ROADMAP.md) for the Trusted
 Publishing plan.)
+
+Before pointing the tool at your own data, check a recipe's shape without
+resolving anything:
+
+```sh
+reconcile validate --config recipe.toml
+```
+
+An unknown section or a misspelled key (a typo'd `[consnet]`, an `auto_threshold`
+that should be `auto`) is rejected by name instead of silently running at a
+default; `reconcile validate` also checks that the input files it points at
+exist and prints the active policy pack and switches.
 
 Run the bundled demo, which resolves an incoming intake batch against an existing
 record set:
@@ -161,22 +195,30 @@ source spans, and approves the merge or rejects it, with no jargon and no
 spreadsheet:
 
 ```sh
-reconcile review --config examples/intake-demo/recipe.toml --out out
+reconcile review --config examples/intake-demo/recipe.toml --reviewer "your name" --out out
 ```
 
 It runs the pipeline, starts a server on `http://127.0.0.1:8765/`, and opens a
-browser. Each decision is saved as you go to `out/decisions.json`, so you can stop
-and resume. When you are done, apply the decisions:
+browser. Each decision is saved as you go to `out/decisions.json`, attributed to
+the `--reviewer` name with a timestamp, so you can stop and resume and so who
+decided each pair is answerable later. When you are done, apply the decisions:
 
 ```sh
 reconcile apply --config examples/intake-demo/recipe.toml --decisions out/decisions.json --out out
 ```
 
+With `--require-second-reviewer` (on by default under the `dv` policy pack) a
+merge takes effect only after two different reviewers approve the same pair: the
+first approval is held as awaiting a second reviewer, a second reviewer resumes
+the same decisions file under their own `--reviewer` name to confirm or reject,
+and `reconcile apply` refuses a file that still holds half-approved pairs. Any
+rejection keeps the records separate immediately.
+
 The server is offline by construction: it binds the loopback interface only,
 loads no external asset, and writes no field value to disk (the decisions file
-carries record ids and verdicts only). Under the `dv` policy pack it refuses any
-non-loopback bind, fail-closed, so the review surface cannot become an egress
-path for client information. The pages are built for WCAG 2.2 AA: a real
+carries record ids, verdicts, reviewer names, and timestamps only). Under the
+`dv` policy pack it refuses any non-loopback bind, fail-closed, so the review
+surface cannot become an egress path for client information. The pages are built for WCAG 2.2 AA: a real
 comparison table, status shown by text and not colour alone, and decision buttons
 that work with the keyboard and with no JavaScript (`A` approve, `R` reject, `J`
 and `K` to move between pairs). Pass `--no-browser` to skip opening a window, or
@@ -394,9 +436,9 @@ locally (this table plus the linked doc) pending a filed issue. Last reviewed:
 |---|---|---|---|
 | Quality & Metrics | Applies | Enforced — suite green (130/130), ≥84% branch coverage a merge-blocking `pytest` gate (target 85%; see ROADMAP note) | [docs/ROADMAP.md](docs/ROADMAP.md) metrics ledger |
 | Code Quality | Applies | Enforced — `ruff` (incl. `S`, `C90`), `ruff format`, `mypy --strict`, `pytest --strict-markers`, `uv.lock` committed, `uv sync --frozen` | `pyproject.toml`, `Makefile` |
-| Security & Supply-Chain | Applies — ASVS L2 (handles DV-survivor PII) | Partial — secret scan, dependency-vuln scan, and SAST (Semgrep + CodeQL + zizmor) enforced; container scan and SBOM/signing are gaps | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Security |
+| Security & Supply-Chain | Applies — ASVS L2 (handles DV-survivor PII) | Partial — secret scan, dependency-vuln scan, SAST (Semgrep + CodeQL + zizmor), and a release-time CycloneDX SBOM + keyless build-provenance attestation (`release.yml`) enforced; container scan (Trivy) is enforced in CI; VEX is still a gap | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Security |
 | CI/CD | Applies | Partial — SHA-pinned actions, least-privilege tokens, `make verify` parity, `secrets`+`security` jobs, CODEOWNERS, and a solo-maintainer review waiver (ADR 0008) all in place; the matching branch ruleset is a committed artifact (`docs/rulesets/main.json`) but not yet applied to the live repo (a repository-settings action) | `.github/workflows/ci.yml`, [docs/decisions/0008-solo-maintainer-review-waiver.md](docs/decisions/0008-solo-maintainer-review-waiver.md), [docs/rulesets/](docs/rulesets/) |
-| Release & Versioning | Applies (release-producing: 0.1.0-0.7.0) | Gap — no git tags exist yet despite cut versions; no release workflow | [CHANGELOG.md](CHANGELOG.md) |
+| Release & Versioning | Applies (release-producing: 0.1.0-0.7.0) | Partial — `.github/workflows/release.yml` is tag-triggered (`v*`), re-verifies at the tagged commit, checks tag/`pyproject.toml` version consistency, builds sdist+wheel, generates a CycloneDX SBOM, attests build provenance (keyless OIDC), and publishes a GitHub Release with the matching CHANGELOG section; gap — no `v*` tag has been cut yet, so the workflow is unexercised, and there is no PyPI publish stage (not yet published to PyPI) | [.github/workflows/release.yml](.github/workflows/release.yml), [CHANGELOG.md](CHANGELOG.md) |
 | Accessibility | Applies (`reconcile review` web UI) | Partial — structural WCAG 2.2 AA design in place; axe/pa11y automated gate and screen-reader walkthrough not yet run | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Accessibility |
 | Observability | Applies — Tier C (library/CLI) | Declared — no hosted-service surface; no-PII-in-logs enforced by tests | [docs/ROADMAP.md](docs/ROADMAP.md) § Observability |
 | Internationalization | Applies — deferred to 1.0 | Declared — EN/ES parity is a real commitment, not yet built (no catalog infra) | [docs/I18N.md](docs/I18N.md) |

@@ -17,6 +17,7 @@ from html import escape
 
 from constituent_reconciler.review.session import (
     APPROVED,
+    AWAITING_SECOND,
     CONFLICT_NOTE,
     REJECTED,
     ClusterEdgeView,
@@ -150,6 +151,27 @@ def _progress_bar(done: int, total: int) -> str:
     )
 
 
+def _reviewer_line(session: ReviewSession) -> str:
+    """Who is reviewing, and whether two-person review is on."""
+
+    two_person = (
+        " Two-person review is on: a merge takes effect only after two "
+        "different reviewers approve it."
+        if session.require_second_reviewer
+        else ""
+    )
+    return (
+        f'<p class="note">Reviewing as <strong>{escape(session.reviewer)}</strong>.{two_person}</p>'
+    )
+
+
+def _decided_by(session: ReviewSession, index: int, verdict: str) -> str:
+    """The distinct reviewer names behind a verdict, for attribution."""
+
+    names = sorted({e.reviewer for e in session.audit(index) if e.verdict == verdict})
+    return ", ".join(names)
+
+
 def render_overview(session: ReviewSession, *, apply_command: str) -> str:
     """The landing page: progress, the queue, and what to do when finished."""
 
@@ -165,6 +187,12 @@ def render_overview(session: ReviewSession, *, apply_command: str) -> str:
             state = '<span class="tag match">APPROVED &#10003;</span>'
         elif verdict == REJECTED:
             state = '<span class="tag differ">REJECTED &#10007;</span>'
+        elif verdict == AWAITING_SECOND:
+            approver = escape(_decided_by(session, view.index, APPROVED))
+            state = (
+                '<span class="tag neutral">AWAITING SECOND REVIEWER</span> '
+                f"(approved by {approver})"
+            )
         else:
             state = "<span>not yet reviewed</span>"
         label = f"{escape(view.left_id)} vs {escape(view.right_id)}"
@@ -188,11 +216,17 @@ def render_overview(session: ReviewSession, *, apply_command: str) -> str:
         else:
             next_link = "<p><strong>All pairs reviewed.</strong></p>"
 
+    awaiting = (
+        f", {counts.awaiting_second} awaiting a second reviewer"
+        if session.require_second_reviewer or counts.awaiting_second
+        else ""
+    )
     body = (
         "<header>\n<h1>Review queue</h1>\n"
+        f"{_reviewer_line(session)}\n"
         f'<p class="progress" aria-live="polite">{decided} of {total} decided '
         f"&mdash; {counts.approved} approved, {counts.rejected} rejected, "
-        f"{counts.pending} pending.</p>\n"
+        f"{counts.pending} pending{awaiting}.</p>\n"
         f"{_progress_bar(decided, total)}\n</header>\n"
         '<main id="main">\n'
         f"{next_link}\n{queue_html}\n"
@@ -346,14 +380,31 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
         )
 
     if verdict == APPROVED:
+        by = escape(_decided_by(session, view.index, APPROVED))
         current = (
             '<p class="verdict approved" role="status">'
-            "Current decision: APPROVED &#10003; (merge)</p>"
+            f"Current decision: APPROVED &#10003; (merge) &mdash; approved by {by}.</p>"
         )
     elif verdict == REJECTED:
+        by = escape(_decided_by(session, view.index, REJECTED))
         current = (
             '<p class="verdict rejected" role="status">'
-            "Current decision: REJECTED &#10007; (keep separate)</p>"
+            f"Current decision: REJECTED &#10007; (keep separate) &mdash; rejected by {by}.</p>"
+        )
+    elif verdict == AWAITING_SECOND:
+        by = escape(_decided_by(session, view.index, APPROVED))
+        if session.reviewer in session.approvers(view.index):
+            note = (
+                " You already approved this pair; a different reviewer must "
+                "provide the second approval before it merges."
+            )
+        else:
+            note = (
+                " Your approval would complete the merge; a rejection keeps the records separate."
+            )
+        current = (
+            '<p class="verdict" role="status">'
+            f"Awaiting a second reviewer &mdash; approved by {by} so far.{note}</p>"
         )
     else:
         current = '<p class="verdict" role="status">No decision yet.</p>'
@@ -376,6 +427,7 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
     cluster_html = render_cluster_preview(view, session.cluster_preview(view.index))
     body = (
         "<header>\n<h1>Review queue</h1>\n"
+        f"{_reviewer_line(session)}\n"
         f'<p class="progress" aria-live="polite">Pair {view.index + 1} of {total} '
         f"&mdash; {decided} decided, {counts.pending} pending.</p>\n"
         f"{_progress_bar(decided, total)}\n</header>\n"
@@ -398,6 +450,7 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
         "<tbody>\n" + "\n".join(field_rows) + "\n</tbody>\n</table>\n"
         f"{cluster_html}"
         f'<form method="post" action="/pair/{view.index}">\n'
+        f'<input type="hidden" name="token" value="{escape(session.token)}">\n'
         '<div class="actions">\n'
         '<button type="submit" name="verdict" value="approve" accesskey="a">'
         "Approve merge <kbd>A</kbd></button>\n"

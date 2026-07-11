@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from constituent_reconciler.models import Cluster, Record, RunResult
+from constituent_reconciler.models import Cluster, Consent, Record, RunResult
 from constituent_reconciler.quality import source_quality
 from constituent_reconciler.suppression import SUPPRESSED
 
@@ -26,7 +26,7 @@ def _record(
         source=source,
         raw=raw,
         normalized=normalized,
-        consent_status=consent,
+        consent=Consent(status=consent),
     )
 
 
