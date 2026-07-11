@@ -1,0 +1,70 @@
+"""Exit-code behavior of `reconcile eval` with the kappa calibration gate.
+
+The gate is fail-closed: a missing, unreadable, or empty labels file exits 1
+the same way a kappa below 0.60 does. Passing labels leave the existing
+false-merge exit logic in charge.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from constituent_reconciler.cli import main
+
+EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "intake-demo"
+
+
+def _eval_args(out: Path, *extra: str) -> list[str]:
+    return [
+        "eval",
+        "--config",
+        str(EXAMPLES / "recipe.toml"),
+        "--truth",
+        str(EXAMPLES / "ground_truth.json"),
+        "--out",
+        str(out),
+        *extra,
+    ]
+
+
+def test_eval_passes_with_committed_calibration_labels(tmp_path: Path) -> None:
+    out = tmp_path / "report.md"
+    labels = EXAMPLES / "calibration_labels.json"
+    code = main(_eval_args(out, "--calibration", str(labels)))
+    assert code == 0
+    markdown = out.read_text(encoding="utf-8")
+    assert "## Calibration (LLM field judge)" in markdown
+    assert "Kappa gate at 0.60: **PASS**" in markdown
+
+
+def test_eval_exits_one_on_low_kappa(tmp_path: Path) -> None:
+    # Half the predictions disagree with the human labels: kappa is near zero.
+    labels = [
+        {"record_id": f"R{i:03d}", "field": "email", "predicted": p, "actual": a}
+        for i, (p, a) in enumerate(
+            [(True, True)] * 5 + [(False, False)] * 5 + [(True, False), (False, True)] * 5
+        )
+    ]
+    labels_path = tmp_path / "labels.json"
+    labels_path.write_text(json.dumps({"threshold": 0.6, "labels": labels}), encoding="utf-8")
+    out = tmp_path / "report.md"
+    code = main(_eval_args(out, "--calibration", str(labels_path)))
+    assert code == 1
+    assert "Kappa gate at 0.60: **FAIL**" in out.read_text(encoding="utf-8")
+
+
+def test_eval_exits_one_on_missing_labels_file(tmp_path: Path) -> None:
+    out = tmp_path / "report.md"
+    code = main(_eval_args(out, "--calibration", str(tmp_path / "does-not-exist.json")))
+    assert code == 1
+    # The report still renders, with the gate reported fail-closed.
+    assert "Kappa gate at 0.60: **FAIL** (no labels)." in out.read_text(encoding="utf-8")
+
+
+def test_eval_exits_one_on_empty_labels(tmp_path: Path) -> None:
+    labels_path = tmp_path / "labels.json"
+    labels_path.write_text(json.dumps({"threshold": 0.6, "labels": []}), encoding="utf-8")
+    out = tmp_path / "report.md"
+    code = main(_eval_args(out, "--calibration", str(labels_path)))
+    assert code == 1
