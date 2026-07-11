@@ -53,6 +53,7 @@ _SECTION_KEYS: dict[str, frozenset[str]] = {
     ),
     "household": frozenset({"enabled"}),
     "comparable": frozenset({"export", "breakdown_fields", "period"}),
+    "provenance": frozenset({"tsa_url"}),
 }
 
 _KNOWN_SECTIONS = frozenset(_SECTION_KEYS)
