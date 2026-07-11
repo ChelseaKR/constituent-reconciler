@@ -432,6 +432,9 @@ def _ingest_source(  # noqa: C901 - routes all supported source types and skips.
             id_prefix=id_prefix,
             _seen=seen,
         )
+        if accounting is not None:
+            accounting.note_read(path)
+        return chunk
 
 
 def _check_distinct_ids(records: Sequence[Record]) -> None:
@@ -458,9 +461,6 @@ def _check_distinct_ids(records: Sequence[Record]) -> None:
             f"column, or remove id_column from the recipe to generate ids from "
             f"row content."
         )
-        if accounting is not None:
-            accounting.note_read(path)
-        return chunk
 
 
 def _apply_overrides(
