@@ -1,12 +1,12 @@
 {
-  "note": "Planted ground truth for the demo fixtures. Each cluster is a set of record ids that are the same person. All within-cluster pairs are true duplicates; everything else is a true non-duplicate. The two same-name, different-DOB look-alikes (E008/N007 and the non-paired Marias) are NOT here on purpose: one is a genuine non-duplicate, and E002/N004 IS a duplicate with a DOB typo, so the matcher must send those to review rather than guess.",
+  "note": "Planted ground truth for the demo fixtures. Each cluster is a set of record ids that are the same person; ids from the CSV id column are namespaced by source (existing: or incoming:). All within-cluster pairs are true duplicates; everything else is a true non-duplicate. The two same-name, different-DOB look-alikes (E008/N007 and the non-paired Marias) are NOT here on purpose: one is a genuine non-duplicate, and E002/N004 IS a duplicate with a DOB typo, so the matcher must send those to review rather than guess.",
   "clusters": [
-    ["E003", "N002"],
-    ["E005", "N006"],
-    ["E007", "N005"],
-    ["E010", "N008"],
-    ["E012", "N010"],
-    ["N003", "N011"],
-    ["E002", "N004"]
+    ["existing:E003", "incoming:N002"],
+    ["existing:E005", "incoming:N006"],
+    ["existing:E007", "incoming:N005"],
+    ["existing:E010", "incoming:N008"],
+    ["existing:E012", "incoming:N010"],
+    ["incoming:N003", "incoming:N011"],
+    ["existing:E002", "incoming:N004"]
   ]
 }
