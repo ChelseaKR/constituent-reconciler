@@ -13,7 +13,7 @@ import csv
 import hashlib
 import json
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
@@ -28,9 +28,11 @@ from constituent_reconciler.extract.base import ExtractedField
 from constituent_reconciler.models import (
     Consent,
     GoldenRecord,
+    IngestReport,
     Pair,
     Record,
     RunResult,
+    SkippedFile,
     SourceSpan,
     TextSpan,
 )
@@ -135,6 +137,39 @@ def _collect_mapped_fields(
     return raw, spans
 
 
+@dataclass
+class IngestAccumulator:
+    """Mutable ingest accounting, frozen into an ``IngestReport`` after a run.
+
+    The readers stay simple: they take one optional accumulator and note what
+    they saw. ``run`` owns the accumulator's lifetime and freezes it, so the
+    accounting is a value on ``RunResult`` rather than shared mutable state.
+    """
+
+    files_read: list[str] = field(default_factory=list)
+    files_skipped: list[SkippedFile] = field(default_factory=list)
+    pages_extracted: int = 0
+    pages_dropped: int = 0
+    normalization_failures: dict[str, dict[str, int]] = field(default_factory=dict)
+
+    def note_read(self, path: Path) -> None:
+        self.files_read.append(str(path))
+
+    def note_skipped(self, path: Path, reason: str) -> None:
+        self.files_skipped.append(SkippedFile(path=str(path), reason=reason))
+
+    def freeze(self) -> IngestReport:
+        return IngestReport(
+            files_read=tuple(self.files_read),
+            files_skipped=tuple(self.files_skipped),
+            pages_extracted=self.pages_extracted,
+            pages_dropped=self.pages_dropped,
+            normalization_failures={
+                name: dict(counts) for name, counts in self.normalization_failures.items()
+            },
+        )
+
+
 def _read_date(row: dict[str, str], column: str | None) -> date | None:
     if not column:
         return None
@@ -168,13 +203,14 @@ def _read_consent(
     )
 
 
-def read_pdf_records(
+def read_pdf_records(  # noqa: C901 - branches mirror ingest accounting cases.
     path: Path,
     source: str,
     *,
     recipe: Recipe,
     id_prefix: str,
     _seen: dict[str, int] | None = None,
+    accounting: IngestAccumulator | None = None,
 ) -> list[Record]:
     """Extract records from a PDF, routing low-confidence pages through the seam.
 
@@ -213,7 +249,11 @@ def read_pdf_records(
         raw, spans = _collect_mapped_fields(page_fields, recipe.mapping)
 
         if not raw.get("first_name") and not raw.get("last_name"):
+            if accounting is not None:
+                accounting.pages_dropped += 1
             continue
+        if accounting is not None:
+            accounting.pages_extracted += 1
 
         unique_id = _content_id(source, raw, id_prefix, seen)
         records.append(
@@ -235,6 +275,7 @@ def read_text_records(
     recipe: Recipe,
     id_prefix: str,
     _seen: dict[str, int] | None = None,
+    accounting: IngestAccumulator | None = None,
 ) -> list[Record]:
     """Extract records from a .txt or .eml intake file.
 
@@ -256,7 +297,11 @@ def read_text_records(
         raw, spans = _collect_mapped_fields(page.fields, recipe.mapping)
 
         if not raw.get("first_name") and not raw.get("last_name"):
+            if accounting is not None:
+                accounting.pages_dropped += 1
             continue
+        if accounting is not None:
+            accounting.pages_extracted += 1
 
         unique_id = _content_id(source, raw, id_prefix, seen)
         records.append(
@@ -271,29 +316,34 @@ def read_text_records(
     return records
 
 
-def _ingest_source(
+def _ingest_source(  # noqa: C901 - routes all supported source types and skips.
     path: Path,
     source: str,
     *,
     recipe: Recipe,
     id_prefix: str,
+    accounting: IngestAccumulator | None = None,
 ) -> list[Record]:
     """Route a source path to the right reader based on file type.
 
     A directory is walked; each .csv is read as a structured source, each .pdf
     is run through the PDF extractor, and each .txt or .eml is run through the
     text extractor. A single file is routed by extension. Files with other
-    extensions are silently skipped inside a directory; passed as a direct
-    argument they fall through to the CSV reader. One duplicate-row counter
-    spans every file of the source, so exact-duplicate rows across files stay
-    distinct without spurious collisions.
+    extensions are skipped inside a directory; passed as a direct argument
+    they fall through to the CSV reader. One duplicate-row counter spans every
+    file of the source, so exact-duplicate rows across files stay distinct
+    without spurious collisions. Every child of a directory is answered for in
+    ``accounting`` when one is passed: read, or skipped with the reason why.
     """
     seen: dict[str, int] = {}
     if path.is_dir():
         records: list[Record] = []
         for child in sorted(path.iterdir()):
             suffix = child.suffix.lower()
-            if suffix == ".csv":
+            if child.is_dir():
+                if accounting is not None:
+                    accounting.note_skipped(child, "directory: not walked recursively")
+            elif suffix == ".csv":
                 chunk = read_records(
                     child,
                     source,
@@ -307,6 +357,8 @@ def _ingest_source(
                     _seen=seen,
                 )
                 records += chunk
+                if accounting is not None:
+                    accounting.note_read(child)
             elif suffix == ".pdf" and recipe.extract.backend != "none":
                 chunk = read_pdf_records(
                     child,
@@ -314,8 +366,11 @@ def _ingest_source(
                     recipe=recipe,
                     id_prefix=id_prefix,
                     _seen=seen,
+                    accounting=accounting,
                 )
                 records += chunk
+                if accounting is not None:
+                    accounting.note_read(child)
             elif suffix in (".txt", ".eml") and recipe.extract.backend != "none":
                 chunk = read_text_records(
                     child,
@@ -323,15 +378,49 @@ def _ingest_source(
                     recipe=recipe,
                     id_prefix=id_prefix,
                     _seen=seen,
+                    accounting=accounting,
                 )
                 records += chunk
+                if accounting is not None:
+                    accounting.note_read(child)
+            elif accounting is not None:
+                if suffix == ".pdf":
+                    accounting.note_skipped(
+                        child, 'pdf extraction disabled (extract.backend = "none")'
+                    )
+                elif suffix in (".txt", ".eml"):
+                    accounting.note_skipped(
+                        child, 'text extraction disabled (extract.backend = "none")'
+                    )
+                else:
+                    accounting.note_skipped(child, f"unsupported extension: {suffix or '(none)'}")
         return records
     elif path.suffix.lower() == ".pdf" and recipe.extract.backend != "none":
-        return read_pdf_records(path, source, recipe=recipe, id_prefix=id_prefix, _seen=seen)
+        chunk = read_pdf_records(
+            path,
+            source,
+            recipe=recipe,
+            id_prefix=id_prefix,
+            _seen=seen,
+            accounting=accounting,
+        )
+        if accounting is not None:
+            accounting.note_read(path)
+        return chunk
     elif path.suffix.lower() in (".txt", ".eml") and recipe.extract.backend != "none":
-        return read_text_records(path, source, recipe=recipe, id_prefix=id_prefix, _seen=seen)
+        chunk = read_text_records(
+            path,
+            source,
+            recipe=recipe,
+            id_prefix=id_prefix,
+            _seen=seen,
+            accounting=accounting,
+        )
+        if accounting is not None:
+            accounting.note_read(path)
+        return chunk
     else:
-        return read_records(
+        chunk = read_records(
             path,
             source,
             mapping=recipe.mapping,
@@ -343,6 +432,9 @@ def _ingest_source(
             id_prefix=id_prefix,
             _seen=seen,
         )
+        if accounting is not None:
+            accounting.note_read(path)
+        return chunk
 
 
 def _check_distinct_ids(records: Sequence[Record]) -> None:
@@ -405,6 +497,7 @@ def run(
     the result exactly.
     """
 
+    accounting = IngestAccumulator()
     raw_records: list[Record] = []
     if recipe.existing is not None:
         raw_records += _ingest_source(
@@ -412,18 +505,23 @@ def run(
             "existing",
             recipe=recipe,
             id_prefix="E",
+            accounting=accounting,
         )
     raw_records += _ingest_source(
         recipe.incoming,
         "incoming",
         recipe=recipe,
         id_prefix="N",
+        accounting=accounting,
     )
     _check_distinct_ids(raw_records)
 
     records = {
         r.unique_id: normalize_record(
-            r, recipe.fields, address_backend=recipe.normalize.address_backend
+            r,
+            recipe.fields,
+            address_backend=recipe.normalize.address_backend,
+            failures=accounting.normalization_failures,
         )
         for r in raw_records
     }
@@ -444,6 +542,7 @@ def run(
         pairs=tuple(pairs),
         clusters=tuple(clusters),
         golden=tuple(golden),
+        ingest=accounting.freeze(),
     )
 
 
