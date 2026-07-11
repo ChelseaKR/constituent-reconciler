@@ -36,7 +36,7 @@ from constituent_reconciler.models import (
 )
 from constituent_reconciler.normalize import normalize_record
 from constituent_reconciler.policy import PolicyViolation
-from constituent_reconciler.provenance import ProvenanceLog, TimestampAuthority
+from constituent_reconciler.provenance import ProvenanceLog, Rfc3161Authority, TimestampAuthority
 from constituent_reconciler.suppression import AggregateSummary, ComparableReport
 
 
@@ -649,6 +649,20 @@ def _maybe_export_comparable(
     return comparable, comparable_path
 
 
+def _timestamp_authority_for(
+    recipe: Recipe,
+    authority: TimestampAuthority | None,
+) -> TimestampAuthority | None:
+    if not recipe.tsa_url:
+        return authority
+    if recipe.require_local_targets:
+        raise PolicyViolation(
+            f"policy pack {recipe.policy_pack!r} forbids network timestamp authorities; "
+            "client information must stay on this machine"
+        )
+    return authority or Rfc3161Authority(recipe.tsa_url)
+
+
 def export(
     result: RunResult,
     recipe: Recipe,
@@ -675,6 +689,7 @@ def export(
     """
 
     out_dir.mkdir(parents=True, exist_ok=True)
+    log_authority = _timestamp_authority_for(recipe, authority)
     exportable, withheld = consent.partition_by_consent(
         result.golden,
         require_consent=recipe.require_consent,
@@ -703,7 +718,7 @@ def export(
     provenance_path = out_dir / "provenance.jsonl"
     logged = 0
     if not dry_run:
-        log = ProvenanceLog(provenance_path, authority)
+        log = ProvenanceLog(provenance_path, log_authority)
         for write_result in write_results:
             if not write_result.is_write:
                 continue

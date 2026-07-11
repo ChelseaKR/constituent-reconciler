@@ -58,6 +58,21 @@ def test_dv_pack_allows_the_local_csv_target(tmp_path: Path) -> None:
     assert summary.aggregate is not None
 
 
+def test_dv_pack_refuses_a_network_timestamp_authority(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    # The RFC 3161 request sends a hash derived from written client fields to
+    # the TSA. VAWA/FVPSA guidance treats hashed client information as still
+    # protected, so the DV pack refuses the network authority before any write.
+    base = load_recipe(EXAMPLES / "recipe-dv.toml")
+    recipe = replace(base, tsa_url="https://tsa.example/tsr")
+    result = pipeline.run(recipe)
+    with pytest.raises(PolicyViolation, match="timestamp"):
+        pipeline.export(result, recipe, out_dir=tmp_path)
+    assert not (tmp_path / "resolved.csv").exists()
+    assert not (tmp_path / "provenance.jsonl").exists()
+
+
 def test_dv_pack_fuses_the_cloud_extraction_seam_off() -> None:
     # Even if a recipe asks for the Bedrock backend, the DV pack returns a NoOp
     # seam: no page image, no field value, leaves the machine.

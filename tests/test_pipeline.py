@@ -312,6 +312,56 @@ def test_export_via_salesforce_creates_and_logs_provenance(tmp_path: Path) -> No
         del os.environ["SF_TOKEN"]
 
 
+def test_recipe_provenance_section_sets_tsa_url_and_flag_overrides(tmp_path: Path) -> None:
+    recipe_path = tmp_path / "recipe.toml"
+    recipe_path.write_text(
+        '[input]\nincoming = "in.csv"\n\n'
+        '[mapping]\nfirst_name = "first"\nlast_name = "last"\n\n'
+        '[provenance]\ntsa_url = "https://tsa.example/tsr"\n',
+        encoding="utf-8",
+    )
+    assert load_recipe(recipe_path).tsa_url == "https://tsa.example/tsr"
+    # The --tsa-url flag overrides the recipe, same pattern as --policy-pack.
+    overridden = load_recipe(recipe_path, tsa_url="https://other.example/tsr")
+    assert overridden.tsa_url == "https://other.example/tsr"
+    # A recipe with no [provenance] section keeps the local-clock default.
+    assert load_recipe(EXAMPLES / "recipe.toml").tsa_url == ""
+
+
+class _RecordedAuthority:
+    name = "rfc3161:test"
+
+    def __init__(self) -> None:
+        self.stamped: list[str] = []
+
+    def stamp(self, digest: str) -> str:
+        self.stamped.append(digest)
+        return "2026-01-01T00:00:00+00:00"
+
+
+def test_export_constructs_rfc3161_authority_from_tsa_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    built: list[str] = []
+    stamper = _RecordedAuthority()
+
+    def _fake_authority(url: str) -> _RecordedAuthority:
+        built.append(url)
+        return stamper
+
+    monkeypatch.setattr(pipeline, "Rfc3161Authority", _fake_authority)
+    recipe = replace(load_recipe(EXAMPLES / "recipe.toml"), tsa_url="https://tsa.example/tsr")
+    result = pipeline.run(recipe)
+    summary = pipeline.export(result, recipe, out_dir=tmp_path)
+    assert built == ["https://tsa.example/tsr"]
+    assert len(stamper.stamped) == summary.logged == 21
+    assert summary.provenance_path is not None
+    first = json.loads(summary.provenance_path.read_text(encoding="utf-8").splitlines()[0])
+    assert first["authority"] == "rfc3161:test"
+    ok, _ = verify_log(summary.provenance_path)
+    assert ok
+
+
 def test_export_via_civicrm_creates_and_logs_provenance(tmp_path: Path) -> None:
     import os
 
