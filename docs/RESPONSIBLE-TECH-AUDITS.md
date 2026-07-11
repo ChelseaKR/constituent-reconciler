@@ -145,14 +145,18 @@ table rather than left blank:
   (`.github/workflows/codeql.yml`) runs CodeQL for both the `python` and
   `actions` languages on push, PR, and a weekly schedule. A `zizmor` job
   additionally lints the workflow files themselves (CICD-19).
-* **Container scan:** Applies (Dockerfile ships a self-host image) — gap,
-  tracked locally pending a filed issue (no Trivy/Grype job in CI yet; see
-  P1-4). The base image is pinned to a mutable `python:3.12-slim` tag today,
-  not yet a digest.
-* **SBOM:** Applies (release-producing repo) — gap, tracked locally pending a
-  filed issue (no SBOM generation on release yet; see P1-7).
-* **VEX:** N/A today — no SBOM yet to accompany a VEX statement; revisit with
-  P1-7.
+* **Container scan:** Applies (Dockerfile ships a self-host image) —
+  enforced. A `container-scan` CI job builds the image (`make docker`) and
+  runs Trivy, blocking on any fixed CRITICAL/HIGH finding; the base image is
+  pinned by digest (`python:3.12-slim@sha256:...`), not just tag.
+* **SBOM:** Applies (release-producing repo) — enforced as of
+  `.github/workflows/release.yml` (2026-07-10, closes P1-7): a CycloneDX 1.7
+  SBOM of the released environment is generated and attached to every
+  GitHub Release, alongside a keyless build-provenance attestation. Not yet
+  exercised end-to-end — no `v*` tag has been cut yet.
+* **VEX:** N/A today — no disclosed vulnerability in a shipped release yet to
+  accompany with a VEX statement; revisit once the SBOM above has been
+  exercised by a real release.
 * **Secret management:** N/A for this repo's own operation — it holds no
   service secrets itself; CRM API keys/tokens are supplied by the *operator*
   through their own environment (`CIVICRM_API_KEY`, `SF_TOKEN`) and are never

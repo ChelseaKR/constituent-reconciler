@@ -398,6 +398,7 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
         "<tbody>\n" + "\n".join(field_rows) + "\n</tbody>\n</table>\n"
         f"{cluster_html}"
         f'<form method="post" action="/pair/{view.index}">\n'
+        f'<input type="hidden" name="token" value="{escape(session.token)}">\n'
         '<div class="actions">\n'
         '<button type="submit" name="verdict" value="approve" accesskey="a">'
         "Approve merge <kbd>A</kbd></button>\n"

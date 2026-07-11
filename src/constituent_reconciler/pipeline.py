@@ -10,6 +10,8 @@ without touching disk.
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -25,6 +27,7 @@ from constituent_reconciler.connectors.salesforce import Transport as Salesforce
 from constituent_reconciler.extract.base import ExtractedField
 from constituent_reconciler.models import (
     Consent,
+    GoldenRecord,
     Pair,
     Record,
     RunResult,
@@ -34,7 +37,37 @@ from constituent_reconciler.models import (
 from constituent_reconciler.normalize import normalize_record
 from constituent_reconciler.policy import PolicyViolation
 from constituent_reconciler.provenance import ProvenanceLog, TimestampAuthority
-from constituent_reconciler.suppression import AggregateSummary
+from constituent_reconciler.suppression import AggregateSummary, ComparableReport
+
+
+class DuplicateIdError(ValueError):
+    """Two records in one run carry the same unique id.
+
+    Raised instead of silently keeping one record and dropping the other: a
+    dropped record would vanish from matching, review, and export with no
+    trace, which violates the fail-closed rule.
+    """
+
+
+def _content_id(source: str, raw: dict[str, str], id_prefix: str, seen: dict[str, int]) -> str:
+    """Mint a stable record id from the record's own content.
+
+    The digest covers the source name and the mapped raw values, so an id
+    survives row insertion and reordering: editing a row changes that row's id
+    and no other, and a decisions file recorded against one run still points at
+    the same people in the next. Exact-duplicate rows share a digest and are
+    disambiguated with a deterministic ``-2``, ``-3``, ... suffix in read order.
+    """
+
+    digest = hashlib.blake2b(
+        f"{source}|{json.dumps(raw, sort_keys=True)}".encode(),
+        digest_size=6,
+    ).hexdigest()
+    count = seen.get(digest, 0) + 1
+    seen[digest] = count
+    if count == 1:
+        return f"{id_prefix}{digest}"
+    return f"{id_prefix}{digest}-{count}"
 
 
 def read_records(
@@ -48,20 +81,28 @@ def read_records(
     consent_date_column: str | None = None,
     consent_expires_column: str | None = None,
     consent_scope_column: str | None = None,
+    _seen: dict[str, int] | None = None,
 ) -> list[Record]:
-    """Read one CSV into Records, applying the column mapping at read time."""
+    """Read one CSV into Records, applying the column mapping at read time.
 
+    Ids are collision-safe by construction: a user-supplied id is namespaced by
+    its source (``existing:E003``), so the same id in two source files stays two
+    records; a generated id is derived from the row's content, not its position.
+    ``_seen`` carries the duplicate-row counter across the files of one source.
+    """
+
+    seen = _seen if _seen is not None else {}
     records: list[Record] = []
     with path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
-        for index, row in enumerate(reader, start=1):
+        for row in reader:
             raw = {
                 canonical: (row.get(column) or "").strip() for canonical, column in mapping.items()
             }
             if id_column and (row.get(id_column) or "").strip():
-                unique_id = row[id_column].strip()
+                unique_id = f"{source}:{row[id_column].strip()}"
             else:
-                unique_id = f"{id_prefix}{index:04d}"
+                unique_id = _content_id(source, raw, id_prefix, seen)
             records.append(
                 Record(
                     unique_id=unique_id,
@@ -133,7 +174,7 @@ def read_pdf_records(
     *,
     recipe: Recipe,
     id_prefix: str,
-    _start_index: int = 1,
+    _seen: dict[str, int] | None = None,
 ) -> list[Record]:
     """Extract records from a PDF, routing low-confidence pages through the seam.
 
@@ -159,6 +200,7 @@ def read_pdf_records(
     seam = make_seam(recipe.policy_pack, recipe.extract.backend)
     extraction = extractor.extract(path)
 
+    seen = _seen if _seen is not None else {}
     records: list[Record] = []
     for page in extraction.pages:
         page_fields = list(page.fields)
@@ -173,7 +215,7 @@ def read_pdf_records(
         if not raw.get("first_name") and not raw.get("last_name"):
             continue
 
-        unique_id = f"{id_prefix}{_start_index + len(records):04d}"
+        unique_id = _content_id(source, raw, id_prefix, seen)
         records.append(
             Record(
                 unique_id=unique_id,
@@ -192,7 +234,7 @@ def read_text_records(
     *,
     recipe: Recipe,
     id_prefix: str,
-    _start_index: int = 1,
+    _seen: dict[str, int] | None = None,
 ) -> list[Record]:
     """Extract records from a .txt or .eml intake file.
 
@@ -208,6 +250,7 @@ def read_text_records(
     else:
         extraction = extract_text_file(path)
 
+    seen = _seen if _seen is not None else {}
     records: list[Record] = []
     for page in extraction.pages:
         raw, spans = _collect_mapped_fields(page.fields, recipe.mapping)
@@ -215,7 +258,7 @@ def read_text_records(
         if not raw.get("first_name") and not raw.get("last_name"):
             continue
 
-        unique_id = f"{id_prefix}{_start_index + len(records):04d}"
+        unique_id = _content_id(source, raw, id_prefix, seen)
         records.append(
             Record(
                 unique_id=unique_id,
@@ -234,7 +277,6 @@ def _ingest_source(
     *,
     recipe: Recipe,
     id_prefix: str,
-    _start_index: int = 1,
 ) -> list[Record]:
     """Route a source path to the right reader based on file type.
 
@@ -242,8 +284,11 @@ def _ingest_source(
     is run through the PDF extractor, and each .txt or .eml is run through the
     text extractor. A single file is routed by extension. Files with other
     extensions are silently skipped inside a directory; passed as a direct
-    argument they fall through to the CSV reader.
+    argument they fall through to the CSV reader. One duplicate-row counter
+    spans every file of the source, so exact-duplicate rows across files stay
+    distinct without spurious collisions.
     """
+    seen: dict[str, int] = {}
     if path.is_dir():
         records: list[Record] = []
         for child in sorted(path.iterdir()):
@@ -259,6 +304,7 @@ def _ingest_source(
                     consent_expires_column=recipe.consent_expires_column,
                     consent_scope_column=recipe.consent_scope_column,
                     id_prefix=id_prefix,
+                    _seen=seen,
                 )
                 records += chunk
             elif suffix == ".pdf" and recipe.extract.backend != "none":
@@ -267,7 +313,7 @@ def _ingest_source(
                     source,
                     recipe=recipe,
                     id_prefix=id_prefix,
-                    _start_index=_start_index + len(records),
+                    _seen=seen,
                 )
                 records += chunk
             elif suffix in (".txt", ".eml") and recipe.extract.backend != "none":
@@ -276,18 +322,14 @@ def _ingest_source(
                     source,
                     recipe=recipe,
                     id_prefix=id_prefix,
-                    _start_index=_start_index + len(records),
+                    _seen=seen,
                 )
                 records += chunk
         return records
     elif path.suffix.lower() == ".pdf" and recipe.extract.backend != "none":
-        return read_pdf_records(
-            path, source, recipe=recipe, id_prefix=id_prefix, _start_index=_start_index
-        )
+        return read_pdf_records(path, source, recipe=recipe, id_prefix=id_prefix, _seen=seen)
     elif path.suffix.lower() in (".txt", ".eml") and recipe.extract.backend != "none":
-        return read_text_records(
-            path, source, recipe=recipe, id_prefix=id_prefix, _start_index=_start_index
-        )
+        return read_text_records(path, source, recipe=recipe, id_prefix=id_prefix, _seen=seen)
     else:
         return read_records(
             path,
@@ -299,6 +341,33 @@ def _ingest_source(
             consent_expires_column=recipe.consent_expires_column,
             consent_scope_column=recipe.consent_scope_column,
             id_prefix=id_prefix,
+            _seen=seen,
+        )
+
+
+def _check_distinct_ids(records: Sequence[Record]) -> None:
+    """Refuse a run in which two records share an id.
+
+    With namespaced user ids and content-derived generated ids a collision can
+    only come from a duplicated ``id_column`` value within one source. Keying
+    the run's record map on such an id would silently drop a record, so the run
+    stops here and names the id instead.
+    """
+
+    sources_by_id: dict[str, list[str]] = {}
+    for record in records:
+        sources_by_id.setdefault(record.unique_id, []).append(record.source)
+    duplicates = {
+        unique_id: sources for unique_id, sources in sources_by_id.items() if len(sources) > 1
+    }
+    if duplicates:
+        unique_id, sources = sorted(duplicates.items())[0]
+        raise DuplicateIdError(
+            f"record id {unique_id!r} appears {len(sources)} times in this run "
+            f"(source: {', '.join(sorted(set(sources)))}). Every record needs a "
+            f"distinct id; fix the duplicated value in the source file's id "
+            f"column, or remove id_column from the recipe to generate ids from "
+            f"row content."
         )
 
 
@@ -349,8 +418,8 @@ def run(
         "incoming",
         recipe=recipe,
         id_prefix="N",
-        _start_index=len(raw_records) + 1,
     )
+    _check_distinct_ids(raw_records)
 
     records = {
         r.unique_id: normalize_record(
@@ -416,8 +485,6 @@ def _write_aggregate_summary(summary: AggregateSummary, out_dir: Path) -> Path:
     cells suppressed and no field values, ids, or member lists.
     """
 
-    import json
-
     from constituent_reconciler.schema import REPORT_SCHEMA_VERSION
 
     summary_path = out_dir / "aggregate_summary.json"
@@ -434,6 +501,16 @@ def _write_aggregate_summary(summary: AggregateSummary, out_dir: Path) -> Path:
     }
     summary_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return summary_path
+
+
+def _write_comparable_report(report: ComparableReport, out_dir: Path) -> Path:
+    """Write the CoC-shaped comparable-database report as JSON."""
+
+    report_path = out_dir / "comparable_report.json"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    payload = suppression.comparable_payload(report)
+    report_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return report_path
 
 
 def _write_household_suggestions(
@@ -525,6 +602,8 @@ class ExportSummary:
     logged: int
     aggregate: AggregateSummary | None = None
     aggregate_path: Path | None = None
+    comparable: ComparableReport | None = None
+    comparable_path: Path | None = None
     household_suggestions: tuple[household.HouseholdSuggestion, ...] = ()
     household_path: Path | None = None
 
@@ -539,6 +618,35 @@ class ExportSummary:
         if not counts:
             return "no records to write"
         return ", ".join(f"{action}: {n}" for action, n in sorted(counts.items()))
+
+
+def _maybe_export_comparable(
+    recipe: Recipe,
+    exportable: Sequence[GoldenRecord],
+    *,
+    out_dir: Path,
+    dry_run: bool,
+) -> tuple[ComparableReport | None, Path | None]:
+    """Build and (unless dry-run) write the comparable report, if opted in.
+
+    The comparable-database export profile is explicit recipe opt-in (see
+    config.py's ``[comparable]`` section): when set, ``run``/``apply`` write
+    ``comparable_report.json`` alongside ``aggregate_summary.json`` using the
+    same suppressed-report builder the standalone ``export-comparable``
+    command uses (``export_comparable`` below), so the two paths cannot
+    drift.
+    """
+
+    if not recipe.comparable_export:
+        return None, None
+    comparable = suppression.comparable_summary(
+        exportable,
+        threshold=recipe.suppression_threshold,
+        breakdown_fields=recipe.comparable_breakdown_fields,
+        period=recipe.comparable_period,
+    )
+    comparable_path = None if dry_run else _write_comparable_report(comparable, out_dir)
+    return comparable, comparable_path
 
 
 def export(
@@ -627,6 +735,10 @@ def export(
         if not dry_run:
             aggregate_path = _write_aggregate_summary(aggregate, out_dir)
 
+    comparable, comparable_path = _maybe_export_comparable(
+        recipe, exportable, out_dir=out_dir, dry_run=dry_run
+    )
+
     return ExportSummary(
         write_results=tuple(write_results),
         withheld=tuple(withheld),
@@ -636,6 +748,39 @@ def export(
         logged=logged,
         aggregate=aggregate,
         aggregate_path=aggregate_path,
+        comparable=comparable,
+        comparable_path=comparable_path,
         household_suggestions=household_suggestions,
         household_path=household_path,
     )
+
+
+def export_comparable(
+    result: RunResult,
+    recipe: Recipe,
+    *,
+    out_dir: Path,
+) -> tuple[ComparableReport, Path]:
+    """Write only the suppressed comparable-database report.
+
+    Backs the standalone ``reconcile export-comparable`` command: one call,
+    independent of ``recipe.comparable_export`` (which instead controls
+    whether ``export`` above writes this report as a side effect of a normal
+    ``run``/``apply``). Uses the recipe's ``comparable_breakdown_fields`` and
+    ``comparable_period`` the same way ``export`` does, so the standalone
+    command and the recipe-driven path never disagree about what a given
+    recipe's comparable report contains.
+    """
+
+    exportable, _ = consent.partition_by_consent(
+        result.golden,
+        require_consent=recipe.require_consent,
+        destination=recipe.output.connector,
+    )
+    report = suppression.comparable_summary(
+        exportable,
+        threshold=recipe.suppression_threshold,
+        breakdown_fields=recipe.comparable_breakdown_fields,
+        period=recipe.comparable_period,
+    )
+    return report, _write_comparable_report(report, out_dir)
