@@ -23,8 +23,10 @@ CONNECTOR_INTERFACE_VERSION = 1
 # The JSON artifacts: aggregate_summary.json, run_manifest.json, run_report.json,
 # and the provenance log entry shape. Version 2 added the run manifest and the
 # provenance "run-start" entry, whose consent field is null rather than a
-# boolean; version-1 logs still verify unchanged.
-REPORT_SCHEMA_VERSION = 2
+# boolean; version 3 added field-level lineage (``field_sources``, member ids
+# only) and the named survivorship ``fill_policy``. Version-1 logs still verify
+# unchanged.
+REPORT_SCHEMA_VERSION = 3
 
 # The decisions.json shape: approved/rejected lists of [left, right] record-id
 # pairs, written by the review session and consumed by ``reconcile apply``.
