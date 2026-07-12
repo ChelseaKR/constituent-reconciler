@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from constituent_reconciler import pipeline
+from constituent_reconciler import matching, pipeline
 from constituent_reconciler.config import HouseholdConfig, OutputConfig, Recipe, load_recipe
 from constituent_reconciler.consent import partition_by_consent
 from constituent_reconciler.evaluate import evaluate
@@ -687,3 +687,38 @@ def test_correction_fails_closed_on_unknown_record_or_unmapped_field() -> None:
         pipeline.run(recipe, corrections=[Correction("missing", "dob", "1972-03-08")])
     with pytest.raises(ValueError, match="does not map"):
         pipeline.run(recipe, corrections=[Correction("incoming:N004", "not_a_field", "x")])
+
+
+def test_force_drop_is_binding_across_transitive_auto_edges(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    incoming = tmp_path / "incoming.csv"
+    incoming.write_text(
+        "id,First Name,Last Name\nA,Ada,One\nB,Ada,Two\nC,Ada,Three\n",
+        encoding="utf-8",
+    )
+    recipe = Recipe(
+        incoming=incoming,
+        mapping={"first_name": "First Name", "last_name": "Last Name"},
+        id_column="id",
+        fields=("first_name", "last_name"),
+        auto_threshold=0.97,
+        review_threshold=0.80,
+    )
+    monkeypatch.setattr(
+        matching,
+        "score_pairs",
+        lambda records, fields, prior: [
+            ("incoming:A", "incoming:B", 0.99),
+            ("incoming:B", "incoming:C", 0.99),
+            ("incoming:A", "incoming:C", 0.20),
+        ],
+    )
+    rejected = frozenset(("incoming:A", "incoming:C"))
+    result = pipeline.run(recipe, force_drop=[rejected])
+    assert all(not rejected <= set(golden.members) for golden in result.golden)
+    assert {pair.key() for pair in result.review_pairs} == {
+        frozenset(("incoming:A", "incoming:B")),
+        frozenset(("incoming:B", "incoming:C")),
+    }
+    assert all("reviewer separated" in pair.note for pair in result.review_pairs)

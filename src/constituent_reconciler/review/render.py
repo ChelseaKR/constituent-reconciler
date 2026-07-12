@@ -504,6 +504,12 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
 
     pct = view.probability * 100
     rationale = escape(rationale_for(view).summary())
+    routing_note = (
+        f'<div class="rationale" role="note"><h3>Why this returned to review</h3>'
+        f"<p>{escape(view.note)}</p></div>"
+        if view.note
+        else ""
+    )
     cluster_html = render_cluster_preview(view, session.cluster_preview(view.index))
     body = (
         "<header>\n<h1>Review queue</h1>\n"
@@ -519,6 +525,7 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
         '<div class="rationale" role="note">\n'
         "<h3>What matches and what differs</h3>\n"
         f"<p>{rationale}</p>\n</div>\n"
+        f"{routing_note}\n"
         f"{current}\n"
         '<table class="compare">\n<caption class="note">Record '
         f"{escape(view.left_id)} (from {escape(view.left_source)}) compared with "

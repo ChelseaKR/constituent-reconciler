@@ -486,7 +486,7 @@ def _apply_overrides(
             band = Band.AUTO
         elif pair.key() in force_drop:
             band = Band.DROP
-        adjusted.append(Pair(pair.left, pair.right, pair.probability, band))
+        adjusted.append(Pair(pair.left, pair.right, pair.probability, band, pair.note))
     return adjusted
 
 
@@ -590,7 +590,10 @@ def run(
         auto_threshold=recipe.auto_threshold,
         review_threshold=recipe.review_threshold,
     )
-    pairs = _apply_overrides(pairs, frozenset(force_auto), frozenset(force_drop))
+    auto_overrides = frozenset(force_auto)
+    drop_overrides = frozenset(force_drop)
+    pairs = _apply_overrides(pairs, auto_overrides, drop_overrides)
+    pairs = decisions.enforce_cannot_links(records.keys(), pairs, drop_overrides)
 
     clusters = decisions.build_clusters(records.keys(), pairs)
     golden = decisions.golden_records(
@@ -618,6 +621,9 @@ def _write_review_queue(result: RunResult, recipe: Recipe, out_dir: Path) -> Pat
         if has_spans:
             for f in recipe.fields:
                 header += [f"{f}_left_span", f"{f}_right_span"]
+        has_notes = any(pair.note for pair in result.review_pairs)
+        if has_notes:
+            header.append("note")
         writer.writerow(header)
         for pair in sorted(result.review_pairs, key=lambda p: (-p.probability, p.left, p.right)):
             left = result.records[pair.left]
@@ -633,6 +639,8 @@ def _write_review_queue(result: RunResult, recipe: Recipe, out_dir: Path) -> Pat
                         str(left_span) if left_span else "",
                         str(right_span) if right_span else "",
                     ]
+            if has_notes:
+                row.append(pair.note)
             writer.writerow(row)
     return review_path
 

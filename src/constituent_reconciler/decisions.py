@@ -21,6 +21,11 @@ from constituent_reconciler.models import Band, Cluster, GoldenRecord, Pair, Rec
 DEFAULT_FILL_POLICY = "survivor-then-lowest-id"
 FILL_POLICIES: tuple[str, ...] = (DEFAULT_FILL_POLICY,)
 
+CANNOT_LINK_NOTE = (
+    "A reviewer separated two records in this group. Automatic edges in the "
+    "group were returned to review so the rejection cannot be overridden transitively."
+)
+
 
 def band_pairs(
     scored: Iterable[tuple[str, str, float]],
@@ -95,6 +100,41 @@ def build_clusters(record_ids: Iterable[str], pairs: Iterable[Pair]) -> list[Clu
         clusters.append(Cluster(cluster_id=root, members=tuple(sorted(members))))
     clusters.sort(key=lambda cluster: cluster.cluster_id)
     return clusters
+
+
+def enforce_cannot_links(
+    record_ids: Iterable[str],
+    pairs: Iterable[Pair],
+    cannot_links: Iterable[frozenset[str]],
+) -> list[Pair]:
+    """Refuse every auto-cluster that would contain a human-rejected pair.
+
+    This is the fail-closed, refuse-and-route implementation of FIX-02. All
+    AUTO edges inside a conflicting transitive component return to REVIEW;
+    the rejected edge itself remains DROP. Re-clustering the returned pairs
+    therefore cannot put either endpoint of a cannot-link in one cluster.
+    """
+
+    ids = tuple(record_ids)
+    materialized = list(pairs)
+    constraints = frozenset(link for link in cannot_links if len(link) == 2)
+    if not constraints:
+        return materialized
+    conflicted_members: set[str] = set()
+    for cluster in build_clusters(ids, materialized):
+        members = frozenset(cluster.members)
+        if any(link <= members for link in constraints):
+            conflicted_members.update(members)
+    if not conflicted_members:
+        return materialized
+    return [
+        Pair(pair.left, pair.right, pair.probability, Band.REVIEW, CANNOT_LINK_NOTE)
+        if pair.band is Band.AUTO
+        and pair.left in conflicted_members
+        and pair.right in conflicted_members
+        else pair
+        for pair in materialized
+    ]
 
 
 def _choose_primary(members: tuple[str, ...], records: Mapping[str, Record]) -> str:
