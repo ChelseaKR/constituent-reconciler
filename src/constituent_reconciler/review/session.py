@@ -198,6 +198,7 @@ class PairView:
     probability: float
     fields: tuple[FieldCell, ...]
     synthetic: bool = False
+    note: str = ""
 
 
 @dataclass(frozen=True)
@@ -555,6 +556,7 @@ class ReviewSession:
             probability=pair.probability,
             fields=tuple(cells),
             synthetic=index in self._synthetic_indexes,
+            note=pair.note,
         )
 
     def views(self) -> list[PairView]:
@@ -660,7 +662,7 @@ class ReviewSession:
                 band = Band.DROP
             elif pair.key() in approved:
                 band = Band.AUTO
-            adjusted.append(Pair(pair.left, pair.right, pair.probability, band))
+            adjusted.append(Pair(pair.left, pair.right, pair.probability, band, pair.note))
         return adjusted
 
     def _edges_within(self, members: tuple[str, ...]) -> tuple[ClusterEdgeView, ...]:
@@ -761,7 +763,7 @@ class ReviewSession:
         projected: list[Pair] = []
         for live in self._live_pairs():
             if intends_merge and live.key() == pair.key():
-                live = Pair(live.left, live.right, live.probability, Band.AUTO)
+                live = Pair(live.left, live.right, live.probability, Band.AUTO, live.note)
             projected.append(live)
 
         clusters = decisions.build_clusters(self._result.records.keys(), projected)

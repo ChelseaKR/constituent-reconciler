@@ -7,6 +7,11 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **Binding human rejections (FIX-02)**: rejected pairs are cannot-link
+  constraints on final clustering. If transitive AUTO edges would reunite a
+  rejected pair, the component is refused and its automatic edges return to
+  review with an explicit explanation; no golden record may contain both
+  rejected endpoints.
 - **Attributed field correction in review (EXP-01)**: reviewers can fix a field
   while approving a pair. Values live only in local `corrections.json`; the
   decisions audit remains PII-free. A correction invalidates earlier verdicts,

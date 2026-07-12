@@ -189,6 +189,7 @@ class Pair:
     right: str
     probability: float
     band: Band
+    note: str = ""
 
     def key(self) -> frozenset[str]:
         return frozenset((self.left, self.right))

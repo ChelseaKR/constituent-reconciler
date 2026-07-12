@@ -46,6 +46,11 @@ threat note; axe/accessibility behavior (R1) unchanged.
 
 ## FIX-02 — Human rejections as cannot-link constraints
 
+**Status: done (2026-07-12).** A human-rejected pair is now a binding
+cannot-link. Any transitive AUTO component containing that pair is refused and
+all of its automatic edges return to review with an explicit routing note; no
+golden record can silently reunite the rejected endpoints.
+
 **Pitch:** Make a reviewer's "reject" binding on the final clustering, not
 only on the single edge they saw.
 

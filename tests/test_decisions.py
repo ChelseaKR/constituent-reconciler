@@ -4,8 +4,14 @@ from datetime import date
 
 import pytest
 
-from constituent_reconciler.decisions import band_pairs, build_clusters, golden_records
-from constituent_reconciler.models import Band, Cluster, Consent, Record
+from constituent_reconciler.decisions import (
+    CANNOT_LINK_NOTE,
+    band_pairs,
+    build_clusters,
+    enforce_cannot_links,
+    golden_records,
+)
+from constituent_reconciler.models import Band, Cluster, Consent, Pair, Record
 
 FIELDS = ("first_name", "last_name", "dob", "email", "phone")
 
@@ -33,6 +39,29 @@ def test_clusters_use_auto_edges_only() -> None:
     assert {"a", "b"} in member_sets
     assert {"c"} in member_sets
     assert {"d"} in member_sets
+
+
+def test_rejection_breaks_a_transitive_auto_cluster_and_routes_edges_to_review() -> None:
+    pairs = [
+        Pair("a", "b", 0.99, Band.AUTO),
+        Pair("b", "c", 0.99, Band.AUTO),
+        Pair("a", "c", 0.20, Band.DROP),
+    ]
+    constrained = enforce_cannot_links(["a", "b", "c"], pairs, [frozenset(("a", "c"))])
+    assert [pair.band for pair in constrained] == [Band.REVIEW, Band.REVIEW, Band.DROP]
+    assert constrained[0].note == CANNOT_LINK_NOTE
+    clusters = build_clusters(["a", "b", "c"], constrained)
+    assert all(not {"a", "c"} <= set(cluster.members) for cluster in clusters)
+
+
+def test_unrelated_auto_cluster_is_unchanged_by_cannot_link() -> None:
+    pairs = [
+        Pair("a", "b", 0.99, Band.AUTO),
+        Pair("c", "d", 0.99, Band.AUTO),
+    ]
+    constrained = enforce_cannot_links(["a", "b", "c", "d"], pairs, [frozenset(("a", "b"))])
+    assert constrained[0].band is Band.REVIEW
+    assert constrained[1].band is Band.AUTO
 
 
 def _record(uid: str, source: str, normalized: dict[str, str], consent: str) -> Record:
