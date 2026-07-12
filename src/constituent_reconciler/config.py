@@ -52,6 +52,7 @@ _SECTION_KEYS: dict[str, frozenset[str]] = {
             "external_id_field",
             "api_version",
             "object_name",
+            "signing_secret_env",
         }
     ),
     "household": frozenset({"enabled"}),
@@ -169,9 +170,13 @@ class OutputConfig:
     """Where resolved records are written. Secrets are never stored here.
 
     ``auth_env`` names the environment variable that holds the credential (a
-    CiviCRM API key, a Salesforce access token); the value is read at write time,
-    not from the recipe. ``api_version`` and ``object_name`` apply to the
-    Salesforce connector; CiviCRM ignores them.
+    CiviCRM API key, a Salesforce access token, or a webhook's bearer token);
+    the value is read at write time, not from the recipe. ``api_version`` and
+    ``object_name`` apply to the Salesforce connector; CiviCRM ignores them.
+    ``signing_secret_env`` names the environment variable holding the webhook
+    connector's HMAC signing secret; other connectors ignore it. Unset, the
+    webhook connector sends no signature header, which is fine for a local
+    test receiver but not recommended for a real deployment.
     """
 
     connector: str = "csv"
@@ -182,6 +187,7 @@ class OutputConfig:
     external_id_field: str = "external_identifier"
     api_version: str = "v60.0"
     object_name: str = "Contact"
+    signing_secret_env: str = ""
 
 
 @dataclass(frozen=True)
@@ -339,6 +345,7 @@ def load_recipe(
         external_id_field=str(output_section.get("external_id_field", "external_identifier")),
         api_version=str(output_section.get("api_version", "v60.0")),
         object_name=str(output_section.get("object_name", "Contact")),
+        signing_secret_env=str(output_section.get("signing_secret_env", "")),
     )
 
     return Recipe(

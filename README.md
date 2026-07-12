@@ -74,8 +74,9 @@ The pipeline runs as a sequence of logged, deterministic-by-default steps:
    verdict for fixing field values is planned. The confidence gate is
    fail-closed: when in doubt, a human looks.
 6. **Write** only approved and consented records, through a connector for the
-   target system (CSV, CiviCRM, and Salesforce today; Airtable, Sheets, and
-   webhook to follow).
+   target system (CSV, CiviCRM, Salesforce, and a generic webhook today;
+   Apricot, Airtable, and Sheets designed but not yet built -- see
+   `docs/connectors/`).
 7. **Log** every write to an append-only provenance record with content
    hashing (BLAKE2b) and an RFC 3161 timestamp, so an org can show what was
    written, when, and under which consent.
@@ -359,6 +360,27 @@ environment:
 SF_TOKEN=your-access-token reconcile run \
   --config examples/intake-demo/recipe-salesforce.toml --out out
 ```
+
+**Generic webhook (opt-in, network).** For a destination with no dedicated
+connector -- a Zapier or Make automation, an org's own intake API -- point
+the `webhook` connector at any endpoint that accepts a JSON POST:
+
+```sh
+WEBHOOK_TOKEN=your-token WEBHOOK_SIGNING_SECRET=your-secret reconcile run \
+  --config examples/intake-demo/recipe-webhook.toml --out out
+```
+
+One POST per resolved record, with an optional bearer token and an optional
+HMAC-SHA256 request signature so the receiver can verify a payload came from
+this run unaltered. The full payload shape, a worked example, and signature
+verification code are in `docs/connectors/webhook.md`. Like CiviCRM and
+Salesforce, this is a network target the `dv` policy pack refuses.
+
+Apricot, Airtable, and Google Sheets are researched but not implemented: each
+is a proprietary vendor API this project has not built or tested against, so
+each has a design brief (auth model, rate limits, pagination, `is_local`
+classification) in `docs/connectors/` rather than code, pending a priority
+decision and API credentials.
 
 Every write is recorded in an append-only, tamper-evident provenance log
 (`out/provenance.jsonl`): each entry carries a BLAKE2b hash of the written fields

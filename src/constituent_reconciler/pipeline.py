@@ -24,6 +24,7 @@ from constituent_reconciler.connectors.base import Connector, WriteResult
 from constituent_reconciler.connectors.civicrm import Transport
 from constituent_reconciler.connectors.crm_csv import CrmCsvConnector
 from constituent_reconciler.connectors.salesforce import Transport as SalesforceTransport
+from constituent_reconciler.connectors.webhook import Transport as WebhookTransport
 from constituent_reconciler.extract.base import ExtractedField
 from constituent_reconciler.models import (
     Consent,
@@ -704,6 +705,7 @@ def build_connector(
     *,
     transport: Transport | None = None,
     sf_transport: SalesforceTransport | None = None,
+    webhook_transport: WebhookTransport | None = None,
 ) -> Connector:
     """Construct the connector named by the recipe. Secrets come from the env.
 
@@ -719,6 +721,8 @@ def build_connector(
         transports["civicrm"] = transport
     if sf_transport is not None:
         transports["salesforce"] = sf_transport
+    if webhook_transport is not None:
+        transports["webhook"] = webhook_transport
     factory = get_factory(recipe.output.connector)
     connector = factory(recipe.output, out_dir, transports)
 
@@ -811,6 +815,7 @@ def export(
     authority: TimestampAuthority | None = None,
     transport: Transport | None = None,
     sf_transport: SalesforceTransport | None = None,
+    webhook_transport: WebhookTransport | None = None,
     confirmed_households: Iterable[str] = (),
 ) -> ExportSummary:
     """Write resolved records through the configured connector.
@@ -849,7 +854,13 @@ def export(
         if not dry_run:
             household_path = _write_household_suggestions(household_suggestions, confirmed, out_dir)
 
-    connector = build_connector(recipe, out_dir, transport=transport, sf_transport=sf_transport)
+    connector = build_connector(
+        recipe,
+        out_dir,
+        transport=transport,
+        sf_transport=sf_transport,
+        webhook_transport=webhook_transport,
+    )
     if household_map and isinstance(connector, CrmCsvConnector):
         connector.set_household_column(household_map)
     write_results = connector.write_all(exportable, recipe.fields, dry_run=dry_run)
