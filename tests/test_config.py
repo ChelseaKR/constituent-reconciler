@@ -263,3 +263,12 @@ def test_validate_command_reports_a_missing_incoming_file(tmp_path: Path, capsys
     err = capsys.readouterr().err  # type: ignore[attr-defined]
     assert code == 2
     assert "does not exist" in err
+
+
+def test_review_calibration_must_be_a_non_negative_integer(tmp_path: Path) -> None:
+    recipe = load_recipe(_write(tmp_path, MINIMAL_INPUT + "\n[review]\ncalibration = 3\n"))
+    assert recipe.review_calibration == 3
+    for invalid in ("-1", "1.5", "true"):
+        path = _write(tmp_path, MINIMAL_INPUT + f"\n[review]\ncalibration = {invalid}\n")
+        with pytest.raises(RecipeError, match="calibration"):
+            load_recipe(path)

@@ -225,6 +225,24 @@ that work with the keyboard and with no JavaScript (`A` approve, `R` reject, `J`
 and `K` to move between pairs). Pass `--no-browser` to skip opening a window, or
 `--port 0` to bind a free port.
 
+To measure how well a reviewer's verdicts track ground truth, a recipe may plant
+known-answer calibration pairs in the queue:
+
+```toml
+[review]
+calibration = 3
+```
+
+The queue then mixes in three synthetic pairs whose correct answer is known,
+generated deterministically from obviously fake values (`Calibration Sample`
+names, `.invalid` email domains) and never from real data. Disclosure is part of
+the design: every page carries a banner saying planted pairs are present, though
+the individual pairs are not pointed out. Decisions on planted pairs are never
+written to the decisions file, so `reconcile apply` cannot merge a synthetic
+record into real ones by construction. When the review server stops, the CLI
+reports how many planted pairs were decided in agreement with the known answers,
+with Cohen's kappa once at least two are decided.
+
 Score a run against known answers:
 
 ```sh

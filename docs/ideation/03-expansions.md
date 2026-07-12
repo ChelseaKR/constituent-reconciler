@@ -204,6 +204,15 @@ claims table flips the email row to "implemented."
 
 ### EXP-09 — Reviewer calibration with planted pairs
 
+**Status: done (2026-07-02).** Implemented as `[review] calibration = N`:
+`review/calibration.py` deterministically plants N disclosed, obviously
+synthetic known-answer pairs; the session excludes them from
+`decisions.json` so `reconcile apply` (and every connector) can never see
+them, a persistent banner discloses their presence without marking
+individual pairs, and `reconcile review` prints agreement plus
+`evaluate.cohen_kappa` when the server stops (kappa withheld below two
+decided planted pairs).
+
 **Pitch:** Optionally mix a few known-answer pairs (from the synthetic
 corpus) into the review queue and report reviewer agreement, reusing
 `evaluate.cohen_kappa`.

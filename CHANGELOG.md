@@ -6,6 +6,14 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 ## [Unreleased]
 
+### Added
+- **Reviewer calibration with planted pairs (EXP-09)**: `[review] calibration = N`
+  deterministically mixes clearly synthetic known-answer pairs into the local
+  review queue. A persistent banner discloses their presence, the CLI reports
+  reviewer agreement and Cohen's kappa, and planted records and verdicts are
+  excluded from `decisions.json` and its audit trail so they can never reach
+  `reconcile apply` or a connector.
+
 ### Changed
 - **Field-level lineage and a named survivorship fill policy (FIX-07)**
   (`models.py`, `decisions.py`, `config.py`, `pipeline.py`, `provenance.py`,

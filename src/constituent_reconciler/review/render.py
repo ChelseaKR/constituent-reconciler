@@ -49,6 +49,9 @@ h1 { font-size: 1.4rem; margin: 0.2rem 0; }
 .privacy {
   background: #002b1d; color: #fff; padding: 0.5rem 1rem; font-weight: 600;
 }
+.calibration {
+  background: #4a3800; color: #fff; padding: 0.5rem 1rem; font-weight: 600;
+}
 .progress { margin: 0.5rem 0; font-weight: 600; }
 .bar {
   background: #eee; border: 1px solid #999; height: 0.9rem;
@@ -120,7 +123,25 @@ document.addEventListener('keydown', function (e) {
 """
 
 
-def _page(title: str, body: str, *, privacy: bool) -> str:
+def _calibration_banner(calibration: int) -> str:
+    """The planted-pairs disclosure, shown on every page while planting is on.
+
+    Transparency requirement (EXP-09): the reviewer is always told planted
+    pairs exist, and no individual pair is ever marked as planted.
+    """
+
+    if calibration <= 0:
+        return ""
+    noun = "pair" if calibration == 1 else "pairs"
+    return (
+        '<div class="calibration" role="note">This queue includes '
+        f"{calibration} planted known-answer {noun} for calibration. "
+        "They are not marked; your decisions on them are used only to report "
+        "reviewer agreement and are never applied to records.</div>"
+    )
+
+
+def _page(title: str, body: str, *, privacy: bool, calibration: int = 0) -> str:
     privacy_banner = (
         '<div class="privacy" role="status">Privacy mode (DV policy pack): '
         "this server stays on your machine and writes no field values to disk.</div>"
@@ -137,6 +158,7 @@ def _page(title: str, body: str, *, privacy: bool) -> str:
         "</head>\n<body>\n"
         '<a class="skip-link" href="#main">Skip to main content</a>\n'
         f"{privacy_banner}"
+        f"{_calibration_banner(calibration)}"
         f"{body}\n"
         f"<script>{_SCRIPT}</script>\n"
         "</body>\n</html>\n"
@@ -240,7 +262,7 @@ def render_overview(session: ReviewSession, *, apply_command: str) -> str:
         '<footer><p class="note">This page runs locally and sends no data over '
         "the network.</p></footer>"
     )
-    return _page("Review queue", body, privacy=privacy)
+    return _page("Review queue", body, privacy=privacy, calibration=session.calibration_total)
 
 
 def _cell(value: str, span: str) -> str:
@@ -467,4 +489,9 @@ def render_pair(session: ReviewSession, view: PairView, *, apply_command: str) -
         f"<code>{escape(str(session.decisions_path))}</code>. Apply with "
         f"<code>{escape(apply_command)}</code>.</p></footer>"
     )
-    return _page(f"Pair {view.index + 1} of {total}", body, privacy=session.privacy_mode)
+    return _page(
+        f"Pair {view.index + 1} of {total}",
+        body,
+        privacy=session.privacy_mode,
+        calibration=session.calibration_total,
+    )

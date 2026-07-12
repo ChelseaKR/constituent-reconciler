@@ -58,7 +58,7 @@ _SECTION_KEYS: dict[str, frozenset[str]] = {
     "household": frozenset({"enabled"}),
     "comparable": frozenset({"export", "breakdown_fields", "period"}),
     "provenance": frozenset({"tsa_url"}),
-    "review": frozenset({"require_second_reviewer"}),
+    "review": frozenset({"require_second_reviewer", "calibration"}),
 }
 
 _KNOWN_SECTIONS = frozenset(_SECTION_KEYS)
@@ -229,6 +229,7 @@ class Recipe:
     prior: float = defaults.DEFAULT_PRIOR
     auto_threshold: float = defaults.DEFAULT_AUTO_THRESHOLD
     review_threshold: float = defaults.DEFAULT_REVIEW_THRESHOLD
+    review_calibration: int = 0
     fields: tuple[str, ...] = field(default_factory=tuple)
     normalize: NormalizeConfig = field(default_factory=NormalizeConfig)
     extract: ExtractConfig = field(default_factory=ExtractConfig)
@@ -305,6 +306,16 @@ def load_recipe(
     require_second_reviewer = policy.require_second_reviewer or bool(
         review_section.get("require_second_reviewer", False)
     )
+    calibration_value = review_section.get("calibration", 0)
+    if isinstance(calibration_value, bool) or not isinstance(calibration_value, int):
+        raise RecipeError(
+            "recipe [review] calibration must be a whole number of planted pairs, "
+            f"got {calibration_value!r}"
+        )
+    if calibration_value < 0:
+        raise RecipeError(
+            f"recipe [review] calibration must be zero or positive, got {calibration_value}"
+        )
 
     existing_value = input_section.get("existing")
     existing = _resolve(base, str(existing_value)) if existing_value else None
@@ -374,6 +385,7 @@ def load_recipe(
         prior=float(thresholds_section.get("prior", defaults.DEFAULT_PRIOR)),
         auto_threshold=float(thresholds_section.get("auto", defaults.DEFAULT_AUTO_THRESHOLD)),
         review_threshold=float(thresholds_section.get("review", defaults.DEFAULT_REVIEW_THRESHOLD)),
+        review_calibration=calibration_value,
         fields=active_fields,
         normalize=normalize,
         extract=extract,
