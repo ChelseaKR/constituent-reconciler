@@ -195,6 +195,26 @@ class Pair:
 
 
 @dataclass(frozen=True)
+class Correction:
+    """A reviewer's fix to one field on one record, made while deciding a pair.
+
+    ``record_id`` is the record whose raw value is replaced, ``field`` is the
+    canonical field name, and ``value`` is the reviewer-supplied replacement.
+    A correction is applied to the record's raw value before normalization on
+    the next run, so the fix flows through matching and into the golden record
+    exactly the way any other source value does, and the value it replaces
+    does not survive the apply.
+    """
+
+    record_id: str
+    field: str
+    value: str
+    reviewer: str = ""
+    corrected_at: str = ""
+    pair: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
 class Cluster:
     """A set of record ids the pipeline considers the same constituent."""
 

@@ -28,6 +28,7 @@ from constituent_reconciler.connectors.webhook import Transport as WebhookTransp
 from constituent_reconciler.extract.base import ExtractedField
 from constituent_reconciler.models import (
     Consent,
+    Correction,
     GoldenRecord,
     IngestReport,
     Pair,
@@ -489,18 +490,66 @@ def _apply_overrides(
     return adjusted
 
 
+def _group_corrections(
+    corrections: Iterable[Correction], *, fields: tuple[str, ...]
+) -> dict[str, dict[str, str]]:
+    """Group corrections by record and reject fields outside this recipe."""
+
+    grouped: dict[str, dict[str, str]] = {}
+    for correction in corrections:
+        if correction.field not in fields:
+            raise ValueError(
+                f"correction targets field {correction.field!r}, which recipe {fields!r} "
+                "does not map"
+            )
+        if not correction.value.strip():
+            raise ValueError("a correction requires a non-blank replacement value")
+        grouped.setdefault(correction.record_id, {})[correction.field] = correction.value
+    return grouped
+
+
+def _apply_corrections(
+    records: list[Record], corrections_by_record: dict[str, dict[str, str]]
+) -> list[Record]:
+    """Replace corrected raw values before normalization, preserving consent."""
+
+    known_ids = {record.unique_id for record in records}
+    unknown = sorted(set(corrections_by_record) - known_ids)
+    if unknown:
+        raise ValueError(f"correction references record not present in this run: {unknown[0]!r}")
+    corrected: list[Record] = []
+    for record in records:
+        fixes = corrections_by_record.get(record.unique_id)
+        if not fixes:
+            corrected.append(record)
+            continue
+        raw = dict(record.raw)
+        raw.update(fixes)
+        corrected.append(
+            Record(
+                unique_id=record.unique_id,
+                source=record.source,
+                raw=raw,
+                consent=record.consent,
+                spans={name: span for name, span in record.spans.items() if name not in fixes},
+            )
+        )
+    return corrected
+
+
 def run(
     recipe: Recipe,
     *,
     force_auto: Iterable[frozenset[str]] = (),
     force_drop: Iterable[frozenset[str]] = (),
+    corrections: Iterable[Correction] = (),
 ) -> RunResult:
     """Execute the pipeline and return the result.
 
     ``force_auto`` and ``force_drop`` carry human review decisions back in: an
     approved review pair becomes a confident merge, a rejected one is dropped.
-    Scoring is deterministic, so re-running with decisions reproduces the rest of
-    the result exactly.
+    Corrections replace raw field values before normalization, so matching,
+    golden-record reduction, lineage, and export all see the reviewed value.
     """
 
     accounting = IngestAccumulator()
@@ -521,6 +570,9 @@ def run(
         accounting=accounting,
     )
     _check_distinct_ids(raw_records)
+    raw_records = _apply_corrections(
+        raw_records, _group_corrections(corrections, fields=recipe.fields)
+    )
 
     records = {
         r.unique_id: normalize_record(

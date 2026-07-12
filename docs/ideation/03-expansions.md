@@ -10,6 +10,11 @@ in `02-large-scale-fixes.md`.
 
 ### EXP-01 — The "correct" verdict: field-level correction in review
 
+**Status: done (2026-07-12).** Corrections are reviewer- and time-attributed,
+persist separately from the PII-free decisions audit, invalidate earlier
+verdicts when evidence changes, and require a fresh distinct concurrence under
+two-person review before `reconcile apply` may merge the pair.
+
 **Pitch:** Let a reviewer fix a value (a transposed date of birth, a typo'd
 surname) while deciding a pair, completing the approve/correct/reject triad
 the README already promises.

@@ -70,8 +70,8 @@ The pipeline runs as a sequence of logged, deterministic-by-default steps:
    supply labeled pairs. The output is match, non-match, or possible-match.
 5. **Review.** Anything below the auto-merge threshold and any possible-match
    routes to a review queue. A non-technical reviewer sees the source span
-   beside the candidate duplicate and chooses approve or reject; a correct
-   verdict for fixing field values is planned. The confidence gate is
+   beside the candidate duplicate and chooses approve, correct, or reject. A
+   correction fixes one field value while approving the pair. The confidence gate is
    fail-closed: when in doubt, a human looks.
 6. **Write** only approved and consented records, through a connector for the
    target system (CSV, CiviCRM, Salesforce, and a generic webhook today;
@@ -192,7 +192,7 @@ merges and re-resolves.
 
 `reconcile review` opens a local web queue over the uncertain pairs. A reviewer
 steps through each candidate, sees the two records side by side with their
-source spans, and approves the merge or rejects it, with no jargon and no
+source spans, and approves, corrects, or rejects it, with no jargon and no
 spreadsheet:
 
 ```sh
@@ -215,13 +215,23 @@ the same decisions file under their own `--reviewer` name to confirm or reject,
 and `reconcile apply` refuses a file that still holds half-approved pairs. Any
 rejection keeps the records separate immediately.
 
+A correction replaces one field value before normalization and approves the
+pair. It is attributed to the correcting reviewer and stored in
+`out/corrections.json`, separate from the PII-free `decisions.json`. In
+two-person mode, making a correction invalidates earlier verdicts; a later,
+distinct reviewer sees the corrected value and must approve it before the merge
+can be applied. `corrections.json` contains client data and needs the same local
+retention and destruction handling as `resolved.csv`.
+
 The server is offline by construction: it binds the loopback interface only,
-loads no external asset, and writes no field value to disk (the decisions file
-carries record ids, verdicts, reviewer names, and timestamps only). Under the
+loads no external asset, and keeps the decisions file free of field values (it
+carries record ids, verdicts, reviewer names, and timestamps only). A correction
+is the explicit exception described above and is isolated in `corrections.json`. Under the
 `dv` policy pack it refuses any non-loopback bind, fail-closed, so the review
 surface cannot become an egress path for client information. The pages are built for WCAG 2.2 AA: a real
 comparison table, status shown by text and not colour alone, and decision buttons
-that work with the keyboard and with no JavaScript (`A` approve, `R` reject, `J`
+that work with the keyboard and with no JavaScript (`A` approve, `C` correct,
+`R` reject, `J`
 and `K` to move between pairs). Pass `--no-browser` to skip opening a window, or
 `--port 0` to bind a free port.
 

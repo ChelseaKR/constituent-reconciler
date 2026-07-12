@@ -7,6 +7,12 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **Attributed field correction in review (EXP-01)**: reviewers can fix a field
+  while approving a pair. Values live only in local `corrections.json`; the
+  decisions audit remains PII-free. A correction invalidates earlier verdicts,
+  and two-person mode requires a later distinct reviewer to see and approve the
+  corrected evidence before apply. Corrections are applied before normalization
+  and flow through lineage, matching, and export.
 - **Reviewer calibration with planted pairs (EXP-09)**: `[review] calibration = N`
   deterministically mixes clearly synthetic known-answer pairs into the local
   review queue. A persistent banner discloses their presence, the CLI reports
