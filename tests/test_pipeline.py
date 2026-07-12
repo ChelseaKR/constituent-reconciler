@@ -518,8 +518,8 @@ def test_webhook_export_honors_consent_scope_not_just_status(tmp_path: Path) -> 
     assert "X2" not in withheld_text
 
     sent_external_ids = {json.loads(body)["external_id"] for _, _, body in transport.calls}
-    assert "X1" not in sent_external_ids
-    assert "X2" in sent_external_ids
+    assert "incoming:X1" not in sent_external_ids
+    assert "incoming:X2" in sent_external_ids
 
 
 def _write_expiry_fixture(tmp_path: Path) -> Path:

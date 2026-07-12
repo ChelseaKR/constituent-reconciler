@@ -84,19 +84,8 @@ def _output_for(name: str) -> OutputConfig:
     return OutputConfig(connector=name)
 
 
-def _build(name: str, out_dir: Path, *, live: bool) -> tuple[Connector, list[Any]]:
-    """Build a connector through the registry with a fake transport.
-
-    ``live`` queues enough fake responses for one write of RECORDS; a dry-run
-    build queues none, so any transport use fails loudly. Returns the
-    connector and the live list of calls the fake transport records (empty
-    list for local connectors, which take no transport).
-    """
-    transports: dict[str, object] = {}
-    calls: list[Any] = []
+def _fake_transport(name: str, *, live: bool) -> object | None:
     if name == "civicrm":
-        # Per record: Contact lookup/create, then Email/Phone lookup/create
-        # for whichever dedicated detail entities have values.
         responses: list[tuple[int, dict[str, object]]] = []
         if live:
             for i, record in enumerate(RECORDS, start=1):
@@ -107,24 +96,37 @@ def _build(name: str, out_dir: Path, *, live: bool) -> tuple[Connector, list[Any
                             (200, {"values": []}),
                             (200, {"values": [{"id": f"{i}-{field_name}"}]}),
                         ]
-        civicrm_fake = FakeCivicrmTransport(responses)
-        transports["civicrm"] = civicrm_fake
-        calls = civicrm_fake.calls
-    elif name == "salesforce":
-        sf_responses: list[tuple[int, dict[str, object] | None]] = []
-        if live:
-            for i, _ in enumerate(RECORDS, start=1):
-                sf_responses.append((201, {"id": f"003{i:03d}", "success": True, "created": True}))
-        sf_fake = FakeSalesforceTransport(sf_responses)
-        transports["salesforce"] = sf_fake
-        calls = sf_fake.calls
-    elif name == "webhook":
-        wh_responses: list[tuple[int, bytes]] = []
-        if live:
-            wh_responses = [(200, b"") for _ in RECORDS]
-        wh_fake = FakeWebhookTransport(wh_responses)
-        transports["webhook"] = wh_fake
-        calls = wh_fake.calls
+        return FakeCivicrmTransport(responses)
+    if name == "salesforce":
+        sf_responses: list[tuple[int, dict[str, object] | None]] = (
+            [
+                (201, {"id": f"003{i:03d}", "success": True, "created": True})
+                for i, _ in enumerate(RECORDS, start=1)
+            ]
+            if live
+            else []
+        )
+        return FakeSalesforceTransport(sf_responses)
+    if name == "webhook":
+        return FakeWebhookTransport([(200, b"") for _ in RECORDS] if live else [])
+    return None
+
+
+def _build(name: str, out_dir: Path, *, live: bool) -> tuple[Connector, list[Any]]:
+    """Build a connector through the registry with a fake transport.
+
+    ``live`` queues enough fake responses for one write of RECORDS; a dry-run
+    build queues none, so any transport use fails loudly. Returns the
+    connector and the live list of calls the fake transport records (empty
+    list for local connectors, which take no transport).
+    """
+    fake = _fake_transport(name, live=live)
+    transports = {name: fake} if fake is not None else {}
+    calls = (
+        fake.calls
+        if isinstance(fake, (FakeCivicrmTransport, FakeSalesforceTransport, FakeWebhookTransport))
+        else []
+    )
     connector = get_factory(name)(_output_for(name), out_dir, transports)
     return connector, calls
 

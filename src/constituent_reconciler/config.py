@@ -52,6 +52,7 @@ _SECTION_KEYS: dict[str, frozenset[str]] = {
             "external_id_field",
             "api_version",
             "object_name",
+            "signing_secret_env",
         }
     ),
     "household": frozenset({"enabled"}),
