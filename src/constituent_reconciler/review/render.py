@@ -295,9 +295,11 @@ def _correction_fieldset(view: PairView) -> str:
         f'<label for="field-{view.index}">Field</label>'
         f'<select id="field-{view.index}" name="field">{options}</select>'
         "<fieldset><legend>Which record is wrong</legend>"
-        f'<input type="radio" name="side" value="left" checked aria-label="{escape(view.left_id)}"> '
+        '<input type="radio" name="side" value="left" checked '
+        f'aria-label="{escape(view.left_id)}"> '
         f"{escape(view.left_id)} "
-        f'<input type="radio" name="side" value="right" aria-label="{escape(view.right_id)}"> '
+        '<input type="radio" name="side" value="right" '
+        f'aria-label="{escape(view.right_id)}"> '
         f"{escape(view.right_id)}</fieldset>"
         f'<label for="value-{view.index}">Correct value</label>'
         f'<input type="text" id="value-{view.index}" name="value" required>'
