@@ -115,6 +115,10 @@ for (const file of files) {
     for (const inc of unexpected) {
       console.log(`  [${inc.id}] ${inc.help} (${inc.message ?? "needs manual review"})`);
       console.log(`    ${inc.helpUrl}`);
+      for (const node of inc.nodes) {
+        console.log(`    target: ${node.target.join(" ")}`);
+        console.log(`    html:   ${node.html}`);
+      }
     }
   }
 }

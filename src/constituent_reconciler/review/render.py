@@ -291,18 +291,18 @@ def _correction_fieldset(view: PairView) -> str:
         for cell in view.fields
     )
     return (
-        '<fieldset class="correct-fieldset"><legend>Fix a value and approve</legend>'
+        '<div class="correct-fieldset"><h3>Fix a value and approve</h3>'
         f'<label for="field-{view.index}">Field</label>'
         f'<select id="field-{view.index}" name="field">{options}</select>'
-        "<label>Which record is wrong</label>"
-        '<label><input type="radio" name="side" value="left" checked> '
-        f"{escape(view.left_id)}</label>"
-        '<label><input type="radio" name="side" value="right"> '
-        f"{escape(view.right_id)}</label>"
+        "<fieldset><legend>Which record is wrong</legend>"
+        f'<input type="radio" name="side" value="left" checked aria-label="{escape(view.left_id)}"> '
+        f"{escape(view.left_id)} "
+        f'<input type="radio" name="side" value="right" aria-label="{escape(view.right_id)}"> '
+        f"{escape(view.right_id)}</fieldset>"
         f'<label for="value-{view.index}">Correct value</label>'
         f'<input type="text" id="value-{view.index}" name="value" required>'
         '<div class="actions"><button type="submit" name="verdict" value="correct" '
-        'accesskey="c">Save correction <kbd>C</kbd></button></div></fieldset>'
+        'accesskey="c">Save correction <kbd>C</kbd></button></div></div>'
     )
 
 
