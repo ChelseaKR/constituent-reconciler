@@ -3,36 +3,56 @@
 Project-specific findings for constituent-reconciler, following a standard
 responsible-tech audit method: ethics, bias, privacy and a DPIA, transparency,
 accessibility, and security. This is a committed, dated artifact, regenerated on
-release. It is a stub at v0.x; each section is filled in as the phase that
-creates the surface lands.
+release. Each implemented surface below names its evidence and residual risk;
+human and external gates remain explicit rather than being marked complete.
 
 This tool handles some of the most sensitive data a nonprofit holds. The audit
 is not a launch afterthought; its checks are wired into CI from the first phase,
 and the privacy invariants below are merge-blocking tests, not prose.
 
-Status: v0.7. The privacy section's DV-pack invariants are implemented and
-merge-blocking; sections marked TODO are scoped but not yet measured.
+Status: v0.7. The privacy invariants are merge-blocking; ethics failure modes,
+the untrusted-document threat model, and disaggregated synthetic bias results
+are documented. The manual screen-reader and real-organization adoption gates
+remain open.
 
-Last verified: 2026-07-05 · Recheck cadence: per release (the "regenerated on
-release" promise above broke for v0.6 and v0.7 — see the 2026-07-05
-remediation log in `CHANGELOG.md` — this stamp exists so staleness is visible
-going forward instead of silent).
+Last verified: 2026-07-12 · Recheck cadence: per release.
 
 ## Ethics
 
 The asymmetry of harm drives the design. A false merge can corrupt or expose a
 person's record across programs and is sometimes irreversible; a missed match
 leaves a harmless duplicate. The system therefore never auto-merges on
-uncertainty and routes every ambiguous decision to a person. TODO: document the
-failure modes considered and the decisions made.
+uncertainty and routes every ambiguous decision to a person.
+
+| Failure mode | Decision and evidence | Residual risk |
+|---|---|---|
+| False merge | 0% fixture gate, cannot-link rejection constraints, and human review below the auto threshold | Fixtures cannot represent every population or source |
+| Missed match | Report separately; retain duplicates instead of lowering the safety threshold | Staff may do extra review or leave a duplicate unresolved |
+| Consent failure | Destination-scoped, dated consent is checked before every connector; withheld artifacts contain ids and reasons only | Deployers own lawful consent collection and expiry policy |
+| Extraction error | Offline default, source spans, confidence gate, and local fallback on model failure | Cloud-refined fields are not yet provenance-tagged |
+| Reviewer error | Attributed decisions, optional two-person review, and synthetic calibration pairs | A single-reviewer deployment still relies on that person's judgment |
 
 ## Bias
 
 Record-linkage and extraction error is not evenly distributed. Name matching
 degrades on transliterated names, hyphenated and changed surnames, and
 non-Western name order; address parsing degrades on rural and informal
-addresses. TODO: report measured error by name and address class on the eval
-fixtures, and the mitigations.
+addresses. The committed R5 audit at
+[`docs/audits/bias-report.md`](./audits/bias-report.md) plants one true pair for
+each of those five documented classes and is regenerated in CI with
+`make eval-bias`.
+
+As of 2026-07-12, all five pairs reach candidate scoring (zero blocking misses),
+with 100% auto+review coverage for hyphenated/punctuated surname, rural-route
+address, and informal address description. Transliterated name and non-Western
+name order are both 0% coverage at the current threshold. The small synthetic
+sample is a regression probe, not a demographic performance claim. The current
+mitigation is to keep the false-merge threshold fail-closed, expose the misses
+instead of tuning to this fixture, preserve source spans for human comparison,
+and require an adopting organization to evaluate representative local names
+and addresses before deployment. Expanding these two classes and setting a
+review-coverage gate requires reviewed data from an adopting organization; no
+real constituent data is committed here.
 
 ## Privacy and data minimization (DPIA)
 
@@ -133,9 +153,11 @@ commit the ACR.
 standard's PII-handling floor). OWASP ASVS-aligned posture: SBOM, Sigstore,
 SHA-pinned actions, OIDC, secret scanning. Untrusted input (uploaded PDFs) is a
 primary threat surface; parsing currently runs in-process, and a sandboxed,
-resource-limited extraction path is planned. TODO: commit the threat model.
+resource-limited extraction path is planned. The committed threat model is
+[`THREAT-MODEL.md`](./THREAT-MODEL.md), re-verified 2026-07-12 after the
+Bedrock/local inference and telemetry paths landed.
 
-Declarations (2026-07-05), each Applies/gap tracked in the README standards
+Declarations (re-verified 2026-07-12), each Applies/gap tracked in the README standards
 table rather than left blank:
 
 * **Secret scanning:** Applies — enforced. `.pre-commit-config.yaml` runs
@@ -176,10 +198,12 @@ table rather than left blank:
 Two portfolio standards outside the A–F sections above, declared here per
 RTF-07 rather than left silent:
 
-* **AI-Evaluation-Standard: N/A** — no model inference in any user-facing or
-  decision path today (`BedrockSeam.refine()` is an unimplemented stub; every
-  policy pack defaults to `NoOpSeam`). Full declaration and the flip-to-Applies
-  trigger: `docs/ROADMAP.md` § "AI Evaluation Standard applicability".
+* **AI-Evaluation-Standard: Applies** to the opt-in Bedrock and local extraction
+  seams. The implementation has a fail-closed calibration gate, model/data
+  cards, mocked contract and fallback tests, and PII-free canonical GenAI
+  telemetry with token/cost accounting. It makes no live hosted-model accuracy
+  claim; deployer-specific benchmarking remains required. Full declaration:
+  `docs/ROADMAP.md` § "AI Evaluation Standard applicability".
 * **Internationalization-Standard: Applies — deferred** to the 1.0 milestone.
   Full declaration, current state, and the catalog plan: `docs/I18N.md`.
 

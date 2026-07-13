@@ -1,6 +1,6 @@
 # 0003 — Extraction seam and cloud gate
 
-Status: accepted (v0.3)
+Status: accepted (v0.3); implementation amendment recorded 2026-07-12
 
 ## Context
 
@@ -84,13 +84,14 @@ signal, not a calibrated probability. When an LLM extraction judge is wired in
 (a later hardening step), Cohen's kappa against human labels will be the
 calibration gate, and `cohen_kappa()` in `evaluate.py` is the seam.
 
-### Cloud seam: protocol, not integration
+### Cloud seam: protocol with an opt-in integration
 
 `CloudSeam` is a Protocol. `NoOpSeam` always returns nothing. `BedrockSeam`
-checks for boto3 at `is_enabled()` time and defines the interface that a
-deployer wires in; `refine()` raises `NotImplementedError` until the
-page-to-image conversion and response parser are implemented, which makes the
-gap explicit rather than silent.
+checks for boto3 at `is_enabled()` time. The original v0.3 decision shipped
+`refine()` as an explicit placeholder; the later implementation now renders
+one page to PNG, calls Bedrock Converse, parses strict JSON, and falls back to
+the offline extraction on call or response failure. The protocol and
+construction-time policy gate did not change.
 
 The gate in `make_seam(policy_pack, backend)` is the policy enforcement point.
 DV and HIPAA packs always get `NoOpSeam` regardless of what the recipe sets for
@@ -110,12 +111,10 @@ not fail the record.
 
 ### Cohen's kappa for extraction calibration
 
-`cohen_kappa(predicted, actual)` is now in `evaluate.py`. It is not yet wired
-into the eval report because v0.3 uses regex extraction rather than an LLM judge,
-and labeling a corpus of extraction outputs for calibration is out of scope for
-this phase. The function is the seam: when a cloud seam's confidence scores are
-compared against human-labeled extraction accuracy, kappa below 0.6 is the
-drift threshold at which the gate fails closed.
+`cohen_kappa(predicted, actual)` is in `evaluate.py` and is now wired into the
+eval report. Missing, malformed, or below-0.6 calibration labels fail closed.
+That gate measures agreement on the committed synthetic labels; it is not a
+live Bedrock accuracy claim.
 
 ## Consequences
 
@@ -125,10 +124,9 @@ drift threshold at which the gate fails closed.
   the write step, enforced in `make_seam()` and covered by tests.
 - pdfplumber is an optional runtime dependency; the core package still works for
   CSV-only runs without it.
-- `BedrockSeam.refine()` raises `NotImplementedError` until a deployer wires in
-  the full implementation; the placeholder is intentional and honest.
-- `cohen_kappa()` is available in `evaluate.py` for when a labeled extraction
-  corpus and an LLM field-judge are in scope.
+- `BedrockSeam.refine()` is an opt-in implementation with a fake-able client,
+  local fallback, and PII-free canonical token/duration/cost telemetry.
+- `cohen_kappa()` is a fail-closed calibration gate over committed labels.
 - `backend = "pdfplumber+ocr"` OCRs any page with no text layer via Tesseract
   (`pytesseract`, the new `ocr` extra); a text-layer PDF behaves identically to
   `backend = "pdfplumber"` and never imports the OCR path.

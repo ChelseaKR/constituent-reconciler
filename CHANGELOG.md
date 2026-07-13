@@ -7,6 +7,19 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **Canonical GenAI observability for opt-in extraction seams.** Bedrock
+  Converse and loopback-local model calls now emit the reviewed, pinned
+  STANDARDS telemetry schema: provider/model identity, input/output tokens,
+  duration, finish reason, and estimated cost. Page images, prompts, responses,
+  record ids, and extracted values are excluded; regression tests exercise the
+  JSON payload with representative PII. The vendored shim records its immutable
+  STANDARDS commit in `.standards-version`.
+- **Disaggregated matching-risk audit (R5).** `evaluate()` accepts explicit
+  planted pairs by risk class, the Markdown report renders per-class surfaced
+  and blocking-miss counts, and `examples/bias-demo/` covers transliterated,
+  hyphenated/punctuated, non-Western-order, rural-route, and informal-address
+  cases. `make eval-bias` regenerates `docs/audits/bias-report.md`, and CI
+  blocks report drift while preserving measured misses.
 - **Binding human rejections (FIX-02)**: rejected pairs are cannot-link
   constraints on final clustering. If transitive AUTO edges would reunite a
   rejected pair, the component is refused and its automatic edges return to
@@ -68,6 +81,18 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   resumed review session warns on stderr when a saved decision references a
   pair that is not in the current run's review queue, instead of ignoring it
   silently.
+
+### Fixed
+- `make test` no longer nests pytest-cov inside `coverage run`, which overwrote
+  the valid pytest coverage data with an empty outer report. Pytest now owns the
+  single coverage session, and the temporary 84% threshold is raised to the
+  documented 85% branch-coverage gate (87.65% observed on this change).
+- The review server accepts the IPv6 loopback host form it actually binds,
+  without weakening the loopback-only and Host-header checks.
+- Consent withholding summaries now evaluate the destination-scoped consent
+  lifecycle, so an out-of-scope grant cannot be reported as exportable.
+- CiviCRM contact creation fails closed when the API returns an empty response,
+  before any email or phone entity write is attempted.
 
 #### Migration note (FIX-03)
 Record ids embedded in artifacts written by earlier versions (decisions files,

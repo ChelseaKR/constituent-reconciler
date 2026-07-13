@@ -22,8 +22,10 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from constituent_reconciler._vendor.genai_telemetry import Usage, cost_usd
 from constituent_reconciler.extract.base import ExtractedField
 from constituent_reconciler.policy import policy_for
+from constituent_reconciler.telemetry import genai_call
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,11 @@ _MISSING_RENDER_DEPS = (
     "low-confidence pages for cloud refinement. Install it with: "
     "pip install 'constituent-reconciler[extract]'"
 )
+
+
+def _usage_count(usage: dict[str, Any], key: str, *, default: int | None = None) -> int | None:
+    value = usage.get(key, default)
+    return value if type(value) is int and value >= 0 else None
 
 
 def _page_to_png(path: Path, page_num: int) -> bytes:
@@ -225,7 +232,7 @@ class BedrockSeam:
 
     def __init__(
         self,
-        model_id: str = "us.anthropic.claude-sonnet-4-6:0",
+        model_id: str = "us.anthropic.claude-sonnet-4-6",
         client: Any | None = None,
     ) -> None:
         self._model_id = model_id
@@ -256,19 +263,61 @@ class BedrockSeam:
             return []
         png_bytes = _page_to_png(path, page_num)
         try:
-            result = self._client.converse(
-                modelId=self._model_id,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"image": {"format": "png", "source": {"bytes": png_bytes}}},
-                            {"text": _build_prompt()},
-                        ],
-                    }
-                ],
-                inferenceConfig={"maxTokens": 1024},
-            )
+            with genai_call("aws.bedrock", self._model_id) as call:
+                result = self._client.converse(
+                    modelId=self._model_id,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"image": {"format": "png", "source": {"bytes": png_bytes}}},
+                                {"text": _build_prompt()},
+                            ],
+                        }
+                    ],
+                    inferenceConfig={"maxTokens": 1024},
+                )
+                usage = result.get("usage")
+                if isinstance(usage, dict):
+                    fresh_input_tokens = _usage_count(usage, "inputTokens")
+                    output_tokens = _usage_count(usage, "outputTokens")
+                    cache_creation_input_tokens = _usage_count(
+                        usage, "cacheWriteInputTokens", default=0
+                    )
+                    cache_read_input_tokens = _usage_count(usage, "cacheReadInputTokens", default=0)
+                    if (
+                        fresh_input_tokens is not None
+                        and output_tokens is not None
+                        and cache_creation_input_tokens is not None
+                        and cache_read_input_tokens is not None
+                    ):
+                        input_tokens = (
+                            fresh_input_tokens
+                            + cache_creation_input_tokens
+                            + cache_read_input_tokens
+                        )
+                        call.record_completion(
+                            model=self._model_id,
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens,
+                            cache_creation_input_tokens=cache_creation_input_tokens,
+                            cache_read_input_tokens=cache_read_input_tokens,
+                            cost_usd=cost_usd(
+                                Usage(
+                                    self._model_id,
+                                    input_tokens=input_tokens,
+                                    output_tokens=output_tokens,
+                                    cache_creation_input_tokens=cache_creation_input_tokens,
+                                    cache_read_input_tokens=cache_read_input_tokens,
+                                    provider="aws.bedrock",
+                                )
+                            ),
+                            finish_reason=(
+                                result.get("stopReason")
+                                if isinstance(result.get("stopReason"), str)
+                                else None
+                            ),
+                        )
         except Exception:
             logger.warning(
                 "Bedrock refinement failed for %s page %d; keeping local extraction",
@@ -331,10 +380,27 @@ class LocalSeam:
             f"{text}"
         )
         try:
-            response = self._json_request(
-                "/api/generate",
-                {"model": self._model_id, "prompt": prompt, "stream": False, "format": "json"},
-            )
+            with genai_call("ollama", self._model_id) as call:
+                response = self._json_request(
+                    "/api/generate",
+                    {
+                        "model": self._model_id,
+                        "prompt": prompt,
+                        "stream": False,
+                        "format": "json",
+                    },
+                )
+                input_tokens = response.get("prompt_eval_count", 0)
+                output_tokens = response.get("eval_count", 0)
+                call.record_completion(
+                    model=self._model_id,
+                    input_tokens=input_tokens if isinstance(input_tokens, int) else 0,
+                    output_tokens=output_tokens if isinstance(output_tokens, int) else 0,
+                    cost_usd=0.0,
+                    finish_reason=response.get("done_reason")
+                    if isinstance(response.get("done_reason"), str)
+                    else None,
+                )
         except (OSError, urllib.error.URLError, json.JSONDecodeError):
             logger.warning(
                 "Local model refinement failed for %s page %d; keeping local extraction",

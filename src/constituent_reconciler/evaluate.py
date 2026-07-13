@@ -66,6 +66,18 @@ def truth_pairs(clusters: Iterable[Iterable[str]]) -> set[frozenset[str]]:
 
 
 @dataclass(frozen=True)
+class SegmentScore:
+    """Coverage outcome for one documented matching-risk class."""
+
+    name: str
+    n_true_pairs: int
+    n_surfaced: int
+    n_missed: int
+    coverage_recall: float
+    blocking_misses: int
+
+
+@dataclass(frozen=True)
 class EvalReport:
     n_records: int
     n_true_pairs: int
@@ -88,6 +100,34 @@ class EvalReport:
     recall_coverage: float
 
     blocking_misses: int
+    segments: tuple[SegmentScore, ...] = ()
+
+
+def _segment_truth_pairs(
+    segments: Mapping[str, Iterable[Iterable[str]]],
+    truth: set[frozenset[str]],
+) -> dict[str, set[frozenset[str]]]:
+    """Validate and expand named risk-class pairs from a ground-truth fixture."""
+
+    expanded: dict[str, set[frozenset[str]]] = {}
+    for name, raw_pairs in segments.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("segment names must be non-empty strings")
+        pairs: set[frozenset[str]] = set()
+        for raw_pair in raw_pairs:
+            members = list(raw_pair)
+            if len(members) != 2 or not all(isinstance(member, str) for member in members):
+                raise ValueError(f"segment {name!r} entries must be two record ids")
+            pair = frozenset(members)
+            if len(pair) != 2:
+                raise ValueError(f"segment {name!r} entries must name two distinct records")
+            if pair not in truth:
+                raise ValueError(f"segment {name!r} pair {sorted(pair)!r} is not ground truth")
+            pairs.add(pair)
+        if not pairs:
+            raise ValueError(f"segment {name!r} must contain at least one pair")
+        expanded[name] = pairs
+    return expanded
 
 
 def cohen_kappa(predicted: list[bool], actual: list[bool]) -> float:
@@ -171,6 +211,8 @@ def evaluate(
     pairs: Iterable[Pair],
     truth_clusters: Iterable[Iterable[str]],
     n_records: int,
+    *,
+    segments: Mapping[str, Iterable[Iterable[str]]] | None = None,
 ) -> EvalReport:
     """Score banded pairs against ground-truth clusters."""
 
@@ -189,6 +231,21 @@ def evaluate(
     caught_cov = len(coverage & truth)
     missed = truth - coverage
     missed_rate = len(missed) / len(truth) if truth else 0.0
+    segment_scores: list[SegmentScore] = []
+    if segments:
+        for name, segment_truth in sorted(_segment_truth_pairs(segments, truth).items()):
+            surfaced = segment_truth & coverage
+            segment_missed = segment_truth - coverage
+            segment_scores.append(
+                SegmentScore(
+                    name=name,
+                    n_true_pairs=len(segment_truth),
+                    n_surfaced=len(surfaced),
+                    n_missed=len(segment_missed),
+                    coverage_recall=len(surfaced) / len(segment_truth),
+                    blocking_misses=len(segment_truth - candidate),
+                )
+            )
 
     return EvalReport(
         n_records=n_records,
@@ -207,6 +264,7 @@ def evaluate(
         precision_coverage=(caught_cov / len(coverage)) if coverage else 1.0,
         recall_coverage=(caught_cov / len(truth)) if truth else 1.0,
         blocking_misses=len(truth - candidate),
+        segments=tuple(segment_scores),
     )
 
 

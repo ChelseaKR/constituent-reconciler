@@ -112,17 +112,17 @@ Priority: **P0** now, **P1** next, **P2** soon, **P3** opportunistic. Effort:
 
 | ID | Remediation | Personas | Pri | Effort | Evidence / tag |
 | --- | --- | --- | --- | --- | --- |
-| R1 | **Run the axe audit and screen-reader walkthrough, and add EN/ES review-UI copy** so the 1.0 accessibility gate can close | A2, A4, D1, C2 | P0 | M | `docs/ROADMAP.md` v0.7 "still open"; `RESPONSIBLE-TECH-AUDITS.md` accessibility TODO; README EN/ES parity. **[corroborates ROADMAP v0.7 / audits]** |
+| R1 | **Run the axe audit and screen-reader walkthrough, and add EN/ES review-UI copy** so the 1.0 accessibility gate can close. Automated axe is enforced; the real-assistive-technology walkthrough, reviewed Spanish copy, and ACR remain human gates | A2, A4, D1, C2 | P0 | M | `docs/ROADMAP.md` v0.7; `RESPONSIBLE-TECH-AUDITS.md`; `docs/reviews/SCREEN-READER-WALKTHROUGH.md`. **[corroborates ROADMAP v0.7 / audits]** |
 | R2 | **Wire RFC 3161 trusted timestamping to a real TSA** so provenance timestamps are independently anchored. ✅ Implemented 2026-07-02: `Rfc3161Authority` with fail-closed response verification, selected by `[provenance] tsa_url` or `--tsa-url`; the local clock stays the default, and the DV pack refuses the network authority | E1, C2, C1, F2 | P1 | M | `docs/ROADMAP.md` v0.2; CHANGELOG 0.5 "not yet". **[corroborates ROADMAP v0.2]** |
-| R3 | **Ship the supply-chain hardening**: SBOM, Sigstore-signed releases, SHA-pinned actions, OIDC, secret scanning | C1, F1, E1 | P1 | M | README Standards; `DPG-CONFORMANCE.md` indicator 8 "partially landed"; metrics ledger; `RESPONSIBLE-TECH-AUDITS.md` security. **[corroborates ROADMAP / DPG note]** |
+| R3 | **Ship the supply-chain hardening**: SBOM, Sigstore-signed releases, SHA-pinned actions, OIDC, secret scanning. ✅ Implementation landed: pinned actions, gitleaks/TruffleHog, Semgrep/CodeQL/zizmor, Trivy, and a release workflow with CycloneDX plus keyless provenance. Operational evidence remains blocked on the first `v*` tag, and the committed ruleset still needs applying to live repository settings | C1, F1, E1 | P1 | M | README Standards; `RESPONSIBLE-TECH-AUDITS.md` security. **[corroborates ROADMAP / DPG note]** |
 | R4 | **Commit the threat model** for the untrusted-PDF/scan parse path. ✅ Implemented 2026-07-02, see `docs/THREAT-MODEL.md` | C1, F1 | P1 | S | `RESPONSIBLE-TECH-AUDITS.md` security TODO. **[corroborates audits]** |
-| R5 | **Measure and report bias by name class** (transliterated, hyphenated, non-Western order) **and address class** (rural/informal) on the eval fixtures, with mitigations | C2, F1, D2, A2 | P1 | M | `RESPONSIBLE-TECH-AUDITS.md` bias TODO; `DPG-CONFORMANCE.md` indicator 9 residual risk. **[corroborates audits / DPG note]** |
-| R6 | **Fill the metrics-ledger targets** (false-merge threshold, coverage floors, kappa drift gate) that are currently TBD. ✅ Implemented 2026-06-30 (working tree, uncommitted) | F2, F1, E1, B1 | P1 | S | `docs/ROADMAP.md` metrics ledger "TBD". **[corroborates ROADMAP]** |
+| R5 | **Measure and report bias by name class** (transliterated, hyphenated, non-Western order) **and address class** (rural/informal) on the eval fixtures, with mitigations. ✅ Implemented 2026-07-12: explicit segment scoring, seeded `examples/bias-demo/`, CI-regenerated `docs/audits/bias-report.md`, and measured gaps retained in the responsible-tech audit | C2, F1, D2, A2 | P1 | M | `RESPONSIBLE-TECH-AUDITS.md`; `DPG-CONFORMANCE.md` indicator 9 residual risk. **[corroborates audits / DPG note]** |
+| R6 | **Fill the metrics-ledger targets** (false-merge threshold, coverage floors, kappa drift gate). ✅ Implemented; the disaggregated risk-class REVIEW metric was added 2026-07-12 | F2, F1, E1, B1 | P1 | S | `docs/ROADMAP.md` metrics ledger. **[corroborates ROADMAP]** |
 | R7 | **Record the end-to-end CiviCRM demo** of messy input landing in a running instance, and write email/phone through dedicated CiviCRM entities instead of the API v4 join-field shorthand. ✅ Entity half implemented 2026-07-11; the recorded demo still needs a running instance | B1, B2, C3 | P1 | M | `docs/ROADMAP.md` v0.2 "still open". **[corroborates ROADMAP v0.2]** |
-| R8 | **Define the retention and destruction model per policy pack**, plus the data-flow map; the DV pack should support routine destruction of individual records. ✅ Implemented 2026-07-01 (working tree, uncommitted) | C2, D1, E1 | P1 | M | `RESPONSIBLE-TECH-AUDITS.md` privacy TODO; HUD Comparable Database Manual (routine destruction). **[corroborates audits + NET-NEW destruction detail]** |
-| R9 | **Publish a model card and data card** for the optional Bedrock extraction seam | C2, F1, C1 | P2 | S | `RESPONSIBLE-TECH-AUDITS.md` transparency TODO. **[corroborates audits]** |
+| R8 | **Define the retention and destruction model per policy pack**, plus the data-flow map; the DV pack should support routine destruction of individual records. ✅ Implemented 2026-07-01 in `DATA-FLOW-AND-RETENTION.md` and the destruction commands | C2, D1, E1 | P1 | M | `RESPONSIBLE-TECH-AUDITS.md`; HUD Comparable Database Manual (routine destruction). **[corroborates audits + NET-NEW destruction detail]** |
+| R9 | **Publish a model card and data card** for the optional Bedrock extraction seam. ✅ Implemented and re-verified 2026-07-12 against the live Converse path and content-free telemetry: `docs/MODEL-CARD.md`, `docs/DATA-CARD.md` | C2, F1, C1 | P2 | S | `RESPONSIBLE-TECH-AUDITS.md` transparency section. **[corroborates audits]** |
 | R10 | **Wire `cohen_kappa()` into the eval report** as the LLM field-judge calibration gate, fail-closed on drift. ✅ Implemented 2026-07-02: `reconcile eval --calibration` scores a committed labels fixture, renders the kappa section in `eval/report.md`, and exits 1 on a missing or failing file | F2, F1 | P2 | M | `docs/ROADMAP.md` v0.3 and metrics ledger; CHANGELOG 0.3 "not yet wired". **[corroborates ROADMAP]** |
-| R11 | **Show a plain-language match rationale beside each review pair** ("agree on last name and address, differ on date of birth") so the reviewer is not deciding on source spans alone. ✅ Implemented 2026-06-30 (working tree, uncommitted) | A2, A4, A3 | P1 | M | README review surface; `CLAUDE.md` "no jargon" mandate; Fellegi-Sunter agreement pattern. **[NET-NEW]** |
+| R11 | **Show a plain-language match rationale beside each review pair** ("agree on last name and address, differ on date of birth") so the reviewer is not deciding on source spans alone. ✅ Implemented in `review/session.py` and rendered in the web queue | A2, A4, A3 | P1 | M | README review surface; `CLAUDE.md` "no jargon" mandate; Fellegi-Sunter agreement pattern. **[NET-NEW]** |
 
 ## Expansion backlog (new capability)
 
@@ -131,11 +131,11 @@ Priority: **P0** now, **P1** next, **P2** soon, **P3** opportunistic. Effort:
 | E1 | **HMIS comparable-database and Open Referral HSDS output mappings** so funder reports come out of the same pipeline | E1, B1, C3, F1 | P1 | L | `docs/ROADMAP.md` open question 4; [HSDS](https://docs.openreferral.org/en/latest/hsds/overview.html); HUD Comparable Database Manual. **[corroborates open question 4]** |
 | E2 | **One-command comparable-database export profile** for VSPs (a CoC-shaped aggregate report) built on the DV pack's `aggregate_summary.json`. ✅ Implemented 2026-07-02 (`reconcile export-comparable` emits `comparable_report.json`) | D1, E1, C2, C3 | P1 | M | DV pack aggregate; HUD Comparable Database Manual. **[corroborates DV pack + NET-NEW report shape]** |
 | E3 | **More connectors**: Apricot, Airtable, Google Sheets, generic webhook, on the existing `Connector` interface. Webhook implemented (`connectors/webhook.py`, `docs/connectors/webhook.md`); Apricot/Airtable/Sheets researched and design-briefed only (`docs/connectors/{apricot,airtable,sheets}-design.md`) -- each needs a priority decision and API credentials this environment does not have before implementation | B1, B2, C3 | P2 | L | README "Salesforce, Airtable, Sheets, CSV and webhook to follow"; ROADMAP architecture diagram. **[corroborates ROADMAP]** |
-| E4 | **Reviewer audit trail and optional two-person review for the DV pack**: record who decided each pair, allow a second-reviewer requirement on sensitive merges. ✅ Implemented 2026-07-02 (branch `roadmap/e4-reviewer-audit-trail-and-optional-two`): `--reviewer` attribution in `decisions.json`'s audit section, `--require-second-reviewer` / recipe `[review]` switch, on by default under the dv pack | C2, C1, D1, B1 | P2 | M | Provenance log records writes only today. **[NET-NEW]** |
-| E5 | **Documented CRM dedupe-rule cooperation**: a CiviCRM unsupervised-rule and an NPSP matching-rule configuration that work with the external-id upsert instead of fighting it. ✅ Implemented 2026-07-01 (working tree, uncommitted), see `docs/CRM-DEDUPE-COOPERATION.md` | B2, B1 | P2 | M | `docs/ROADMAP.md` open question 2; [CiviCRM dedupe](https://civicrm.org/blog/spidersilk/understanding-civicrm-dedupe-rules); [NPSP duplicate management](https://help.salesforce.com/s/articleView?id=sfdo.configure_duplicate_detection_and_npsp_contact_merge.htm&language=en_US&type=5). **[corroborates open question 2 + NET-NEW deliverable]** |
+| E4 | **Reviewer audit trail and optional two-person review for the DV pack**: record who decided each pair, allow a second-reviewer requirement on sensitive merges. ✅ Implemented: `--reviewer` attribution in `decisions.json`'s audit section, `--require-second-reviewer` / recipe `[review]` switch, on by default under the dv pack | C2, C1, D1, B1 | P2 | M | Review audit tests. **[NET-NEW]** |
+| E5 | **Documented CRM dedupe-rule cooperation**: a CiviCRM unsupervised-rule and an NPSP matching-rule configuration that work with the external-id upsert instead of fighting it. ✅ Implemented in `docs/CRM-DEDUPE-COOPERATION.md` | B2, B1 | P2 | M | `docs/ROADMAP.md` open question 2; [CiviCRM dedupe](https://civicrm.org/blog/spidersilk/understanding-civicrm-dedupe-rules); [NPSP duplicate management](https://help.salesforce.com/s/articleView?id=sfdo.configure_duplicate_detection_and_npsp_contact_merge.htm&language=en_US&type=5). **[corroborates open question 2 + NET-NEW deliverable]** |
 | E6 | **Harden and test the libpostal backend in CI, and add position-sensitive address matching** to retire the documented position-insensitive simplification | A1, D2, C2 | P2 | M | ADR 0004 / `docs/ROADMAP.md` v0.4; [libpostal](https://github.com/openvenues/libpostal). **[corroborates ROADMAP v0.4 + NET-NEW]** |
 | E7 | **Un-merge / reversibility path** so a wrong merge found after the write can be reversed, directly attacking the gated harm | A3, B1, D2, C3 | P2 | L | README/ROADMAP "a false merge is sometimes irreversible". **[NET-NEW]** |
-| E8 | **Pilot-readiness adoption kit**: a short "bring your own org" guide (map your spreadsheet, pick a pack, dry-run, read the eval) to drive the real-organization adoption the 1.0 tag is gated on. ✅ Implemented 2026-06-30 (working tree, uncommitted), see `docs/ADOPTION-KIT.md` | C3, B1, B2, F2 | P1 | M | `docs/ROADMAP.md` v1.0 adoption gate; `CLAUDE.md` audiences. **[NET-NEW]** |
+| E8 | **Pilot-readiness adoption kit**: a short "bring your own org" guide (map your spreadsheet, pick a pack, dry-run, read the eval) to drive the real-organization adoption the 1.0 tag is gated on. ✅ Implemented in `docs/ADOPTION-KIT.md`; actual multi-organization adoption remains external evidence | C3, B1, B2, F2 | P1 | M | `docs/ROADMAP.md` v1.0 adoption gate; `CLAUDE.md` audiences. **[NET-NEW]** |
 | E9 | **Incremental re-resolution and a progress indicator** so a re-run on a large existing set only re-resolves changed records | B1, A4 | P3 | L | README upsert idempotency (re-runs update, not duplicate). **[NET-NEW]** |
 | E10 | **Submit a formal DPGA registry nomination** (the conformance note is a self-assessment, not a submission) | F1, F2, C3 | P3 | S | `DPG-CONFORMANCE.md` "not a registry submission"; [DPGA registry](https://www.digitalpublicgoods.net/registry). **[corroborates DPG note + NET-NEW action]** |
 
@@ -145,58 +145,41 @@ These slot under `docs/ROADMAP.md`'s existing v1.0 milestone; none reorders a
 shipped phase. They are the persona-prioritized cut of what stands between v0.7
 and a defensible 1.0, plus the breadth items that come after.
 
-### Now (the named 1.0 blockers and the differentiator's finish)
-- **R1** accessibility audit, screen-reader walkthrough, EN/ES review-UI copy.
-- **R3** supply-chain hardening (start with SHA-pinned actions and an SBOM, the
-  cheapest credibility wins).
-- **R6** fill the metrics-ledger targets so the gates are numerically committed.
-- **R11** plain-language match rationale in the review queue.
-- **E8** pilot-readiness adoption kit.
+### Remaining 1.0 evidence gates
 
-### Next (prove the claims, integrate the outputs)
-- **R2** RFC 3161 timestamping to a real TSA.
-- **R4** committed threat model.
-- **R5** bias measured and reported by name and address class.
-- **R7** recorded CiviCRM demo and dedicated email/phone entities.
-- **R8** retention and destruction model per pack, with the data-flow map.
-- **E1** HMIS and HSDS output mappings.
-- **E2** comparable-database export profile.
+- **R1:** complete the real-assistive-technology walkthrough, obtain reviewed
+  Spanish UI copy, and publish the ACR. Automation cannot honestly substitute
+  for either human review.
+- **R7:** record the live CiviCRM demo. The connector behavior is implemented;
+  this evidence requires an authorized running CiviCRM instance.
+- **R3:** exercise the release workflow on the first real `v*` tag and apply the
+  committed ruleset to live repository settings.
+- **E8:** run the adoption kit with more than one real organization. The kit is
+  shipped; adoption is external evidence, not code.
 
-### Later (breadth and depth once the core is proven)
-- **R9** extraction-seam model and data cards.
-- **R10** calibration gate wired into the eval.
-- **E3** more connectors.
-- **E4** reviewer audit trail and two-person DV review.
-- **E5** CRM dedupe-rule cooperation guidance.
-- **E6** libpostal hardening and position-sensitive matching.
-- **E7** un-merge / reversibility path.
-- **E9** incremental re-resolution.
-- **E10** DPGA registry submission.
+### Product backlog after those gates
 
-## Recommended first sprint
+- **E1:** HMIS and HSDS output mappings.
+- **E3:** Apricot, Airtable, and Google Sheets connectors, conditional on a
+  priority decision and integration credentials.
+- **E6:** libpostal CI hardening and the remaining address-depth work.
+- **E7:** un-merge/reversibility.
+- **E9:** incremental re-resolution and progress reporting.
+- **E10:** formal DPGA registry submission.
 
-The triage and the existing roadmap converge on the same starting line: the work
-that closes the 1.0 gate while sharpening the differentiator, weighted toward
-items that turn an asserted claim into a tested or shipped one.
+Completed and evidenced in-repository: **R2, R4, R5, R6, R8, R9, R10, R11,
+E2, E4, and E5**. R3, R7, and E8 have shipped code/docs with the external
+evidence portions called out above.
 
-1. **R1 (accessibility) and R11 (match rationale) together.** The review queue is
-   the product, and these two finish it for its actual users (A2, A4) and its data
-   subjects' interests (D1, D2). R11 is the single highest-leverage reviewer
-   change: it removes the "I am guessing" feeling that drives a wrong approval,
-   the exact error the whole eval is built to gate.
-2. **R6 (fill the metrics ledger).** An afternoon of work that lets every
-   assurance persona (E1, F1, F2) and the ops lead (B1) point at a committed
-   false-merge threshold instead of "TBD". It makes the gates real and is a
-   prerequisite for the R10 calibration gate.
-3. **R3 (supply-chain quick wins).** SHA-pin the actions and generate an SBOM
-   first; they are small and they move DPG indicator 8 and Aisha's (C1) review
-   from "partial" toward "met".
-4. **E8 (pilot-readiness kit).** The 1.0 tag is gated on real-organization
-   adoption, and nothing in the repo yet helps a Karen (C3) or a Priya (B1) bring
-   their own organization on. This is the item that unblocks the gate itself.
+## Recommended next validation cycle
 
-Bundle the afternoon-sized wins alongside: **R4** (threat model) and **R9**
-(extraction-seam cards) reuse work already scoped in the audits.
+Run R1 with an assistive-technology user and native Spanish reviewer, then use
+the adoption kit with a pilot organization that can also supply the running
+CiviCRM instance for R7. That single external cycle can produce the remaining
+accessibility, integration, and adoption evidence without inventing substitutes
+inside the repository. Cut the first release tag only after those results are
+incorporated, so R3's release evidence represents the candidate actually being
+evaluated.
 
 ## Traceability matrix (persona to findings)
 

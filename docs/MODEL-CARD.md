@@ -17,19 +17,20 @@ for every claim here: `src/constituent_reconciler/extract/seam.py` and the
   outside the machine.
 * **Model and provider.** Claude, built by Anthropic, served through Amazon
   Bedrock and called with the Bedrock Converse API.
-* **Default model id.** `us.anthropic.claude-sonnet-4-6:0`, which names Claude
+* **Default model id.** `us.anthropic.claude-sonnet-4-6`, which names Claude
   Sonnet 4.6 through a US cross-region Bedrock inference profile. A deployer
   can pass a different model id when constructing `BedrockSeam`.
 * **Where it lives in the code.** `BedrockSeam` in
   `src/constituent_reconciler/extract/seam.py`, constructed by `make_seam()`.
   The recipe's `[extract]` section selects it with `backend = "bedrock"` and
   sets the page-level `confidence_threshold` (default 0.5).
-* **Implementation status.** `BedrockSeam.refine()` is a documented extension
-  point. It raises `NotImplementedError` until a deployer wires in page-to-image
-  conversion and response parsing. As shipped, the pipeline never sends a
-  request to Bedrock; `is_enabled()` constructs a local boto3 client and makes
-  no network call. The seam exists now so the gating logic is testable and so
-  tests can inject a fake through `make_seam()`.
+* **Implementation status.** Implemented and opt-in. `BedrockSeam.refine()`
+  renders the selected PDF page to a 150-DPI PNG, invokes Bedrock Converse,
+  parses a strict JSON field list, and falls back to the offline extraction on
+  a call or response failure. Tests inject a fake Converse client, so request,
+  parsing, and fallback behavior are exercised without credentials or network
+  access. `is_enabled()` constructs the boto3 client; the network call occurs
+  only in `refine()` after all policy and confidence gates hold.
 * **This project trains no model.** The card documents a third-party hosted
   model the pipeline can optionally call, not a model this project produced.
 
@@ -73,9 +74,10 @@ which means no seam at all.
 
 ## Limitations
 
-* No behavior can be observed yet, because `refine()` is unimplemented. The
-  limitations below describe the design, and they should be re-checked when a
-  deployer wires the call.
+* The request and parser behavior are covered with a fake Bedrock client, but
+  this repository does not run a live hosted-model benchmark because it has no
+  AWS account or credentials. Model quality can change independently of this
+  code even when the model id remains configured.
 * Extraction error is not evenly distributed. The bias section of
   [`RESPONSIBLE-TECH-AUDITS.md`](RESPONSIBLE-TECH-AUDITS.md) records the known
   risk classes for this domain (transliterated and hyphenated names,
@@ -91,11 +93,19 @@ which means no seam at all.
 
 ## Evaluation status
 
-Not yet benchmarked. Evaluation is deferred until `refine()` is implemented,
-since there is no behavior to measure. When a deployer wires the call, the
-planned calibration path is the LLM field-judge kappa gate (R10 in
-[`RESEARCH-ROADMAP.md`](RESEARCH-ROADMAP.md)), scored on the committed synthetic
-eval fixtures. Until then this project makes no accuracy claim for the seam.
+The request/response contract, malformed-output fallback, policy fusing, and
+PII-free telemetry are merge-blocking tests. The committed offline extraction
+fixture reports 100.0% precision and 94.1% recall in
+[`eval/extraction-report.md`](../eval/extraction-report.md), but that score does
+not measure Claude and is not presented as a hosted-model accuracy claim. The
+field-judge calibration gate is wired into `reconcile eval`: missing or drifting
+labels fail closed below Cohen's kappa 0.60. A deployer enabling Bedrock must
+benchmark its chosen model and document set before trusting refined fields.
+
+Each model call emits the portfolio's pinned OpenTelemetry GenAI attribute
+names, input/output token counts, duration, finish reason, and estimated cost.
+Prompt, page, response, and extracted field content are excluded by default;
+tests assert that representative PII never appears in the telemetry payload.
 
 ## Ethical considerations
 
@@ -113,9 +123,9 @@ controls apply. This project is a reference implementation, not legal advice.
 
 * Leave `backend = "none"` unless low-confidence pages are a measured problem
   the offline extractor cannot solve.
-* If you implement `refine()`, add cloud-refined provenance tagging at the same
-  time, benchmark against the eval fixtures before trusting the output, and
-  re-read this card against your implementation, since it documents the seam
-  as shipped.
+* If you enable `refine()`, benchmark the configured model against documents
+  representative of your deployment before trusting the output. Cloud-refined
+  field provenance remains a known gap, so keep the seam off when that
+  distinction is required by your audit trail.
 * Review your AWS account settings before enabling; the data card lists the
   ones that matter.

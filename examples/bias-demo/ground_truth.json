@@ -1,0 +1,17 @@
+{
+  "note": "Synthetic planted pairs for matching-risk classes documented in MODEL-CARD.md. Segment membership is explicit so the committed report cannot silently substitute an aggregate score for disaggregated results.",
+  "clusters": [
+    ["existing:B001", "incoming:N001"],
+    ["existing:B002", "incoming:N002"],
+    ["existing:B003", "incoming:N003"],
+    ["existing:B004", "incoming:N004"],
+    ["existing:B005", "incoming:N005"]
+  ],
+  "segments": {
+    "transliterated name variant": [["existing:B001", "incoming:N001"]],
+    "hyphenated or punctuated surname": [["existing:B002", "incoming:N002"]],
+    "non-Western name order": [["existing:B003", "incoming:N003"]],
+    "rural-route address": [["existing:B004", "incoming:N004"]],
+    "informal address description": [["existing:B005", "incoming:N005"]]
+  }
+}

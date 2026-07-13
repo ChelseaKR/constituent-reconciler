@@ -218,7 +218,13 @@ def _cmd_eval(args: argparse.Namespace) -> int:
     result = pipeline.run(recipe)
     truth = json.loads(Path(args.truth).read_text(encoding="utf-8"))
     clusters = truth.get("clusters", [])
-    report = evaluate(result.pairs, clusters, n_records=len(result.records))
+    segments = truth.get("segments", {})
+    report = evaluate(
+        result.pairs,
+        clusters,
+        n_records=len(result.records),
+        segments=segments,
+    )
     calibration = _load_calibration(Path(args.calibration) if args.calibration else None)
     markdown = render_eval_markdown(
         report,

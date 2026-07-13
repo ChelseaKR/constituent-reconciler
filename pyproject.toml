@@ -56,6 +56,7 @@ packages = ["src/constituent_reconciler"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests", "tools"]
+extend-exclude = ["src/constituent_reconciler/_vendor/genai_telemetry"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "W", "S", "C90"]
@@ -98,10 +99,15 @@ module = [
 ]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["constituent_reconciler._vendor.genai_telemetry.*"]
+ignore_errors = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --strict-markers --strict-config --import-mode=importlib --cov=constituent_reconciler --cov-branch --cov-report=term-missing --cov-fail-under=84"
+addopts = "-q --strict-markers --strict-config --import-mode=importlib --cov=constituent_reconciler --cov-branch --cov-report=term-missing --cov-fail-under=85"
 
 [tool.coverage.run]
 branch = true
 source = ["constituent_reconciler"]
+omit = ["src/constituent_reconciler/_vendor/*"]

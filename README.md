@@ -12,8 +12,9 @@ every uncertain match before anything is written. Nothing merges silently.
 > and Salesforce write-back (live API push and offline import-ready export files),
 > a tamper-evident provenance log, a DV privacy pack that enforces VAWA/FVPSA
 > confidentiality as merge-blocking tests, and one-command Docker self-host. A
-> full accessibility audit and supply-chain hardening remain before the 1.0
-> stability tag, which is gated on real-organization adoption. Track progress in
+> manual screen-reader validation and real-organization adoption remain before
+> the 1.0 stability tag; automated supply-chain controls are in CI and the
+> release workflow still needs its first real tag exercise. Track progress in
 > [docs/ROADMAP.md](docs/ROADMAP.md); the build is specified in
 > [CLAUDE.md](CLAUDE.md).
 
@@ -57,8 +58,8 @@ The pipeline runs as a sequence of logged, deterministic-by-default steps:
 1. **Ingest** a folder of CSVs and PDFs, digitally created or scanned.
    Image-only scanned pages run through a local Tesseract OCR backend
    (`[extract] backend = "pdfplumber+ocr"`, the optional `ocr` extra) so a
-   paper intake form yields fields instead of an empty page; email bodies are
-   planned and the roadmap tracks it.
+   paper intake form yields fields instead of an empty page. Plain-text and
+   `.eml` intake bodies use the offline text extractor with line/column spans.
 2. **Extract** field and value pairs with a source-span pointer and a
    confidence score. Extraction runs offline by default; an optional Bedrock
    (Claude) seam handles only low-confidence pages, and only when the active
@@ -495,27 +496,28 @@ transfer, and install steps are in
 ## Standards
 
 This project is held to the portfolio-wide engineering standards maintained
-alongside this repo's siblings. That standards set is not yet published as its
-own taggable repository, so it cannot be vendored in here as a pinned
-submodule yet (a portfolio-level gap, not this repo's to fix — tracked as a
-gap here rather than silently assumed done). Applies/N-A is declared per
+alongside this repo's siblings. The dependency-light GenAI telemetry shim is
+vendored at the reviewed STANDARDS commit recorded in
+`src/constituent_reconciler/_vendor/genai_telemetry/.standards-version`; the
+full standards set remains a sibling repository rather than a submodule.
+Applies/N-A is declared per
 standard below, not silently omitted; every "Applies — gap" row is tracked
 locally (this table plus the linked doc) pending a filed issue. Last reviewed:
-2026-07-05.
+2026-07-12.
 
 | Standard | Applies? | Status | Details |
 |---|---|---|---|
-| Quality & Metrics | Applies | Enforced — suite green (130/130), ≥84% branch coverage a merge-blocking `pytest` gate (target 85%; see ROADMAP note) | [docs/ROADMAP.md](docs/ROADMAP.md) metrics ledger |
+| Quality & Metrics | Applies | Enforced — full suite and ≥85% branch coverage are merge-blocking; aggregate, extraction, large-corpus, and disaggregated bias reports are committed | [docs/ROADMAP.md](docs/ROADMAP.md) metrics ledger |
 | Code Quality | Applies | Enforced — `ruff` (incl. `S`, `C90`), `ruff format`, `mypy --strict`, `pytest --strict-markers`, `uv.lock` committed, `uv sync --frozen` | `pyproject.toml`, `Makefile` |
 | Security & Supply-Chain | Applies — ASVS L2 (handles DV-survivor PII) | Partial — secret scan, dependency-vuln scan, SAST (Semgrep + CodeQL + zizmor), and a release-time CycloneDX SBOM + keyless build-provenance attestation (`release.yml`) enforced; container scan (Trivy) is enforced in CI; VEX is still a gap | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Security |
 | CI/CD | Applies | Partial — SHA-pinned actions, least-privilege tokens, `make verify` parity, `secrets`+`security` jobs, CODEOWNERS, and a solo-maintainer review waiver (ADR 0008) all in place; the matching branch ruleset is a committed artifact (`docs/rulesets/main.json`) but not yet applied to the live repo (a repository-settings action) | `.github/workflows/ci.yml`, [docs/decisions/0008-solo-maintainer-review-waiver.md](docs/decisions/0008-solo-maintainer-review-waiver.md), [docs/rulesets/](docs/rulesets/) |
 | Release & Versioning | Applies (release-producing: 0.1.0-0.7.0) | Partial — `.github/workflows/release.yml` is tag-triggered (`v*`), re-verifies at the tagged commit, checks tag/`pyproject.toml` version consistency, builds sdist+wheel, generates a CycloneDX SBOM, attests build provenance (keyless OIDC), and publishes a GitHub Release with the matching CHANGELOG section; gap — no `v*` tag has been cut yet, so the workflow is unexercised, and there is no PyPI publish stage (not yet published to PyPI) | [.github/workflows/release.yml](.github/workflows/release.yml), [CHANGELOG.md](CHANGELOG.md) |
-| Accessibility | Applies (`reconcile review` web UI) | Partial — structural WCAG 2.2 AA design in place; axe/pa11y automated gate and screen-reader walkthrough not yet run | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Accessibility |
-| Observability | Applies — Tier C (library/CLI) | Declared — no hosted-service surface; no-PII-in-logs enforced by tests | [docs/ROADMAP.md](docs/ROADMAP.md) § Observability |
+| Accessibility | Applies (`reconcile review` web UI) | Partial — structural WCAG 2.2 AA design and automated axe gate in place; manual screen-reader walkthrough remains | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Accessibility |
+| Observability | Applies — Tier C plus model-call telemetry | Canonical GenAI spans/logs record tokens, duration, finish reason, and estimated cost; PII/content absence is enforced by tests | [docs/ROADMAP.md](docs/ROADMAP.md) § Observability |
 | Internationalization | Applies — deferred to 1.0 | Declared — EN/ES parity is a real commitment, not yet built (no catalog infra) | [docs/I18N.md](docs/I18N.md) |
-| AI Evaluation | N/A today | Declared — no model inference in any decision path (`BedrockSeam` unimplemented, `NoOpSeam` default); flips to Applies the day that seam ships | [docs/ROADMAP.md](docs/ROADMAP.md) § AI Evaluation Standard applicability |
-| Documentation | Applies | Partial — this table, ADRs, CITATION.cff, CHANGELOG all present; ADRs live at `docs/decisions/` not the standard's `docs/adr/` path; STANDARDS/ not yet vendored | [docs/decisions/](docs/decisions/) |
-| Responsible Tech | Applies (core to this repo's identity) | Partial — strongest section of this repo: DV/VAWA/FVPSA invariants are merge-blocking tests; threat model and dated bias/ethics sign-off still open | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) |
+| AI Evaluation | Applies to opt-in extraction seams | Model/data cards, fail-closed kappa, mocked contract/fallback tests, and PII-free token/cost telemetry landed; live model quality remains deployer-specific | [docs/ROADMAP.md](docs/ROADMAP.md) § AI Evaluation Standard applicability |
+| Documentation | Applies | Partial — this table, ADRs, CITATION.cff, CHANGELOG, model/data cards, and the pinned telemetry shim are present; ADRs live at `docs/decisions/` rather than `docs/adr/` | [docs/decisions/](docs/decisions/) |
+| Responsible Tech | Applies (core to this repo's identity) | Partial — DV/VAWA/FVPSA invariants, threat model, ethics failure modes, and dated bias evidence are committed; the human accessibility/adoption gates remain | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) |
 
 Project-specific target values are recorded in
 [docs/ROADMAP.md](docs/ROADMAP.md) and findings in

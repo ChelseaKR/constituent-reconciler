@@ -7,7 +7,8 @@ the security TODO in [`RESPONSIBLE-TECH-AUDITS.md`](./RESPONSIBLE-TECH-AUDITS.md
 and pairs with [`SECURITY.md`](../SECURITY.md), which owns reporting and the
 out-of-scope list.
 
-Status: committed 2026-07-02 against the v0.7 code. Revisit whenever the
+Status: committed 2026-07-02 and re-verified 2026-07-12 against the implemented
+Bedrock and local-model seams. Revisit whenever the
 extraction surface changes, and at minimum when the sandboxed extraction path
 lands.
 
@@ -131,10 +132,11 @@ The boundaries that matter:
 - **Typed, content-free parse errors (T4).** Wrap extraction failures in an
   error type that names the file and page but never embeds page text, so a
   traceback cannot carry PII.
-- **Model and data cards for the Bedrock seam (T5).** Tracked as R9 in
-  [`RESEARCH-ROADMAP.md`](./RESEARCH-ROADMAP.md), so a deployer who does
-  enable the seam can see what leaves the machine and what the model was
-  evaluated on.
+- **Model and data cards plus content-free telemetry (T5).** The cards are
+  committed as [`MODEL-CARD.md`](./MODEL-CARD.md) and
+  [`DATA-CARD.md`](./DATA-CARD.md). GenAI telemetry records only canonical
+  model, token, duration, finish, and estimated-cost fields; tests assert that
+  page content and representative PII are absent.
 
 ## Residual risks and out of scope
 
@@ -145,8 +147,8 @@ The boundaries that matter:
   view of the world.
 - **Egress under permissive packs is by design.** A non-DV pack with the
   Bedrock backend configured will send low-confidence page content to AWS.
-  That is an explicit deployer choice, not a defect, and the planned cards
-  (R9) document its terms.
+  That is an explicit deployer choice, not a defect; the model and data cards
+  document its terms and the account-level controls the deployer must review.
 - **The host itself.** Software already running on the operator's machine,
   including anything able to read loopback traffic or the reviewer's browser,
   is outside every boundary here and belongs to the host's own security

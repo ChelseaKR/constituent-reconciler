@@ -36,7 +36,9 @@ jobs:
         run: |
           make eval
           make eval-extraction
-          git diff --exit-code eval/report.md eval/extraction-report.md
+          make eval-bias
+          git diff --exit-code \
+            eval/report.md eval/extraction-report.md docs/audits/bias-report.md
 
   # Automated axe-core audit of the review queue's real rendered HTML
   # (docs/decisions/0009-automated-axe-audit.md), separate from `verify` so a

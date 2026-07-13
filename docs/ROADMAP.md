@@ -84,10 +84,10 @@ The smallest version that ships the differentiator.
 * `cohen_kappa()` in `evaluate.py` is the calibration seam for when an LLM
   extraction judge is wired in and its confidence scores are compared against
   human-labeled field accuracy.
-* Still open: the WCAG 2.2 AA web review UI. The full `BedrockSeam.refine()`
-  implementation (page-to-image conversion and Converse response parsing) has
-  since shipped, with a fake-able injected client so the parsing and
-  fault-tolerance paths are tested without boto3 or network access.
+* The full `BedrockSeam.refine()` implementation (page-to-image conversion and
+  Converse response parsing) has shipped, with a fake-able injected client so
+  request, parsing, and fault-tolerance paths are tested without boto3 or
+  network access. The WCAG 2.2 AA web review UI subsequently shipped in v0.7.
 
 ## v0.4.0 — Address normalization (shipped)
 
@@ -205,50 +205,40 @@ shared standard.
 
 | Attribute | Target | Gate |
 |-----------|--------|------|
-| Test coverage (logic) | At least 85% branch coverage on `src/`; gate temporarily set to 84% (84.63% measured 2026-07-05 for this PR's scope — see note below) | AUTO |
+| Test coverage (logic) | At least 85% branch coverage on `src/`; observed 87.65% on 2026-07-12 | AUTO |
 | False-merge rate (eval) | 0% among auto-merged pairs on the committed fixtures, fail-closed; CI runs the gate at 0.0 | AUTO |
 | Matching pairwise precision and recall | Auto-merge precision 100% (a false merge fails the gate); auto+review coverage recall at least 95%, reported with Wilson CIs | REVIEW |
-| Extraction field precision and recall | At least 0.95 precision and 0.90 recall on a labeled extraction fixture; target only, the fixture and its measurement are not landed | REVIEW |
+| Extraction field precision and recall | At least 0.95 precision and 0.90 recall on the committed labeled fixture; observed 1.00 precision and 0.941 recall in `eval/extraction-report.md` | REVIEW |
+| Matching risk-class coverage | Disaggregate transliterated, hyphenated/punctuated, non-Western-order, rural-route, and informal-address planted pairs; preserve misses in the committed report | REVIEW |
 | LLM field-judge calibration (Cohen's kappa) | Kappa at least 0.60, fail-closed on drift, the 0.6 line `evaluate.cohen_kappa` documents; wired into the eval in R10 | AUTO |
 | Review queue accessibility | WCAG 2.2 AA; axe clean (automated, `accessibility` CI job, 2026-07-07) and screen-reader walkthrough (manual, not yet performed — docs/reviews/SCREEN-READER-WALKTHROUGH.md) | AUTO + REVIEW |
 | i18n parity (EN, ES) | key and placeholder parity | AUTO |
 | Supply chain | SBOM, Sigstore, SHA-pinned actions, OIDC | AUTO |
 | DV policy-pack invariants | PII non-egress, consent-gated write | AUTO |
 
-Enforcement today: the false-merge gate and the DV policy-pack invariants (PII
-non-egress and consent-gated write) run as merge-blocking checks in CI now, and
-CI also fails if the committed eval report drifts. The coverage floor is now a
-merge-blocking `pytest` gate too (`--cov-fail-under=84` in `pyproject.toml`,
-`pytest-cov` a committed dev dependency, 2026-07-05) — set to 84, not the 85
-target, because this PR intentionally excludes an in-progress, pre-existing
-feature branch (cannot-link constraints, review-server web-boundary checks,
-strict recipe validation) that was sitting uncommitted in the working tree
-alongside this remediation work; that branch's own tests are what push
-measured coverage to 85%+. Raise the floor back to 85 when that branch lands.
-The false-merge rate stays the primary correctness metric because a wrong
-merge is the expensive error, but a coverage regression now fails the build as
-well. The secret-scan
-and dependency-vulnerability items are also merge-blocking CI jobs now
-(`secrets`, `security` in `ci.yml`); SAST, container scanning, and SBOM/signing
-remain committed targets not yet wired (see the remediation plan's P1-2,
-P1-4, P1-7). The new `accessibility` job (axe-core over jsdom against the
-rendered review queue) runs on every PR the same way, but like `sast`,
-`zizmor`, and `container-scan` it is not yet in docs/rulesets/main.json's
-required-status-checks list, so a red run there does not block a merge today. The kappa drift gate and the i18n parity check land with the
-phases named beside them (the kappa gate with R10, EN/ES parity with R1). The
-matching and extraction precision and recall figures are REVIEW metrics a
-person reads from the eval report rather than pass-or-fail gates.
+Enforcement today: the false-merge, calibration, coverage, and DV policy-pack
+invariants run in merge-blocking tests. CI regenerates the aggregate matching,
+extraction, and disaggregated bias reports and fails on any committed-report
+drift. The branch-coverage gate is the documented 85% target.
+Secret/dependency scans, Semgrep, CodeQL, zizmor, Trivy, and the automated axe
+audit run in CI; the release workflow generates a CycloneDX SBOM and keyless
+build-provenance attestation. The committed repository ruleset still needs the
+matching live-repository settings action, so job presence and required-check
+enforcement are reported separately. Matching/extraction precision and the
+risk-class rows remain REVIEW metrics rather than pass/fail gates; the report
+therefore preserves the measured transliterated-name and non-Western-order
+misses instead of tuning the fixture until it is green.
 
 ## AI Evaluation Standard applicability
 
-`AI-Evaluation-Standard: N/A — no model inference in any user-facing or
-decision path (BedrockSeam is an unimplemented stub; NoOpSeam default).
-Reviewed 2026-07-05.` `BedrockSeam.refine()` raises `NotImplementedError`
-(`src/constituent_reconciler/extract/seam.py`), and every policy pack ships
-`NoOpSeam` by default; the DV and HIPAA packs fuse the seam off entirely. The
-day `BedrockSeam.refine()` gains a real implementation, this line flips to
-Applies and the AI-Evaluation standard's controls (eval harness, calibration
-gate, model card) become binding before that PR merges.
+`AI-Evaluation-Standard: Applies — opt-in Bedrock and local-model extraction
+seams; deterministic matching remains outside model inference. Reviewed
+2026-07-12.` `BedrockSeam.refine()` is implemented; the default backend is
+still `none`, and the DV and HIPAA packs fuse cloud inference off. Binding
+controls now include model/data cards, a fail-closed kappa gate, mocked contract
+and fallback tests, and canonical PII-free GenAI token/duration/cost telemetry.
+There is no live hosted-model accuracy claim: an adopting organization must
+benchmark its selected model on representative local documents.
 
 ## Observability
 
@@ -257,18 +247,19 @@ loopback-only review server, not a hosted service, so there is no request-rate,
 latency-SLO, or distributed-tracing surface for OTel/RUM tiers A or B to apply
 to. What Tier C asks for:
 
-* **Logging posture:** opt-in, human-readable stdout/stderr from the CLI (run
-  report, per-stage counts); no structured JSON log sink is shipped or planned
-  while the tool stays local-only. The review server explicitly suppresses
-  per-request access logging (`review/server.py`).
+* **Logging posture:** human-readable stdout/stderr for deterministic pipeline
+  stages. Optional Bedrock/local model calls additionally emit one structured
+  `genai_call` record using the pinned portfolio shim; the review server still
+  suppresses per-request access logging (`review/server.py`).
 * **No secrets or PII in logs:** enforced by construction, not just convention —
   `decisions.json` carries ids and verdicts only, `withheld` records are logged
   by id and reason only, and provenance entries store BLAKE2b hashes rather than
   raw field values, each backed by a merge-blocking test
   (`tests/test_consent.py`, `tests/test_provenance.py`, `tests/test_review.py`).
-* **Out of scope:** OpenTelemetry traces/metrics, RUM, and log aggregation — all
-  presuppose a hosted, multi-request service this tool is not. Revisit if a
-  hosted review-server mode is ever built.
+* **Model-call telemetry:** an optional span factory receives canonical
+  OpenTelemetry GenAI attributes. The same call records input/output tokens,
+  duration, finish reason, and estimated cost without page, prompt, response,
+  field, or record content. RUM and hosted-service request SLOs remain N/A.
 
 ## Out of scope
 

@@ -1,4 +1,4 @@
-.PHONY: install verify format-check lint type test security axe-fixtures axe eval eval-extraction eval-large run docker bundle clean
+.PHONY: install verify format-check lint type test security axe-fixtures axe eval eval-extraction eval-bias eval-large run docker bundle clean
 
 # Reproduce the full local toolchain. CI mirrors `make verify` byte for byte.
 # `uv sync --frozen` refuses to run (and exits non-zero) if uv.lock is stale
@@ -20,8 +20,7 @@ type:
 # on src/ (configured in pyproject.toml), so `make verify` — and therefore
 # CI — is a merge-blocking coverage gate.
 test:
-	.venv/bin/python -m coverage run -m pytest
-	.venv/bin/python -m coverage report
+	.venv/bin/python -m pytest
 
 # Dependency-vulnerability gate (SEC-11, SEC-13): pip-audit and osv-scanner
 # both block on any HIGH/CRITICAL finding with a fix available; no mute pattern.
@@ -61,6 +60,16 @@ eval-extraction:
 	.venv/bin/reconcile eval-extraction \
 		--fixtures eval/fixtures/extraction \
 		--out eval/extraction-report.md
+
+# Regenerate the disaggregated matching-risk audit (R5). Every named segment
+# must be explicit in ground_truth.json; the report preserves misses rather
+# than reducing the fixture until every row looks green.
+eval-bias:
+	.venv/bin/reconcile eval \
+		--config examples/bias-demo/recipe.toml \
+		--truth examples/bias-demo/ground_truth.json \
+		--calibration examples/bias-demo/calibration_labels.json \
+		--out docs/audits/bias-report.md
 
 # Regenerate the large synthetic-corpus eval report (FIX-11). Not part of
 # `verify` or CI: a 10^4-10^5 record corpus through Splink/DuckDB takes
