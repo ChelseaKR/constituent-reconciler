@@ -221,7 +221,10 @@ class CivicrmConnector:
             else:
                 values = {**contact_payload, self.config.external_id_field: external_id}
                 created = self._call("Contact", "create", {"values": values})
-                created_id = created.get("values", [{}])[0].get("id")
+                # ``values`` can come back an empty list (not just present-but-idless),
+                # so index defensively rather than assuming an element exists.
+                created_rows = created.get("values") or [{}]
+                created_id = created_rows[0].get("id")
                 if created_id is None:
                     raise ConnectorError(
                         f"CiviCRM Contact.create returned no id for {record.cluster_id}; "
