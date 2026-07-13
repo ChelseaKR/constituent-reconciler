@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -164,9 +165,22 @@ def test_default_pack_bedrock_backend_returns_bedrock_seam() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _converse_response(text: str) -> dict[str, Any]:
+def _converse_response(
+    text: str,
+    *,
+    with_usage: bool = False,
+    usage: dict[str, object] | None = None,
+) -> dict[str, Any]:
     """A minimal Bedrock Converse response carrying one text block."""
-    return {"output": {"message": {"content": [{"text": text}]}}}
+    response: dict[str, Any] = {"output": {"message": {"content": [{"text": text}]}}}
+    if with_usage:
+        response.update(
+            {
+                "usage": usage if usage is not None else {"inputTokens": 120, "outputTokens": 24},
+                "stopReason": "end_turn",
+            }
+        )
+    return response
 
 
 class _StubBedrockClient:
@@ -229,6 +243,90 @@ def test_bedrock_refine_parses_converse_response(stub_page_render: None) -> None
     assert image_block["image"]["source"]["bytes"] == b"png-bytes"
 
 
+def test_bedrock_refine_emits_canonical_pii_free_telemetry(
+    stub_page_render: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    from constituent_reconciler._vendor.genai_telemetry.attributes import (
+        GEN_AI_REQUEST_MODEL,
+        GEN_AI_SYSTEM,
+        GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+        GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
+        GEN_AI_USAGE_INPUT_TOKENS,
+        METRIC_OPERATION_DURATION,
+        PORTFOLIO_COST_USD,
+    )
+
+    response = _converse_response(
+        '{"fields": []}',
+        with_usage=True,
+        usage={
+            "inputTokens": 120,
+            "outputTokens": 24,
+            "cacheWriteInputTokens": 30,
+            "cacheReadInputTokens": 50,
+        },
+    )
+    with caplog.at_level(logging.INFO, logger="constituent_reconciler"):
+        BedrockSeam(client=_StubBedrockClient(response=response)).refine(Path("private.pdf"), 1)
+    event = json.loads(caplog.records[-1].message)
+    assert event[GEN_AI_SYSTEM] == "aws.bedrock"
+    assert event[GEN_AI_REQUEST_MODEL] == "us.anthropic.claude-sonnet-4-6"
+    assert event[GEN_AI_USAGE_INPUT_TOKENS] == 200
+    assert event[GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS] == 30
+    assert event[GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS] == 50
+    assert event[PORTFOLIO_COST_USD] == 0.000932
+    assert event[METRIC_OPERATION_DURATION] >= 0
+    assert "private.pdf" not in caplog.records[-1].message
+
+
+@pytest.mark.parametrize(
+    "invalid_usage",
+    [
+        {"inputTokens": True, "outputTokens": 24},
+        {"inputTokens": -1, "outputTokens": 24},
+        {"inputTokens": 120, "outputTokens": 24, "cacheWriteInputTokens": -1},
+        {"inputTokens": 120, "outputTokens": 24, "cacheReadInputTokens": "1"},
+    ],
+)
+def test_bedrock_invalid_usage_is_not_emitted(
+    stub_page_render: None,
+    caplog: pytest.LogCaptureFixture,
+    invalid_usage: dict[str, object],
+) -> None:
+    from constituent_reconciler._vendor.genai_telemetry.attributes import (
+        GEN_AI_USAGE_INPUT_TOKENS,
+    )
+
+    response = _converse_response(
+        '{"fields": [{"name": "first_name", "value": "Alice", "confidence": 0.8}]}',
+        with_usage=True,
+        usage=invalid_usage,
+    )
+    with caplog.at_level(logging.INFO, logger="constituent_reconciler"):
+        fields = BedrockSeam(client=_StubBedrockClient(response=response)).refine(
+            Path("private.pdf"), 1
+        )
+    assert [(field.field_name, field.value) for field in fields] == [("first_name", "Alice")]
+    event = json.loads(caplog.records[-1].message)
+    assert GEN_AI_USAGE_INPUT_TOKENS not in event
+
+
+def test_bedrock_reflected_finish_reason_is_not_emitted(
+    stub_page_render: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    from constituent_reconciler._vendor.genai_telemetry.attributes import (
+        GEN_AI_RESPONSE_FINISH_REASONS,
+    )
+
+    response = _converse_response('{"fields": []}', with_usage=True)
+    response["stopReason"] = "PLANTED-PII-alice@example.org"
+    with caplog.at_level(logging.INFO, logger="constituent_reconciler"):
+        BedrockSeam(client=_StubBedrockClient(response=response)).refine(Path("private.pdf"), 1)
+    event = json.loads(caplog.records[-1].message)
+    assert GEN_AI_RESPONSE_FINISH_REASONS not in event
+    assert "PLANTED-PII" not in caplog.records[-1].message
+
+
 def test_bedrock_refine_fenced_json_response_parses(stub_page_render: None) -> None:
     fenced = (
         '```json\n{"fields": [{"name": "phone", "value": "555-123-4567", "confidence": 0.7}]}\n```'
@@ -271,10 +369,16 @@ def test_bedrock_refine_skips_malformed_entries(stub_page_render: None) -> None:
     assert [(f.field_name, f.value) for f in fields] == [("first_name", "Alice")]
 
 
-def test_bedrock_refine_client_error_returns_empty(stub_page_render: None) -> None:
-    client = _StubBedrockClient(error=RuntimeError("throttled"))
+def test_bedrock_refine_client_error_log_is_content_free(
+    stub_page_render: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    client = _StubBedrockClient(error=RuntimeError("PLANTED-PII-alice@example.org"))
     seam = BedrockSeam(client=client)
-    assert seam.refine(Path("form.pdf"), 1) == []
+    with caplog.at_level(logging.WARNING, logger="constituent_reconciler.extract.seam"):
+        assert seam.refine(Path("private-alice.pdf"), 1) == []
+    assert "private-alice.pdf" not in caplog.text
+    assert "PLANTED-PII" not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
 
 
 def test_bedrock_refine_without_client_returns_empty() -> None:
@@ -445,6 +549,61 @@ def test_local_seam_refine_parses_fields_from_fake_server(intake_pdf: Path) -> N
         ("first_name", "Alice"),
         ("email", "alice@example.org"),
     ]
+
+
+@pytest.mark.parametrize(
+    "invalid_usage",
+    [
+        {"prompt_eval_count": True, "eval_count": 2},
+        {"prompt_eval_count": -1, "eval_count": 2},
+        {"prompt_eval_count": 4, "eval_count": False},
+        {"prompt_eval_count": 4, "eval_count": -2},
+    ],
+)
+def test_local_seam_invalid_usage_and_reflected_finish_reason_are_not_emitted(
+    intake_pdf: Path,
+    caplog: pytest.LogCaptureFixture,
+    invalid_usage: dict[str, object],
+) -> None:
+    from constituent_reconciler._vendor.genai_telemetry.attributes import (
+        GEN_AI_RESPONSE_FINISH_REASONS,
+        GEN_AI_USAGE_INPUT_TOKENS,
+    )
+
+    model_reply = json.dumps(
+        {
+            "response": '{"fields": []}',
+            "done_reason": "PLANTED-PII-alice@example.org",
+            **invalid_usage,
+        }
+    ).encode("utf-8")
+    with _fake_ollama(model_reply) as host:
+        with caplog.at_level(logging.INFO, logger="constituent_reconciler"):
+            LocalSeam(host=host).refine(intake_pdf, 1)
+    event = json.loads(caplog.records[-1].message)
+    assert GEN_AI_USAGE_INPUT_TOKENS not in event
+    assert GEN_AI_RESPONSE_FINISH_REASONS not in event
+    assert "PLANTED-PII" not in caplog.records[-1].message
+
+
+def test_local_seam_error_log_is_content_free(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import constituent_reconciler.extract.seam as seam_mod
+
+    seam = LocalSeam()
+
+    def fail_request(path: str, payload: dict[str, object] | None = None) -> dict[str, Any]:
+        raise OSError("PLANTED-PII-alice@example.org")
+
+    monkeypatch.setattr(seam_mod, "_page_text", lambda path, page_num: "private intake text")
+    monkeypatch.setattr(seam, "_json_request", fail_request)
+    with caplog.at_level(logging.WARNING, logger="constituent_reconciler.extract.seam"):
+        assert seam.refine(Path("private-alice.pdf"), 1) == []
+    assert "private-alice.pdf" not in caplog.text
+    assert "PLANTED-PII" not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
 
 
 def test_local_seam_server_down_is_disabled_and_refine_returns_empty(

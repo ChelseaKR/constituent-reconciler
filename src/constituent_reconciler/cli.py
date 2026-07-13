@@ -170,7 +170,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print(f"policy error: {error}", file=sys.stderr)
         return 2
     result = pipeline.run(recipe)
-    _, withheld = partition_by_consent(result.golden, require_consent=recipe.require_consent)
+    _, withheld = partition_by_consent(
+        result.golden,
+        require_consent=recipe.require_consent,
+        destination=recipe.output.connector,
+    )
     print(render_run_summary(result, withheld=len(withheld)))
     try:
         out_dir = Path(args.out)
@@ -214,7 +218,13 @@ def _cmd_eval(args: argparse.Namespace) -> int:
     result = pipeline.run(recipe)
     truth = json.loads(Path(args.truth).read_text(encoding="utf-8"))
     clusters = truth.get("clusters", [])
-    report = evaluate(result.pairs, clusters, n_records=len(result.records))
+    segments = truth.get("segments", {})
+    report = evaluate(
+        result.pairs,
+        clusters,
+        n_records=len(result.records),
+        segments=segments,
+    )
     calibration = _load_calibration(Path(args.calibration) if args.calibration else None)
     markdown = render_eval_markdown(
         report,
@@ -361,7 +371,11 @@ def _cmd_apply(args: argparse.Namespace) -> int:
         force_drop=force_drop,
         corrections=corrections,
     )
-    _, withheld = partition_by_consent(result.golden, require_consent=recipe.require_consent)
+    _, withheld = partition_by_consent(
+        result.golden,
+        require_consent=recipe.require_consent,
+        destination=recipe.output.connector,
+    )
     print(render_run_summary(result, withheld=len(withheld)))
     try:
         summary = pipeline.export(

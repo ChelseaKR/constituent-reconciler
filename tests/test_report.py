@@ -33,3 +33,21 @@ def test_eval_markdown_without_labels_is_fail_closed() -> None:
     assert "## Calibration (LLM field judge)" in markdown
     assert "fail-closed" in markdown
     assert "Kappa gate at 0.60: **FAIL** (no labels)." in markdown
+
+
+def test_eval_markdown_renders_disaggregated_risk_classes() -> None:
+    banded = band_pairs(
+        [("a", "b", 0.85)],
+        auto_threshold=0.97,
+        review_threshold=0.80,
+    )
+    report = evaluate(
+        banded,
+        [["a", "b"]],
+        n_records=2,
+        segments={"transliterated name": [["a", "b"]]},
+    )
+    markdown = render_eval_markdown(report, dataset="bias-demo")
+
+    assert "## Disaggregated error by documented risk class" in markdown
+    assert "| transliterated name | 1 | 1 | 0 | 100.0% | 0 |" in markdown

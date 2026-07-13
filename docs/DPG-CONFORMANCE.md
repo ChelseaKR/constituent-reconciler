@@ -66,8 +66,11 @@ synthetic.
 and `pytest` as merge-blocking CI gates; a committed, regenerated eval report
 with Wilson confidence intervals; declared config, connector, and report schema
 versions (`reconcile schema`); conventional commits and a Keep a Changelog
-history. Supply-chain hardening (SBOM, signed releases, SHA-pinned actions) lands
-on the path to 1.0; the gaps are tracked, not hidden.
+history. Actions are SHA-pinned; secret, dependency, SAST, workflow, and
+container scans run in CI; the release workflow generates a CycloneDX SBOM and
+keyless build-provenance attestation. It has not yet been exercised on a real
+`v*` tag, which is reported as an operational evidence gap rather than a missing
+implementation.
 
 ## 9. Do no harm by design
 
@@ -75,15 +78,16 @@ on the path to 1.0; the gaps are tracked, not hidden.
 uncertainty and routes every ambiguous decision to a person, because a false
 merge can corrupt or expose a record irreversibly. Consent is a technical
 invariant, not a checkbox. The DV pack makes data egress structurally impossible
-under that mode. Known residual risks (bias in name and address matching across
-naming conventions; the limits of small-cell suppression against
-cross-tabulation) are documented in `docs/RESPONSIBLE-TECH-AUDITS.md` rather than
-omitted.
+under that mode. Disaggregated synthetic results now quantify the documented
+name/address risk classes in `docs/audits/bias-report.md`, including the
+transliterated-name and non-Western-order misses. The limits of that small
+fixture and of small-cell suppression against cross-tabulation are documented
+in `docs/RESPONSIBLE-TECH-AUDITS.md` rather than omitted.
 
 ## Summary
 
 All nine indicators are met at the reference-implementation level. The honest
 qualifications: indicator 7 carries the not-legal-advice caveat every tool in
-this space must, and indicator 8's supply-chain items are partially landed and
-tracked toward 1.0. Nothing here is a substitute for an organization's own review
-or a formal DPG registry assessment.
+this space must, and indicator 8's release path still needs its first real-tag
+exercise. Nothing here is a substitute for an organization's own review or a
+formal DPG registry assessment.

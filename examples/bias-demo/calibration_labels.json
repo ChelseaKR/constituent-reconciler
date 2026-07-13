@@ -1,0 +1,26 @@
+{
+  "note": "Synthetic balanced confidence labels for the fail-closed kappa gate. The labels are not demographic attributes and contain no real personal data.",
+  "threshold": 0.6,
+  "labels": [
+    {"record_id": "N001", "field": "first_name", "predicted": true, "actual": true},
+    {"record_id": "N001", "field": "phone", "predicted": true, "actual": true},
+    {"record_id": "N002", "field": "last_name", "predicted": true, "actual": true},
+    {"record_id": "N002", "field": "dob", "predicted": true, "actual": true},
+    {"record_id": "N003", "field": "email", "predicted": true, "actual": true},
+    {"record_id": "N003", "field": "dob", "predicted": true, "actual": true},
+    {"record_id": "N004", "field": "address", "predicted": true, "actual": true},
+    {"record_id": "N004", "field": "last_name", "predicted": true, "actual": true},
+    {"record_id": "N005", "field": "phone", "predicted": true, "actual": true},
+    {"record_id": "N005", "field": "dob", "predicted": true, "actual": true},
+    {"record_id": "N001", "field": "email", "predicted": false, "actual": false},
+    {"record_id": "N001", "field": "address", "predicted": false, "actual": false},
+    {"record_id": "N002", "field": "email", "predicted": false, "actual": false},
+    {"record_id": "N002", "field": "address", "predicted": false, "actual": false},
+    {"record_id": "N003", "field": "phone", "predicted": false, "actual": false},
+    {"record_id": "N003", "field": "address", "predicted": false, "actual": false},
+    {"record_id": "N004", "field": "email", "predicted": false, "actual": false},
+    {"record_id": "N004", "field": "phone", "predicted": false, "actual": false},
+    {"record_id": "N005", "field": "email", "predicted": false, "actual": false},
+    {"record_id": "N005", "field": "address", "predicted": false, "actual": false}
+  ]
+}

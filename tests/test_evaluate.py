@@ -134,6 +134,40 @@ def test_evaluate_counts_false_merge_and_coverage() -> None:
     assert report.recall_coverage == 1.0
 
 
+def test_evaluate_disaggregates_documented_risk_classes() -> None:
+    banded = band_pairs(
+        [("a", "b", 0.85), ("c", "d", 0.50)],
+        auto_threshold=0.97,
+        review_threshold=0.80,
+    )
+    report = evaluate(
+        banded,
+        [["a", "b"], ["c", "d"]],
+        n_records=4,
+        segments={
+            "hyphenated surname": [["a", "b"]],
+            "rural route": [["c", "d"]],
+        },
+    )
+
+    scores = {segment.name: segment for segment in report.segments}
+    assert scores["hyphenated surname"].coverage_recall == 1.0
+    assert scores["hyphenated surname"].n_surfaced == 1
+    assert scores["rural route"].coverage_recall == 0.0
+    assert scores["rural route"].n_missed == 1
+    assert scores["rural route"].blocking_misses == 0
+
+
+def test_evaluate_rejects_segment_pair_outside_ground_truth() -> None:
+    with pytest.raises(ValueError, match="is not ground truth"):
+        evaluate(
+            [],
+            [["a", "b"]],
+            n_records=3,
+            segments={"invalid": [["a", "c"]]},
+        )
+
+
 # ---------------------------------------------------------------------------
 # Extraction metrics
 # ---------------------------------------------------------------------------

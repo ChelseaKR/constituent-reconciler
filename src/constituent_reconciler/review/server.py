@@ -25,6 +25,7 @@ loopback socket for the end-to-end path and the CLI.
 from __future__ import annotations
 
 import hmac
+import socket
 import webbrowser
 from dataclasses import dataclass
 from functools import partial
@@ -247,6 +248,30 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         self._send(handle_post(self.session, self.path, form, self._context()))
 
 
+class _ThreadingHTTPServerV6(ThreadingHTTPServer):
+    """ThreadingHTTPServer bound over IPv6, for the ``::1`` loopback host.
+
+    ``http.server`` defaults to ``AF_INET``, so binding the advertised ``::1``
+    loopback would otherwise fail with a ``socket.gaierror``.
+    """
+
+    address_family = socket.AF_INET6
+
+
+def _authority(sockname: tuple[object, ...]) -> str:
+    """The ``host:port`` a browser puts in the Host header for this socket.
+
+    An IPv6 address is bracketed (``[::1]:8765``), matching how browsers and
+    URLs spell an IPv6 authority; without the brackets the Host-header check
+    would refuse every request on an IPv6 bind.
+    """
+
+    host, port = str(sockname[0]), sockname[1]
+    if ":" in host:
+        return f"[{host}]:{port}"
+    return f"{host}:{port}"
+
+
 def build_server(session: ReviewSession, host: str, port: int) -> ThreadingHTTPServer:
     """Bind a loopback review server. Refuses a non-loopback host under DV.
 
@@ -262,12 +287,13 @@ def build_server(session: ReviewSession, host: str, port: int) -> ThreadingHTTPS
             f"{host!r} is not loopback. Use one of: {', '.join(sorted(LOOPBACK_HOSTS))}."
         )
     handler = partial(ReviewRequestHandler, session)
-    server = ThreadingHTTPServer((host, port), handler)
+    server_class = _ThreadingHTTPServerV6 if ":" in host else ThreadingHTTPServer
+    server = server_class((host, port), handler)
     sockname = server.socket.getsockname()
     # Stamped on the server, not computed per-request, so it reflects the
     # actual bound address (relevant when ``port`` is 0 and the OS assigns one)
     # and every handler checks the Host header against the same value.
-    server.authority = f"{sockname[0]}:{sockname[1]}"  # type: ignore[attr-defined]
+    server.authority = _authority(sockname)  # type: ignore[attr-defined]
     return server
 
 
@@ -286,8 +312,11 @@ def serve(
     """
 
     server = build_server(session, host, port)
-    sockname = server.socket.getsockname()
-    url = f"http://{sockname[0]}:{sockname[1]}/"
+    # Reuse the authority build_server stamped on the server (bracketed for
+    # IPv6), so the URL printed and opened here always matches the Host header
+    # every handler checks against; a raw f-string over sockname would print
+    # an unbracketed "::1:port" that no browser can parse as a URL.
+    url = f"http://{server.authority}/"  # type: ignore[attr-defined]
     print(f"Review server running at {url}")
     print(f"  Reviewing as {session.reviewer}.")
     if session.require_second_reviewer:

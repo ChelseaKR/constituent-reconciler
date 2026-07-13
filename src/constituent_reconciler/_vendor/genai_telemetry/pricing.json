@@ -1,0 +1,182 @@
+{
+  "_comment": "Pinned model price table (USD per 1M tokens) for cost-per-conversation computation. Every provider-specific row names its source. Update this file (and last_verified) when prices change; treat computed costs as estimates, not billing (billing is authoritative in the provider console).",
+  "last_verified": "2026-07-12",
+  "unit": "usd_per_1m_tokens",
+  "sources": {
+    "anthropic_pricing": {
+      "provider": "Anthropic",
+      "url": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "scope": "Claude API first-party standard pricing",
+      "last_verified": "2026-07-11"
+    },
+    "anthropic_model_ids": {
+      "provider": "Anthropic",
+      "url": "https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions",
+      "scope": "Exact Claude API IDs, pinned snapshots, and pre-4.6 aliases",
+      "last_verified": "2026-07-12"
+    },
+    "aws_bedrock_model_ids": {
+      "provider": "Amazon Web Services",
+      "url": "https://docs.aws.amazon.com/bedrock/latest/userguide/models.html",
+      "scope": "Per-model Bedrock Runtime IDs and system-defined inference-profile IDs",
+      "last_verified": "2026-07-12"
+    },
+    "anthropic_bedrock_endpoint_pricing": {
+      "provider": "Anthropic",
+      "billing_platform": "Amazon Bedrock",
+      "url": "https://platform.claude.com/docs/en/about-claude/pricing#cloud-platform-pricing",
+      "scope": "Claude 4.5 and later on Amazon Bedrock",
+      "rule": "Global endpoints use base rates; regional and multi-region endpoints apply a 1.1x multiplier.",
+      "last_verified": "2026-07-12"
+    },
+    "aws_bedrock_price_list": {
+      "provider": "Amazon Web Services",
+      "service": "Amazon Bedrock",
+      "url": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonBedrock/current/index.json",
+      "offer_code": "AmazonBedrock",
+      "catalog_version": "20260707080509",
+      "publication_date": "2026-07-07T08:05:09Z",
+      "source_unit": "usd_per_1k_tokens",
+      "last_verified": "2026-07-12"
+    }
+  },
+  "models": {
+    "claude-fable-5": {
+      "provider": "anthropic", "source": "anthropic_pricing",
+      "aws_bedrock": {
+        "source": "anthropic_bedrock_endpoint_pricing",
+        "model_ids": ["anthropic.claude-fable-5"],
+        "profile_model_ids": ["anthropic.claude-fable-5"],
+        "profile_prefixes": ["us", "global"],
+        "global": 1.0, "regional": 1.1, "multi_region": 1.1
+      },
+      "input": 10.0, "output": 50.0, "cache_write_5m": 12.5,
+      "cache_write_1h": 20.0, "cache_read": 1.0
+    },
+    "claude-mythos-5": {
+      "provider": "anthropic", "source": "anthropic_pricing",
+      "aws_bedrock": {
+        "source": "anthropic_bedrock_endpoint_pricing",
+        "model_ids": ["anthropic.claude-mythos-5"],
+        "profile_model_ids": [], "profile_prefixes": [],
+        "global": 1.0, "regional": 1.1, "multi_region": 1.1
+      },
+      "input": 10.0, "output": 50.0, "cache_write_5m": 12.5,
+      "cache_write_1h": 20.0, "cache_read": 1.0
+    },
+    "claude-opus-4-8": {
+      "provider": "anthropic", "source": "anthropic_pricing",
+      "aws_bedrock": {
+        "source": "anthropic_bedrock_endpoint_pricing",
+        "model_ids": ["anthropic.claude-opus-4-8"],
+        "profile_model_ids": ["anthropic.claude-opus-4-8"],
+        "profile_prefixes": ["us", "eu", "jp", "au", "global"],
+        "global": 1.0, "regional": 1.1, "multi_region": 1.1
+      },
+      "input": 5.0, "output": 25.0, "cache_write_5m": 6.25,
+      "cache_write_1h": 10.0, "cache_read": 0.5
+    },
+    "claude-opus-4-7": {
+      "provider": "anthropic", "source": "anthropic_pricing",
+      "aws_bedrock": {
+        "source": "anthropic_bedrock_endpoint_pricing",
+        "model_ids": ["anthropic.claude-opus-4-7"],
+        "profile_model_ids": ["anthropic.claude-opus-4-7"],
+        "profile_prefixes": ["us", "eu", "jp", "au", "global"],
+        "global": 1.0, "regional": 1.1, "multi_region": 1.1
+      },
+      "input": 5.0, "output": 25.0, "cache_write_5m": 6.25,
+      "cache_write_1h": 10.0, "cache_read": 0.5
+    },
+    "claude-opus-4-6": {
+      "provider": "anthropic", "source": "anthropic_pricing",
+      "aws_bedrock": {
+        "source": "anthropic_bedrock_endpoint_pricing",
+        "model_ids": ["anthropic.claude-opus-4-6-v1"],
+        "profile_model_ids": ["anthropic.claude-opus-4-6-v1"],
+        "profile_prefixes": ["us", "eu", "au", "global"],
+        "global": 1.0, "regional": 1.1, "multi_region": 1.1
+      },
+      "input": 5.0, "output": 25.0, "cache_write_5m": 6.25,
+      "cache_write_1h": 10.0, "cache_read": 0.5
+    },
+    "claude-sonnet-5": {
+      "provider": "anthropic", "source": "anthropic_pricing",
+      "aws_bedrock": {
+        "source": "anthropic_bedrock_endpoint_pricing",
+        "model_ids": ["anthropic.claude-sonnet-5"],
+        "profile_model_ids": ["anthropic.claude-sonnet-5"],
+        "profile_prefixes": ["us", "global"],
+        "global": 1.0, "regional": 1.1, "multi_region": 1.1
+      },
+      "input": 3.0, "output": 15.0, "cache_write_5m": 3.75,
+      "cache_write_1h": 6.0, "cache_read": 0.3
+    },
+    "claude-sonnet-4-6": {
+      "provider": "anthropic", "source": "anthropic_pricing",
+      "aws_bedrock": {
+        "source": "anthropic_bedrock_endpoint_pricing",
+        "model_ids": ["anthropic.claude-sonnet-4-6"],
+        "profile_model_ids": ["anthropic.claude-sonnet-4-6"],
+        "profile_prefixes": ["us", "eu", "au", "jp", "global"],
+        "global": 1.0, "regional": 1.1, "multi_region": 1.1
+      },
+      "input": 3.0, "output": 15.0, "cache_write_5m": 3.75,
+      "cache_write_1h": 6.0, "cache_read": 0.3
+    },
+    "claude-haiku-4-5": {
+      "provider": "anthropic", "source": "anthropic_pricing",
+      "aliases": ["claude-haiku-4-5-20251001"],
+      "aws_bedrock": {
+        "source": "anthropic_bedrock_endpoint_pricing",
+        "model_ids": [
+          "anthropic.claude-haiku-4-5-20251001-v1:0",
+          "anthropic.claude-haiku-4-5"
+        ],
+        "profile_model_ids": ["anthropic.claude-haiku-4-5-20251001-v1:0"],
+        "profile_prefixes": ["us", "eu", "au", "jp", "global"],
+        "global": 1.0, "regional": 1.1, "multi_region": 1.1
+      },
+      "input": 1.0, "output": 5.0, "cache_write_5m": 1.25,
+      "cache_write_1h": 2.0, "cache_read": 0.1
+    },
+    "amazon.titan-embed-text-v2:0": {
+      "provider": "amazon",
+      "service": "aws.bedrock",
+      "source": "aws_bedrock_price_list",
+      "pricing_mode": "on_demand_in_region",
+      "input_only": true,
+      "regions": {
+        "ap-northeast-1": {"input": 0.029, "sku": "HSPSH92KBVRBRFHP"},
+        "ap-northeast-2": {"input": 0.024592, "sku": "X2GE9X2QXW5HY9KA"},
+        "ap-northeast-3": {"input": 0.027, "sku": "A5ZPGC7NBGBC4Q8Z"},
+        "ap-south-1": {"input": 0.024, "sku": "2XPPP4SFDN73K3D3"},
+        "ap-south-2": {"input": 0.027, "sku": "3PEJSD4F9MMC6STE"},
+        "ap-southeast-1": {"input": 0.028, "sku": "J2CRZZCGSZ9UJNHZ"},
+        "ap-southeast-2": {"input": 0.026004, "sku": "G5Z77SJV36KW79WS"},
+        "ca-central-1": {"input": 0.1, "sku": "FUMCS2U39M57A9Y2"},
+        "eu-central-1": {"input": 0.2, "sku": "QRGS5WQKSZZ4QQKV"},
+        "eu-central-2": {"input": 0.027, "sku": "2YDXQCAXBSCWMXXE"},
+        "eu-north-1": {"input": 0.021, "sku": "HC2YM8KHUY5YBC8H"},
+        "eu-south-1": {"input": 0.023, "sku": "Q95862VYYYZN5K46"},
+        "eu-south-2": {"input": 0.021, "sku": "NQAABHKE49YC4RAU"},
+        "eu-west-1": {"input": 0.026004, "sku": "3WCTR7VK48VUCXDZ"},
+        "eu-west-2": {"input": 0.1, "sku": "7VZBQ3J9QZ9A74JN"},
+        "eu-west-3": {"input": 0.03, "sku": "UZET556CEKWTGG8M"},
+        "sa-east-1": {"input": 0.2, "sku": "DV3GUFCZ3MN2KDJA"},
+        "us-east-1": {"input": 0.02, "sku": "EDNQYEHQ3XQ8N7EY"},
+        "us-east-2": {"input": 0.02, "sku": "73TWNPGDKBFY3XAT"},
+        "us-gov-east-1": {"input": 0.03, "sku": "X5XVHVFK27XGR6FU"},
+        "us-gov-west-1": {"input": 0.11, "sku": "DE4RH42PBHM2ZZ9R"},
+        "us-west-1": {"input": 0.024, "sku": "WDD8D7UNMVPUZ7WA"},
+        "us-west-2": {"input": 0.02, "sku": "4DKBSWT3EN64D397"}
+      }
+    }
+  },
+  "notes": {
+    "claude-sonnet-5": "Introductory pricing $2 input / $10 output per 1M runs through 2026-08-31; table lists standard rates. Adjust if computing intro-window cost.",
+    "anthropic_source": "The Claude base rows use source anthropic_pricing. First-party aliases use anthropic_model_ids. Exact Bedrock model and inference-profile IDs use aws_bedrock_model_ids and the linked per-model cards; undocumented prefixes, revisions, and ARNs remain unpriced. Bedrock global/regional/multi-region selection uses the explicit endpoint multipliers and source above; Vertex remains outside this table.",
+    "regional_models": "A model with a regions map requires Usage.region. Missing and unsupported regions remain unpriced rather than borrowing another region's rate.",
+    "aws_conversion": "AWS source prices are per 1K input tokens; Titan regional input values above are multiplied by 1,000 into this table's per-1M unit."
+  }
+}

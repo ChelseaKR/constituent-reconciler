@@ -226,6 +226,24 @@ def render_eval_markdown(
         "auto+review coverage recall is the share of true duplicates the system "
         "surfaces to a human one way or another.",
     ]
+    if report.segments:
+        lines += [
+            "",
+            "## Disaggregated error by documented risk class",
+            "",
+            "Each row is a planted true-duplicate pair representing a risk class "
+            "called out in the model card. `Surfaced` includes both auto and review; "
+            "blocking misses were never scored.",
+            "",
+            "| Risk class | True pairs | Surfaced | Missed | Coverage recall | Blocking misses |",
+            "|------------|-----------:|----------:|-------:|----------------:|----------------:|",
+        ]
+        lines += [
+            f"| {segment.name} | {segment.n_true_pairs} | {segment.n_surfaced} | "
+            f"{segment.n_missed} | {_pct(segment.coverage_recall)} | "
+            f"{segment.blocking_misses} |"
+            for segment in report.segments
+        ]
     lines += _calibration_lines(calibration)
     return "\n".join(lines) + "\n"
 

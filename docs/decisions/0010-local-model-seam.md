@@ -65,17 +65,17 @@ could accidentally call out.
 
 ### `LocalSeam.refine()` is a working implementation, not a placeholder
 
-Unlike `BedrockSeam.refine()` (still `NotImplementedError`, per 0003, because
-page-to-image conversion is out of scope), `LocalSeam.refine()` is
-implemented: it reads a low-confidence page's text layer via a new
-`extract.pdf.page_text()` helper, asks the local model to return the same
-five fields the offline regex extractor targets (`first_name`, `last_name`,
-`dob`, `email`, `phone`) as JSON, and parses the response. No page-to-image
+`LocalSeam.refine()` is implemented: it reads a low-confidence page's text
+layer via the private `extract.seam._page_text()` helper, asks the local model
+to return the six canonical fields (`first_name`, `last_name`, `dob`, `email`,
+`phone`, `address`) as JSON, and parses the response. No page-to-image
 step is needed because a local text model works directly from pdfplumber's
 already-extracted text; that keeps the implementation stdlib-only and avoids
 the dependency weight EXP-05 flags as a risk (an image pipeline would need
-Pillow and a PDF rasterizer). A vision-capable local model, for pages with no
-text layer at all, is a real gap this decision does not close.
+Pillow and a PDF rasterizer). Bedrock's later implementation does render a PNG;
+that does not change this local seam's text-only design. A vision-capable local
+model for pages with no text layer at all remains a gap this decision does not
+close.
 
 ### Confidence is a routing signal, not a calibrated probability
 

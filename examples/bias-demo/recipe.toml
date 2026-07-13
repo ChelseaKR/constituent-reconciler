@@ -1,0 +1,33 @@
+# Synthetic, disaggregated matching evaluation for documented risk classes.
+# Run from the repository root:
+#   reconcile eval --config examples/bias-demo/recipe.toml \
+#     --truth examples/bias-demo/ground_truth.json \
+#     --calibration examples/bias-demo/calibration_labels.json \
+#     --out docs/audits/bias-report.md
+
+[input]
+existing = "existing.csv"
+incoming = "incoming.csv"
+id_column = "id"
+
+[mapping]
+first_name = "first"
+last_name = "last"
+dob = "dob"
+email = "email"
+phone = "phone"
+address = "address"
+
+[normalize]
+address_backend = "deterministic"
+
+[consent]
+column = "consent"
+
+[thresholds]
+prior = 0.01
+auto = 0.97
+review = 0.80
+
+[policy]
+pack = "default"
