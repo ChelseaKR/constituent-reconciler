@@ -311,6 +311,22 @@ def test_bedrock_invalid_usage_is_not_emitted(
     assert GEN_AI_USAGE_INPUT_TOKENS not in event
 
 
+def test_bedrock_reflected_finish_reason_is_not_emitted(
+    stub_page_render: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    from constituent_reconciler._vendor.genai_telemetry.attributes import (
+        GEN_AI_RESPONSE_FINISH_REASONS,
+    )
+
+    response = _converse_response('{"fields": []}', with_usage=True)
+    response["stopReason"] = "PLANTED-PII-alice@example.org"
+    with caplog.at_level(logging.INFO, logger="constituent_reconciler"):
+        BedrockSeam(client=_StubBedrockClient(response=response)).refine(Path("private.pdf"), 1)
+    event = json.loads(caplog.records[-1].message)
+    assert GEN_AI_RESPONSE_FINISH_REASONS not in event
+    assert "PLANTED-PII" not in caplog.records[-1].message
+
+
 def test_bedrock_refine_fenced_json_response_parses(stub_page_render: None) -> None:
     fenced = (
         '```json\n{"fields": [{"name": "phone", "value": "555-123-4567", "confidence": 0.7}]}\n```'
@@ -353,10 +369,16 @@ def test_bedrock_refine_skips_malformed_entries(stub_page_render: None) -> None:
     assert [(f.field_name, f.value) for f in fields] == [("first_name", "Alice")]
 
 
-def test_bedrock_refine_client_error_returns_empty(stub_page_render: None) -> None:
-    client = _StubBedrockClient(error=RuntimeError("throttled"))
+def test_bedrock_refine_client_error_log_is_content_free(
+    stub_page_render: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    client = _StubBedrockClient(error=RuntimeError("PLANTED-PII-alice@example.org"))
     seam = BedrockSeam(client=client)
-    assert seam.refine(Path("form.pdf"), 1) == []
+    with caplog.at_level(logging.WARNING, logger="constituent_reconciler.extract.seam"):
+        assert seam.refine(Path("private-alice.pdf"), 1) == []
+    assert "private-alice.pdf" not in caplog.text
+    assert "PLANTED-PII" not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
 
 
 def test_bedrock_refine_without_client_returns_empty() -> None:
@@ -527,6 +549,61 @@ def test_local_seam_refine_parses_fields_from_fake_server(intake_pdf: Path) -> N
         ("first_name", "Alice"),
         ("email", "alice@example.org"),
     ]
+
+
+@pytest.mark.parametrize(
+    "invalid_usage",
+    [
+        {"prompt_eval_count": True, "eval_count": 2},
+        {"prompt_eval_count": -1, "eval_count": 2},
+        {"prompt_eval_count": 4, "eval_count": False},
+        {"prompt_eval_count": 4, "eval_count": -2},
+    ],
+)
+def test_local_seam_invalid_usage_and_reflected_finish_reason_are_not_emitted(
+    intake_pdf: Path,
+    caplog: pytest.LogCaptureFixture,
+    invalid_usage: dict[str, object],
+) -> None:
+    from constituent_reconciler._vendor.genai_telemetry.attributes import (
+        GEN_AI_RESPONSE_FINISH_REASONS,
+        GEN_AI_USAGE_INPUT_TOKENS,
+    )
+
+    model_reply = json.dumps(
+        {
+            "response": '{"fields": []}',
+            "done_reason": "PLANTED-PII-alice@example.org",
+            **invalid_usage,
+        }
+    ).encode("utf-8")
+    with _fake_ollama(model_reply) as host:
+        with caplog.at_level(logging.INFO, logger="constituent_reconciler"):
+            LocalSeam(host=host).refine(intake_pdf, 1)
+    event = json.loads(caplog.records[-1].message)
+    assert GEN_AI_USAGE_INPUT_TOKENS not in event
+    assert GEN_AI_RESPONSE_FINISH_REASONS not in event
+    assert "PLANTED-PII" not in caplog.records[-1].message
+
+
+def test_local_seam_error_log_is_content_free(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import constituent_reconciler.extract.seam as seam_mod
+
+    seam = LocalSeam()
+
+    def fail_request(path: str, payload: dict[str, object] | None = None) -> dict[str, Any]:
+        raise OSError("PLANTED-PII-alice@example.org")
+
+    monkeypatch.setattr(seam_mod, "_page_text", lambda path, page_num: "private intake text")
+    monkeypatch.setattr(seam, "_json_request", fail_request)
+    with caplog.at_level(logging.WARNING, logger="constituent_reconciler.extract.seam"):
+        assert seam.refine(Path("private-alice.pdf"), 1) == []
+    assert "private-alice.pdf" not in caplog.text
+    assert "PLANTED-PII" not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
 
 
 def test_local_seam_server_down_is_disabled_and_refine_returns_empty(

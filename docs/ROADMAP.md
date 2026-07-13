@@ -258,8 +258,10 @@ to. What Tier C asks for:
   (`tests/test_consent.py`, `tests/test_provenance.py`, `tests/test_review.py`).
 * **Model-call telemetry:** an optional span factory receives canonical
   OpenTelemetry GenAI attributes. The same call records input/output tokens,
-  duration, finish reason, and estimated cost without page, prompt, response,
-  field, or record content. RUM and hosted-service request SLOs remain N/A.
+  duration, an allowlisted finish reason, and estimated cost without page,
+  prompt, response, filename, exception detail, field, or record content.
+  Telemetry exporter failures are isolated from provider results. RUM and
+  hosted-service request SLOs remain N/A.
 
 ## Out of scope
 

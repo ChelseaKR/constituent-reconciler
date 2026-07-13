@@ -319,12 +319,7 @@ class BedrockSeam:
                             ),
                         )
         except Exception:
-            logger.warning(
-                "Bedrock refinement failed for %s page %d; keeping local extraction",
-                path.name,
-                page_num,
-                exc_info=True,
-            )
+            logger.warning("Bedrock refinement failed; keeping local extraction")
             return []
         return _parse_response(result)
 
@@ -390,24 +385,22 @@ class LocalSeam:
                         "format": "json",
                     },
                 )
-                input_tokens = response.get("prompt_eval_count", 0)
-                output_tokens = response.get("eval_count", 0)
-                call.record_completion(
-                    model=self._model_id,
-                    input_tokens=input_tokens if isinstance(input_tokens, int) else 0,
-                    output_tokens=output_tokens if isinstance(output_tokens, int) else 0,
-                    cost_usd=0.0,
-                    finish_reason=response.get("done_reason")
-                    if isinstance(response.get("done_reason"), str)
-                    else None,
-                )
+                input_tokens = _usage_count(response, "prompt_eval_count", default=0)
+                output_tokens = _usage_count(response, "eval_count", default=0)
+                if input_tokens is not None and output_tokens is not None:
+                    call.record_completion(
+                        model=self._model_id,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        cost_usd=0.0,
+                        finish_reason=(
+                            response.get("done_reason")
+                            if isinstance(response.get("done_reason"), str)
+                            else None
+                        ),
+                    )
         except (OSError, urllib.error.URLError, json.JSONDecodeError):
-            logger.warning(
-                "Local model refinement failed for %s page %d; keeping local extraction",
-                path.name,
-                page_num,
-                exc_info=True,
-            )
+            logger.warning("Local model refinement failed; keeping local extraction")
             return []
         raw_text = response.get("response")
         return _parse_local_fields(raw_text) if isinstance(raw_text, str) else []

@@ -83,6 +83,9 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   silently.
 
 ### Fixed
+- GenAI telemetry now rejects negative and boolean token counts, drops unknown
+  provider finish reasons, emits content-free fallback warnings, and isolates
+  span/log exporter failures so instrumentation cannot change a provider result.
 - `make test` no longer nests pytest-cov inside `coverage run`, which overwrote
   the valid pytest coverage data with an empty outer report. Pytest now owns the
   single coverage session, and the temporary 84% threshold is raised to the
