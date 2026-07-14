@@ -122,7 +122,7 @@ that, as four merge-blocking invariants:
 
 The invariants are grounded in primary VAWA, FVPSA, and CMS sources, with the
 citations and three honesty corrections recorded in
-docs/decisions/0005-dv-policy-pack.md and docs/RESPONSIBLE-TECH-AUDITS.md. The
+docs/adr/0005-dv-policy-pack.md and docs/RESPONSIBLE-TECH-AUDITS.md. The
 `policy.py` model maps a pack name to its invariants and fails closed on an
 unknown name. `hipaa` is a partial pack (consent plus no cloud seam) and does not
 claim the DV local-target and aggregate rules.
@@ -141,7 +141,7 @@ because the tag itself is gated on adoption (see below):
   project against the nine indicators, honestly.
 * **Declared schema and interface versions** (`schema.py`, `reconcile schema`)
   for the config, the connector interface, and the JSON artifacts, with the
-  versioning contract in docs/decisions/0006-schema-stability.md.
+  versioning contract in docs/adr/0006-schema-stability.md.
 
 ## v0.7.0 — Web review UI and offline CRM export (shipped)
 
@@ -167,7 +167,7 @@ the 1.0 milestone named.
   keyboard-complete controls, no-JS fallback) is in place, and an automated
   axe-core audit of the review queue's rendered HTML now runs as a CI job
   (`accessibility` in `.github/workflows/ci.yml`; `make axe` locally; see
-  docs/decisions/0009-automated-axe-audit.md). The walkthrough is a manual
+  docs/adr/0011-automated-axe-audit.md). The walkthrough is a manual
   pass with real assistive technology, tracked with a checklist in
   docs/reviews/SCREEN-READER-WALKTHROUGH.md, not yet performed.
 

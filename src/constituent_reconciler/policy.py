@@ -8,7 +8,7 @@ VAWA and FVPSA needs, as switches the rest of the code reads and as tests assert
 
 The invariants here are grounded in primary guidance, not invented. The sources
 and exact statutory citations are recorded in docs/RESPONSIBLE-TECH-AUDITS.md and
-docs/decisions/0005-dv-policy-pack.md. In brief:
+docs/adr/0005-dv-policy-pack.md. In brief:
 
 * No PII egress. VAWA bars a grantee from disclosing personally identifying
   client information "regardless of whether the information has been encoded,
@@ -81,7 +81,7 @@ class Policy:
     once that analysis is written, or a recipe-level
     ``extract.local_model_override`` a deployer sets explicitly, never
     implied by requesting the local backend alone. See
-    docs/decisions/0010-local-model-seam.md.
+    docs/adr/0010-local-model-seam.md.
     """
 
     pack: str

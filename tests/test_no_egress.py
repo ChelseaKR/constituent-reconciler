@@ -102,7 +102,7 @@ def test_dv_pack_fuses_the_cloud_extraction_seam_off() -> None:
 def test_dv_pack_fuses_the_local_seam_off_by_default() -> None:
     # A local model does not egress PII, but that is a separate question from
     # whether model-assisted extraction is acceptable at all under a given
-    # org's VAWA reading (docs/decisions/0010-local-model-seam.md). The dv
+    # org's VAWA reading (docs/adr/0010-local-model-seam.md). The dv
     # pack has not recorded that analysis, so backend="local" alone still
     # produces a NoOp seam, same as backend="bedrock".
     seam = make_seam("dv", backend="local")

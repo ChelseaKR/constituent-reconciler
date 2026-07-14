@@ -17,7 +17,7 @@ human instead.
 
 These are defaults, not law. A recipe can override the prior and the thresholds;
 a later version will expose per-field overrides. The numbers are documented in
-docs/decisions/0001-matcher-and-defaults.md so a reviewer can see the reasoning,
+docs/adr/0001-matcher-and-defaults.md so a reviewer can see the reasoning,
 not just the constants.
 """
 
@@ -79,7 +79,7 @@ def _first_name_comparison(column: str = "first_name") -> dict[str, Any]:
     match at all; it needs the vendored table in :mod:`nicknames`, looked up
     through the ``first_name_nickname_key`` column normalize.py derives
     alongside ``first_name``. The four m_probabilities sum to 1.0 (the
-    convention this module uses throughout, see docs/decisions/0001), moved
+    convention this module uses throughout, see docs/adr/0001), moved
     down slightly from the three-level version's 0.92/0.07/0.01 split to make
     room for the new level without changing the overall shape of the prior.
     """
@@ -131,7 +131,7 @@ def _last_name_comparison(column: str = "last_name") -> dict[str, Any]:
     ``test_term_frequency_adjustment_favors_the_rarer_surname``) without
     letting a small batch's sampling noise dominate the score. Revisit this
     number if the batch sizes this project sees in practice turn out to be
-    much larger, per docs/decisions/0009-matching-depth-pack.md.
+    much larger, per docs/adr/0009-matching-depth-pack.md.
 
     The compound-surname level reads the ``last_name_surname1`` and
     ``last_name_surname2`` columns normalize.py derives (the last two

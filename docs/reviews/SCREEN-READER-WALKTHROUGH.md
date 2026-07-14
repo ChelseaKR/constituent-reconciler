@@ -11,7 +11,7 @@ docs/ROADMAP.md's metrics ledger ("axe clean, screen-reader walkthrough"). The
 first half — an automated axe-core scan of the rendered review queue — is
 implemented in `scripts/axe_audit.mjs` and runs in CI
 (`.github/workflows/ci.yml`, job `accessibility`); see
-docs/decisions/0009-automated-axe-audit.md for why an automated scan can cover
+docs/adr/0011-automated-axe-audit.md for why an automated scan can cover
 that half but not this one. A scan can confirm markup conforms to a rule set;
 it cannot tell you whether the rationale sentence reads sensibly out loud,
 whether the reading order matches the visual order at a table with scoped

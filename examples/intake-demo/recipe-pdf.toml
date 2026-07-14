@@ -16,7 +16,7 @@
 # egress. Under policy pack = "dv" or "hipaa" the Bedrock seam is always
 # disabled, and the local seam is disabled too unless local_model_override is
 # set explicitly, on the theory that "no cloud calls" and "no model at all"
-# are different questions (see docs/decisions/0010-local-model-seam.md).
+# are different questions (see docs/adr/0010-local-model-seam.md).
 
 [input]
 existing = "existing.csv"

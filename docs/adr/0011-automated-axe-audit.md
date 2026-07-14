@@ -1,4 +1,4 @@
-# 0009 — Automated axe audit of the review queue
+# 0011 — Automated axe audit of the review queue
 
 Status: accepted (v0.7 follow-up)
 

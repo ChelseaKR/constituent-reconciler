@@ -1,7 +1,7 @@
 # Branch rulesets (committed artifact, not yet applied)
 
 `main.json` is the desired-state ruleset for the `main` branch, matching
-`docs/decisions/0008-solo-maintainer-review-waiver.md`: PRs required (0
+`docs/adr/0008-solo-maintainer-review-waiver.md`: PRs required (0
 approvals required, since there is one maintainer), the three CI jobs
 (`verify`, `security`, `secrets` from `.github/workflows/ci.yml`) required and
 strict-up-to-date, force-push and branch deletion blocked, linear history

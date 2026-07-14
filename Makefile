@@ -34,7 +34,7 @@ security:
 verify: format-check lint type test
 
 # Automated axe-core audit of the review queue's actual rendered HTML
-# (docs/decisions/0009-automated-axe-audit.md). Not part of `verify`, so a
+# (docs/adr/0011-automated-axe-audit.md). Not part of `verify`, so a
 # contributor without Node installed is not blocked from the Python checks;
 # CI runs it as its own job. Requires `npm ci` once.
 axe-fixtures:

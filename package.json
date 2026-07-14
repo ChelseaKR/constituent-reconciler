@@ -1,7 +1,7 @@
 {
   "name": "constituent-reconciler-accessibility-audit",
   "private": true,
-  "description": "Dev-only tooling for the automated axe-core audit of the review queue UI (docs/ROADMAP.md, docs/decisions/0009-automated-axe-audit.md). Not part of the shipped package or Docker image.",
+  "description": "Dev-only tooling for the automated axe-core audit of the review queue UI (docs/ROADMAP.md, docs/adr/0011-automated-axe-audit.md). Not part of the shipped package or Docker image.",
   "type": "module",
   "scripts": {
     "axe": "node scripts/axe_audit.mjs .axe-fixtures"
