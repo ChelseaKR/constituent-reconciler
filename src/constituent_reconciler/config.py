@@ -132,7 +132,7 @@ class ExtractConfig:
         machine, for example Ollama (no network egress). Under DV and HIPAA
         packs this stays off unless the pack sets ``allow_local_seam`` or the
         recipe sets ``local_model_override``; see
-        docs/decisions/0010-local-model-seam.md.
+        docs/adr/0010-local-model-seam.md.
 
     ``confidence_threshold`` is the page-level score below which a page is
     considered low-confidence and offered to the seam if one is active.
@@ -156,7 +156,7 @@ class HouseholdConfig:
 
     ``enabled`` defaults to False under every policy pack, including ``dv``: the
     grouping step (household.py) never runs unless a recipe turns it on
-    explicitly. See docs/decisions for the DV interaction; the off-by-default is
+    explicitly. See docs/adr for the DV interaction; the off-by-default is
     an invariant, not a convenience default, because inferring co-residence from
     a shared address is itself sensitive (shelter residents share an address
     without being a household).

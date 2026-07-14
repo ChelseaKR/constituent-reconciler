@@ -83,6 +83,12 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   silently.
 
 ### Fixed
+- Canonicalized the architecture decision log under `docs/adr/`, added the
+  portfolio meta-ADR and authoring template, and resolved the duplicate 0009
+  identifier by renumbering the automated axe decision to 0011. Repository
+  references and the README conformance table now use the canonical path and
+  labels; the declared but unimplemented internationalization commitment
+  remains an explicit gap.
 - GenAI telemetry now rejects negative and boolean token counts, drops unknown
   provider finish reasons, emits content-free fallback warnings, and isolates
   span/log exporter failures so instrumentation cannot change a provider result.
@@ -198,7 +204,7 @@ change, shipped with this changelog entry.
     omitted (silent omission is itself a defect under the portfolio's
     documentation standard); status line now leads with "Beta" per the
     standard vocabulary.
-  - `docs/decisions/0008-solo-maintainer-review-waiver.md` records, dated and
+  - `docs/adr/0008-solo-maintainer-review-waiver.md` records, dated and
     reasoned, that the ≥1/≥2-human-reviewer control is waived while this repo
     has one maintainer, and names the compensating automated gates.
     `docs/rulesets/main.json` is the matching desired-state branch ruleset —
@@ -282,7 +288,7 @@ the items the README named as remaining before the 1.0 tag.
   connectors (`salesforce.FIELD_MAP`, `civicrm.IMPORT_FIELD_MAP`) so the file and
   the API payload cannot drift. Both targets are `is_local = True`, so the DV pack
   permits them while still refusing the network push.
-- **ADR 0007** (`docs/decisions/0007-review-ui-and-crm-export.md`).
+- **ADR 0007** (`docs/adr/0007-review-ui-and-crm-export.md`).
 - `examples/intake-demo/recipe-salesforce-csv.toml` and `recipe-civicrm-csv.toml`;
   20 new tests (128 total).
 
@@ -310,7 +316,7 @@ on real-organization adoption, per `docs/ROADMAP.md`).
   command and stamped into `aggregate_summary.json` as `schema_version`.
 - **DPG Standard conformance note** (`docs/DPG-CONFORMANCE.md`) mapping the
   project against the nine indicators.
-- **ADR 0006** (`docs/decisions/0006-schema-stability.md`) defining the
+- **ADR 0006** (`docs/adr/0006-schema-stability.md`) defining the
   stability contract.
 - `examples/intake-demo/recipe-salesforce.toml`; 13 new tests (108 total).
 
@@ -339,7 +345,7 @@ on real-organization adoption, per `docs/ROADMAP.md`).
   suppression so a lone suppressed cell is not recoverable by subtraction.
 - **`PolicyViolation`** exception, surfaced by the CLI with a clear message and a
   non-zero exit.
-- **ADR 0005** (`docs/decisions/0005-dv-policy-pack.md`) and an expanded privacy
+- **ADR 0005** (`docs/adr/0005-dv-policy-pack.md`) and an expanded privacy
   section in `docs/RESPONSIBLE-TECH-AUDITS.md` with primary VAWA/FVPSA/CMS
   citations and three honesty corrections (the statutory verb is "disclose,
   reveal, or release"; revocable consent is NNEDV best practice not statute; the
@@ -377,7 +383,7 @@ on real-organization adoption, per `docs/ROADMAP.md`).
   `"deterministic"`).
 - **`examples/address-demo/`**: fixture and recipe demonstrating address-format
   variation resolving to a merge.
-- **ADR 0004** (`docs/decisions/0004-address-normalization.md`).
+- **ADR 0004** (`docs/adr/0004-address-normalization.md`).
 
 ### Changed
 - `Record` gains an `address` slot in the canonical schema, active only when a
@@ -418,7 +424,7 @@ on real-organization adoption, per `docs/ROADMAP.md`).
 - **`cohen_kappa(predicted, actual)`** in `evaluate.py`: the calibration seam
   for comparing an LLM extraction judge's confidence against human-labeled field
   accuracy. Not yet wired into the eval report; the function is the planned seam.
-- **ADR 0003** (`docs/decisions/0003-extraction-seam.md`): documents the
+- **ADR 0003** (`docs/adr/0003-extraction-seam.md`): documents the
   pdfplumber choice, the regex-over-text-layer approach, the confidence
   heuristic, and the cloud-seam protocol.
 

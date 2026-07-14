@@ -26,7 +26,7 @@ Scope and honesty notes, read before extending this table:
   (patronymic and matronymic diminutives, for example). Extending this table
   to other naming traditions needs review by someone with cultural and
   linguistic fluency in that tradition, not guesswork from this codebase.
-  Tracked as follow-up work; see docs/decisions/0009-matching-depth-pack.md.
+  Tracked as follow-up work; see docs/adr/0009-matching-depth-pack.md.
 * Every key and value here must already be normalized the way
   ``normalize.normalize_name`` normalizes a name (lower-case, no accents, no
   punctuation, no spaces) so a table lookup never has to re-normalize.

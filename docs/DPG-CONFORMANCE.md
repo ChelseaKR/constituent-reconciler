@@ -39,7 +39,7 @@ Docker image (`Dockerfile`) runs the tool anywhere Docker runs.
 ## 5. Documentation
 
 **Met.** `README.md` for practitioners, `CLAUDE.md` as the build spec,
-`docs/ROADMAP.md`, MADR architecture decisions in `docs/decisions/`, a committed
+`docs/ROADMAP.md`, MADR architecture decisions in `docs/adr/`, a committed
 eval report, and this conformance note. Module and public-API docstrings
 throughout.
 

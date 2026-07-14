@@ -9,7 +9,7 @@ The contract: once the project reaches 1.0, a breaking change to any of these
 surfaces bumps the package MAJOR version and ships a migration note. Before 1.0,
 a surface may change with a MINOR bump and a CHANGELOG entry. A consumer can read
 these constants (or ``reconcile schema``) to check what it is integrating
-against. The rationale is in docs/decisions/0006-schema-stability.md.
+against. The rationale is in docs/adr/0006-schema-stability.md.
 """
 
 from __future__ import annotations

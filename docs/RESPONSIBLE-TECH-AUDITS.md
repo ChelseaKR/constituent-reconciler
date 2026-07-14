@@ -135,7 +135,7 @@ with scoped headers, status carried by text and a symbol rather than colour
 alone, decision controls that work with the keyboard and with no JavaScript, and
 no external asset fetch. The axe AUTO-GATE now runs (`accessibility` job in
 `.github/workflows/ci.yml`, an axe-core scan over jsdom of the review queue's
-real rendered HTML; docs/decisions/0009-automated-axe-audit.md), zero
+real rendered HTML; docs/adr/0011-automated-axe-audit.md), zero
 violations against the current markup as of 2026-07-07. Its one honest gap is
 `color-contrast`, which jsdom cannot evaluate (no canvas); every color pair in
 the stylesheet was checked by hand against the WCAG formula instead and clears

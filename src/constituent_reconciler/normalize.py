@@ -96,7 +96,7 @@ def soundex(normalized_value: str) -> str:
     Soundex, not full (Double) Metaphone, is the deliberate choice here. The
     ideation note that motivated this module suggested a metaphone key, but
     this project's dependency rule keeps everything around the matcher on the
-    standard library (see docs/decisions/0001), and there is no
+    standard library (see docs/adr/0001), and there is no
     metaphone implementation in the standard library. Soundex is a small,
     fully-specified, public-domain algorithm that is straightforward to
     implement correctly in a few lines of stdlib Python; a hand-rolled
@@ -148,7 +148,7 @@ def surname_tokens(raw_value: str) -> tuple[str, str]:
     This is a heuristic, not a rule from any naming-convention reference; it
     is documented as needing linguistic and cultural SME review, the same
     caveat that applies to ``nicknames`` (see that module's docstring and
-    docs/decisions/0009-matching-depth-pack.md).
+    docs/adr/0009-matching-depth-pack.md).
     """
 
     words = raw_value.split()

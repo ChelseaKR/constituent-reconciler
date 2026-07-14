@@ -68,7 +68,7 @@ README speaks only to nonprofit practitioners.
   for records, `tomllib` for the recipe, `argparse` for the CLI, and stdlib
   `csv`. pandas appears only inside the Splink wrapper, nowhere else. libpostal
   arrives with address normalization (v0.4). The rationale for these choices is
-  recorded in docs/decisions/0001-matcher-and-defaults.md.
+  recorded in docs/adr/0001-matcher-and-defaults.md.
 * License: Apache-2.0, matching the portfolio default.
 
 ## Architecture

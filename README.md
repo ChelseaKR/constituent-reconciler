@@ -111,7 +111,7 @@ The pack enforces four invariants, each a merge-blocking test:
 The invariants are grounded in primary VAWA, FVPSA, and CMS sources, with the
 citations and the honest scope of each claim in
 [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) and
-[docs/decisions/0005-dv-policy-pack.md](docs/decisions/0005-dv-policy-pack.md).
+[docs/adr/0005-dv-policy-pack.md](docs/adr/0005-dv-policy-pack.md).
 This is a reference implementation, not legal advice. An organization adopting it
 needs its own review against its own obligations.
 
@@ -459,7 +459,7 @@ docker run --rm -v "$PWD/out:/work/out" constituent-reconciler \
 
 Mount your own recipe and data at `/work/data` to run against real input. The
 `reconcile schema` command prints the config, connector, and report schema
-versions the build commits to (see `docs/decisions/0006-schema-stability.md`).
+versions the build commits to (see `docs/adr/0006-schema-stability.md`).
 
 ### Installing without internet access
 
@@ -493,31 +493,31 @@ transfer, and install steps are in
 * **CiviCRM** native dedup is rule-based exact matching. It is a write target
   this tool feeds, which validates the niche rather than competing with it.
 
-## Standards
+## Standards Conformance
 
 This project is held to the portfolio-wide engineering standards maintained
 alongside this repo's siblings. The dependency-light GenAI telemetry shim is
 vendored at the reviewed STANDARDS commit recorded in
 `src/constituent_reconciler/_vendor/genai_telemetry/.standards-version`; the
 full standards set remains a sibling repository rather than a submodule.
-Applies/N-A is declared per
+Applies/N/A is declared per
 standard below, not silently omitted; every "Applies — gap" row is tracked
 locally (this table plus the linked doc) pending a filed issue. Last reviewed:
-2026-07-12.
+2026-07-14.
 
 | Standard | Applies? | Status | Details |
 |---|---|---|---|
 | Quality & Metrics | Applies | Enforced — full suite and ≥85% branch coverage are merge-blocking; aggregate, extraction, large-corpus, and disaggregated bias reports are committed | [docs/ROADMAP.md](docs/ROADMAP.md) metrics ledger |
 | Code Quality | Applies | Enforced — `ruff` (incl. `S`, `C90`), `ruff format`, `mypy --strict`, `pytest --strict-markers`, `uv.lock` committed, `uv sync --frozen` | `pyproject.toml`, `Makefile` |
 | Security & Supply-Chain | Applies — ASVS L2 (handles DV-survivor PII) | Partial — secret scan, dependency-vuln scan, SAST (Semgrep + CodeQL + zizmor), and a release-time CycloneDX SBOM + keyless build-provenance attestation (`release.yml`) enforced; container scan (Trivy) is enforced in CI; VEX is still a gap | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Security |
-| CI/CD | Applies | Partial — SHA-pinned actions, least-privilege tokens, `make verify` parity, `secrets`+`security` jobs, CODEOWNERS, and a solo-maintainer review waiver (ADR 0008) all in place; the matching branch ruleset is a committed artifact (`docs/rulesets/main.json`) but not yet applied to the live repo (a repository-settings action) | `.github/workflows/ci.yml`, [docs/decisions/0008-solo-maintainer-review-waiver.md](docs/decisions/0008-solo-maintainer-review-waiver.md), [docs/rulesets/](docs/rulesets/) |
+| CI/CD | Applies | Partial — SHA-pinned actions, least-privilege tokens, `make verify` parity, `secrets`+`security` jobs, CODEOWNERS, and a solo-maintainer review waiver (ADR 0008) all in place; the matching branch ruleset is a committed artifact (`docs/rulesets/main.json`) but not yet applied to the live repo (a repository-settings action) | `.github/workflows/ci.yml`, [docs/adr/0008-solo-maintainer-review-waiver.md](docs/adr/0008-solo-maintainer-review-waiver.md), [docs/rulesets/](docs/rulesets/) |
 | Release & Versioning | Applies (release-producing: 0.1.0-0.7.0) | Partial — `.github/workflows/release.yml` is tag-triggered (`v*`), re-verifies at the tagged commit, checks tag/`pyproject.toml` version consistency, builds sdist+wheel, generates a CycloneDX SBOM, attests build provenance (keyless OIDC), and publishes a GitHub Release with the matching CHANGELOG section; gap — no `v*` tag has been cut yet, so the workflow is unexercised, and there is no PyPI publish stage (not yet published to PyPI) | [.github/workflows/release.yml](.github/workflows/release.yml), [CHANGELOG.md](CHANGELOG.md) |
 | Accessibility | Applies (`reconcile review` web UI) | Partial — structural WCAG 2.2 AA design and automated axe gate in place; manual screen-reader walkthrough remains | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Accessibility |
 | Observability | Applies — Tier C plus model-call telemetry | Canonical GenAI spans/logs record tokens, duration, finish reason, and estimated cost; PII/content absence is enforced by tests | [docs/ROADMAP.md](docs/ROADMAP.md) § Observability |
 | Internationalization | Applies — deferred to 1.0 | Declared — EN/ES parity is a real commitment, not yet built (no catalog infra) | [docs/I18N.md](docs/I18N.md) |
 | AI Evaluation | Applies to opt-in extraction seams | Model/data cards, fail-closed kappa, mocked contract/fallback tests, and PII-free token/cost telemetry landed; live model quality remains deployer-specific | [docs/ROADMAP.md](docs/ROADMAP.md) § AI Evaluation Standard applicability |
-| Documentation | Applies | Partial — this table, ADRs, CITATION.cff, CHANGELOG, model/data cards, and the pinned telemetry shim are present; ADRs live at `docs/decisions/` rather than `docs/adr/` | [docs/decisions/](docs/decisions/) |
-| Responsible Tech | Applies (core to this repo's identity) | Partial — DV/VAWA/FVPSA invariants, threat model, ethics failure modes, and dated bias evidence are committed; the human accessibility/adoption gates remain | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) |
+| Documentation | Applies | Enforced — this table, canonical ADR log and template, CITATION.cff, CHANGELOG, model/data cards, and the pinned telemetry shim are present | [docs/adr/](docs/adr/) |
+| Responsible-Tech Framework | Applies (core to this repo's identity) | Partial — DV/VAWA/FVPSA invariants, threat model, ethics failure modes, and dated bias evidence are committed; the human accessibility/adoption gates remain | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) |
 
 Project-specific target values are recorded in
 [docs/ROADMAP.md](docs/ROADMAP.md) and findings in
