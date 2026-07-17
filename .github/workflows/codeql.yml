@@ -1,18 +1,22 @@
 name: codeql
 
 # SAST for both the Python source (SEC-08) and the workflow files themselves
-# (CICD-20's "actions" language). Runs on every push/PR to main plus a weekly
-# schedule so drift in the CodeQL query packs themselves still gets caught
-# even on a quiet repo.
+# (CICD-20's "actions" language). Runs on every PR plus a weekly schedule so
+# drift in the CodeQL query packs themselves still gets caught even on a
+# quiet repo; the push-to-main trigger is redundant with the PR run and
+# dropped per CI-CD-STANDARD §11e.
 on:
-  push:
-    branches: [main]
   pull_request:
   schedule:
     - cron: "0 7 * * 3" # Wednesday 07:00 UTC
 
 permissions:
   contents: read
+
+# Supersede in-flight runs on the same ref (CI-CD-STANDARD §11c).
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   analyze:
