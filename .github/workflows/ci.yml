@@ -14,6 +14,12 @@ on:
 permissions:
   contents: read
 
+# Supersede in-flight runs on the same ref (CI-CD-STANDARD §11c) — a newer
+# push makes the older run's result moot, so don't spend minutes finishing it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -56,6 +62,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "22"
+          cache: "npm"
       - name: Install (Python)
         run: make install
       - name: Install (Node, frozen lockfile)
@@ -189,11 +196,12 @@ jobs:
 
   # Exercises the optional libpostal backend against the real C library. The
   # deterministic backend stays the default and the blocking gate; this job is
-  # non-blocking and does not run on pull requests because the source build and
-  # trained-model data download are too heavy for the merge path.
+  # non-blocking and runs only on the weekly schedule (or manual dispatch),
+  # never per-push (CI-CD-STANDARD §11d): the source build and trained-model
+  # data download are too heavy — and advisory — for the merge path.
   libpostal:
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     continue-on-error: true
     env:
       LIBPOSTAL_COMMIT: ffafa3fcd687631955453df70906c53d5677ce9a # v1.1.4
