@@ -30,6 +30,16 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   every write chains back to the exact configuration that produced it; dry
   runs stamp nothing. A Recipe built in code (no recipe file) records a null
   recipe hash rather than inventing one.
+- **Definition of done, PR template, hygiene gate, and ledger ownership
+  (maturity batch M7/M9/M10).** `DEFINITION_OF_DONE.md` writes down the
+  working agreement the quality bar implied; `.github/pull_request_template.md`
+  asks for the same items at review time, including eval-regeneration,
+  audit re-stamping on release, and new-dependency rationale. `make hygiene`
+  (tools/hygiene.py, inside `make verify` and CI) fails on debt markers,
+  uncoded suppressions, unexplained coverage exclusions, and bare Semgrep
+  waivers, with its own test suite. The metrics ledger gains Measured-by and
+  Owner columns plus a quarterly solo-scale DORA note that states plainly
+  what is not yet measurable.
 - **Canonical GenAI observability for opt-in extraction seams.** Bedrock
   Converse and loopback-local model calls now emit the reviewed, pinned
   STANDARDS telemetry schema: provider/model identity, input/output tokens,

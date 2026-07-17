@@ -31,7 +31,12 @@ security:
 	.venv/bin/python -m pip_audit --skip-editable --progress-spinner=off
 	osv-scanner --lockfile uv.lock
 
-verify: format-check lint type test
+# Source-hygiene gate (CQ-34/CQ-35): no debt markers, no uncoded or
+# unexplained suppressions. tools/hygiene.py documents each rule.
+hygiene:
+	.venv/bin/python tools/hygiene.py
+
+verify: format-check lint type hygiene test
 
 # Automated axe-core audit of the review queue's actual rendered HTML
 # (docs/adr/0011-automated-axe-audit.md). Not part of `verify`, so a
