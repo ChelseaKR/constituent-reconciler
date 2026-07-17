@@ -152,10 +152,12 @@ commit the ACR.
 **ASVS: L2** (handles PII: DV-survivor constituent records; matches the
 standard's PII-handling floor). OWASP ASVS-aligned posture: SBOM, Sigstore,
 SHA-pinned actions, OIDC, secret scanning. Untrusted input (uploaded PDFs) is a
-primary threat surface; parsing currently runs in-process, and a sandboxed,
-resource-limited extraction path is planned. The committed threat model is
-[`THREAT-MODEL.md`](./THREAT-MODEL.md), re-verified 2026-07-12 after the
-Bedrock/local inference and telemetry paths landed.
+primary threat surface; since 2026-07-17 PDF parsing runs in a resource-limited
+child process by default (containment, not privilege separation — the threat
+model states the limits), with an explicit recipe opt-out. The committed threat
+model is [`THREAT-MODEL.md`](./THREAT-MODEL.md), re-verified 2026-07-12 after
+the Bedrock/local inference and telemetry paths landed and updated 2026-07-17
+for the sandbox default.
 
 Declarations (re-verified 2026-07-12), each Applies/gap tracked in the README standards
 table rather than left blank:

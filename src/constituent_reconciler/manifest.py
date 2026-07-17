@@ -67,15 +67,20 @@ def _input_digests(paths: Iterable[Path]) -> dict[str, str]:
 
 
 def build_manifest(
-    recipe_path: Path,
+    recipe_path: Path | None,
     input_paths: Iterable[Path],
     recipe: Recipe,
 ) -> dict[str, object]:
-    """Assemble the reproducibility manifest for one run."""
+    """Assemble the reproducibility manifest for one run.
+
+    ``recipe_path`` may be None when the Recipe was built in code rather than
+    loaded from a file; the manifest then records a null recipe hash instead
+    of inventing one.
+    """
 
     return {
         "created_at": datetime.now(UTC).isoformat(),
-        "recipe_hash": file_digest(recipe_path),
+        "recipe_hash": file_digest(recipe_path) if recipe_path is not None else None,
         "input_hashes": _input_digests(input_paths),
         "package_version": __version__,
         "splink_version": _splink_version(),

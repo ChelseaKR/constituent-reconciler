@@ -309,6 +309,14 @@ filename, page number, bounding box) that appears in the review queue CSV as
 `{field}_left_span` and `{field}_right_span` columns, so a reviewer can navigate
 back to where the value was read.
 
+PDFs parse in a resource-limited child process by default: a malformed or
+hostile intake file that hangs, balloons memory, or crashes the parser is
+contained and its document routed to human review instead of taking the run
+down. This is containment, not a full syscall sandbox (the child keeps the
+same privileges; see `docs/THREAT-MODEL.md`). Set `sandbox = false` under
+`[extract]` to parse in-process, accepting that exposure; the caps live in
+`src/constituent_reconciler/extract/sandbox.py`.
+
 Pages with fewer than five words, or where the average word length looks garbled
 (over 15 characters), score below 0.5 and are flagged as low-confidence. They
 can be routed to a cloud seam (Claude on Bedrock) by setting `backend =
@@ -419,6 +427,14 @@ Check it at any time:
 ```sh
 reconcile verify --provenance out/provenance.jsonl
 ```
+
+Each non-dry-run export also stamps `out/run_manifest.json`: BLAKE2b digests
+of the recipe file and every input file (digests only, never field values),
+the package and Splink versions, the resolved thresholds, and the policy pack.
+The log's first entry for the run is a `run-start` entry carrying the
+manifest's hash, so every write chains back to the exact configuration and
+inputs that produced it, and an auditor can recompute the digests to detect a
+swapped input file.
 
 ### Destroying artifacts on a retention schedule
 

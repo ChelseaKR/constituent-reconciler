@@ -133,8 +133,12 @@ def test_export_writes_csv_review_queue_and_provenance(tmp_path: Path) -> None:
         for line in summary.provenance_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    assert entries
-    for entry in entries:
+    # The first entry is the run-start binding the writes to the manifest; the
+    # write entries follow it.
+    assert entries and entries[0]["action"] == "run-start"
+    write_entries = entries[1:]
+    assert len(write_entries) == 21
+    for entry in write_entries:
         assert entry["fill_policy"] == "survivor-then-lowest-id"
         golden = result_by_id[entry["record_id"]]
         assert entry["field_sources"] == golden.field_sources
@@ -404,10 +408,13 @@ def test_export_constructs_rfc3161_authority_from_tsa_url(
     result = pipeline.run(recipe)
     summary = pipeline.export(result, recipe, out_dir=tmp_path)
     assert built == ["https://tsa.example/tsr"]
-    assert len(stamper.stamped) == summary.logged == 21
+    # The authority stamps the run-start entry too, so writes + 1.
+    assert summary.logged == 21
+    assert len(stamper.stamped) == 22
     assert summary.provenance_path is not None
     first = json.loads(summary.provenance_path.read_text(encoding="utf-8").splitlines()[0])
     assert first["authority"] == "rfc3161:test"
+    assert first["action"] == "run-start"
     ok, _ = verify_log(summary.provenance_path)
     assert ok
 
@@ -722,3 +729,93 @@ def test_force_drop_is_binding_across_transitive_auto_edges(
         frozenset(("incoming:B", "incoming:C")),
     }
     assert all("reviewer separated" in pair.note for pair in result.review_pairs)
+
+
+# ---------------------------------------------------------------------------
+# Run manifest (FIX-08 wiring): every non-dry-run export stamps the manifest
+# and opens the provenance chain with a run-start entry bound to it.
+# ---------------------------------------------------------------------------
+
+
+def test_export_stamps_run_manifest_and_binds_the_chain_to_it(tmp_path: Path) -> None:
+    from constituent_reconciler.manifest import file_digest, manifest_hash
+
+    recipe = load_recipe(EXAMPLES / "recipe.toml")
+    result = pipeline.run(recipe)
+    summary = pipeline.export(result, recipe, out_dir=tmp_path)
+
+    assert summary.manifest_path == tmp_path / "run_manifest.json"
+    manifest = json.loads(summary.manifest_path.read_text(encoding="utf-8"))
+    # The recipe digest is recomputable by an auditor from the recipe file.
+    assert manifest["recipe_hash"] == file_digest(EXAMPLES / "recipe.toml")
+    # Every input file is digested, keyed by name, and recomputable.
+    assert manifest["input_hashes"]["incoming.csv"] == file_digest(EXAMPLES / "incoming.csv")
+    assert manifest["input_hashes"]["existing.csv"] == file_digest(EXAMPLES / "existing.csv")
+    assert manifest["policy_pack"] == recipe.policy_pack
+    assert manifest["thresholds"]["auto"] == recipe.auto_threshold
+
+    # The chain's first entry is the run-start carrying the manifest's hash,
+    # so every following write entry chains back to this configuration.
+    assert summary.provenance_path is not None
+    entries = [
+        json.loads(line)
+        for line in summary.provenance_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert entries[0]["action"] == "run-start"
+    assert entries[0]["content_hash"] == manifest_hash(manifest)
+    ok, message = verify_log(summary.provenance_path)
+    assert ok
+    assert manifest_hash(manifest) in message
+
+
+def test_dry_run_export_writes_no_manifest_and_no_provenance(tmp_path: Path) -> None:
+    recipe = load_recipe(EXAMPLES / "recipe.toml")
+    result = pipeline.run(recipe)
+    summary = pipeline.export(result, recipe, out_dir=tmp_path, dry_run=True)
+    assert summary.manifest_path is None
+    assert summary.provenance_path is None
+    assert not (tmp_path / "run_manifest.json").exists()
+    assert not (tmp_path / "provenance.jsonl").exists()
+
+
+def test_manifest_exposes_a_swapped_input_file(tmp_path: Path) -> None:
+    from constituent_reconciler.manifest import file_digest
+
+    incoming = tmp_path / "incoming.csv"
+    incoming.write_text("first,last\nAda,Lovelace\n", encoding="utf-8")
+    recipe_file = tmp_path / "recipe.toml"
+    recipe_file.write_text(
+        '[input]\nincoming = "incoming.csv"\n[mapping]\nfirst_name = "first"\nlast_name = "last"\n',
+        encoding="utf-8",
+    )
+    recipe = load_recipe(recipe_file)
+    out_dir = tmp_path / "out"
+    summary = pipeline.export(pipeline.run(recipe), recipe, out_dir=out_dir)
+    assert summary.manifest_path is not None
+    manifest = json.loads(summary.manifest_path.read_text(encoding="utf-8"))
+    recorded = manifest["input_hashes"]["incoming.csv"]
+    assert recorded == file_digest(incoming)
+
+    # An after-the-fact swap of the input no longer matches the recorded
+    # digest: the auditor's recomputation exposes it.
+    incoming.write_text("first,last\nGrace,Hopper\n", encoding="utf-8")
+    assert file_digest(incoming) != recorded
+
+
+def test_in_memory_recipe_manifest_records_null_recipe_hash(tmp_path: Path) -> None:
+    incoming = tmp_path / "incoming.csv"
+    incoming.write_text("first,last\nAda,Lovelace\n", encoding="utf-8")
+    recipe = Recipe(
+        incoming=incoming,
+        mapping={"first_name": "first", "last_name": "last"},
+        fields=("first_name", "last_name"),
+    )
+    out_dir = tmp_path / "out"
+    summary = pipeline.export(pipeline.run(recipe), recipe, out_dir=out_dir)
+    assert summary.manifest_path is not None
+    manifest = json.loads(summary.manifest_path.read_text(encoding="utf-8"))
+    # No recipe file existed, so no hash is invented; the input digest is
+    # still recorded.
+    assert manifest["recipe_hash"] is None
+    assert "incoming.csv" in manifest["input_hashes"]

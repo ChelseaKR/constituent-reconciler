@@ -26,6 +26,7 @@ from constituent_reconciler.connectors.crm_csv import CrmCsvConnector
 from constituent_reconciler.connectors.salesforce import Transport as SalesforceTransport
 from constituent_reconciler.connectors.webhook import Transport as WebhookTransport
 from constituent_reconciler.extract.base import ExtractedField
+from constituent_reconciler.manifest import build_manifest, manifest_hash, write_manifest
 from constituent_reconciler.models import (
     Consent,
     Correction,
@@ -225,14 +226,25 @@ def read_pdf_records(  # noqa: C901 - branches mirror ingest accounting cases.
     OCRs any page with no embedded text layer instead of yielding an empty
     page; every other backend value uses the plain pdfplumber text-layer
     extractor.
+
+    Unless the recipe sets ``[extract] sandbox = false``, the parse runs in a
+    resource-limited child process (``extract/sandbox.py``): a hostile or
+    malformed PDF fails closed to a zero-confidence page that is dropped and
+    accounted for here, instead of crashing the run.
     """
+    from constituent_reconciler.extract.base import Extractor
     from constituent_reconciler.extract.pdf import PdfplumberExtractor
+    from constituent_reconciler.extract.sandbox import SandboxedExtractor
     from constituent_reconciler.extract.seam import make_seam
 
-    if recipe.extract.backend == "pdfplumber+ocr":
+    wants_ocr = recipe.extract.backend == "pdfplumber+ocr"
+    extractor: Extractor
+    if recipe.extract.sandbox:
+        extractor = SandboxedExtractor(ocr=wants_ocr)
+    elif wants_ocr:
         from constituent_reconciler.extract.ocr import PdfplumberOcrExtractor
 
-        extractor: PdfplumberExtractor | PdfplumberOcrExtractor = PdfplumberOcrExtractor()
+        extractor = PdfplumberOcrExtractor()
     else:
         extractor = PdfplumberExtractor()
     seam = make_seam(
@@ -803,6 +815,7 @@ class ExportSummary:
     withheld_path: Path | None
     provenance_path: Path | None
     logged: int
+    manifest_path: Path | None = None
     aggregate: AggregateSummary | None = None
     aggregate_path: Path | None = None
     comparable: ComparableReport | None = None
@@ -885,6 +898,12 @@ def export(
     connector. Each real write is recorded in the append-only provenance log. A
     dry run performs no writes and logs nothing.
 
+    Every non-dry-run export also stamps ``out/run_manifest.json`` (see
+    ``manifest.py``): BLAKE2b digests of the recipe file and each input file,
+    the resolved thresholds, and the policy pack; the manifest's hash is the
+    log's ``run-start`` entry, appended ahead of the write entries so every
+    write chains back to the exact configuration that produced it.
+
     ``confirmed_households`` carries household ids a reviewer confirmed from an
     earlier run's ``household_suggestions.csv`` (see ``cli.py``'s ``apply``
     command). It has no effect unless ``recipe.household.enabled`` is true: the
@@ -926,9 +945,14 @@ def export(
     write_results = connector.write_all(exportable, recipe.fields, dry_run=dry_run)
 
     provenance_path = out_dir / "provenance.jsonl"
+    manifest_path: Path | None = None
     logged = 0
     if not dry_run:
+        input_paths = [p for p in (recipe.existing, recipe.incoming) if p is not None]
+        manifest = build_manifest(recipe.recipe_path, input_paths, recipe)
+        manifest_path = write_manifest(manifest, out_dir)
         log = ProvenanceLog(provenance_path, log_authority)
+        log.append_run_start(manifest_hash(manifest))
         for write_result in write_results:
             if not write_result.is_write:
                 continue
@@ -977,7 +1001,10 @@ def export(
         withheld=tuple(withheld),
         review_path=review_path,
         withheld_path=withheld_path,
-        provenance_path=provenance_path if (not dry_run and logged) else None,
+        # The log exists on every non-dry run: it holds at least the run-start
+        # entry binding this run to its manifest, plus one entry per write.
+        provenance_path=provenance_path if not dry_run else None,
+        manifest_path=manifest_path,
         logged=logged,
         aggregate=aggregate,
         aggregate_path=aggregate_path,

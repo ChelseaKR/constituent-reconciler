@@ -109,3 +109,33 @@ def test_corrupt_pdf_fails_closed_with_reason(tmp_path: Path) -> None:
 
     _assert_fail_closed(result, "corrupt.pdf")
     assert "extraction failed" in (result.note or "")
+
+
+# ---------------------------------------------------------------------------
+# OCR worker selection (FIX-10 wiring): backend "pdfplumber+ocr" runs the
+# OCR-fallback extractor inside the same containment.
+# ---------------------------------------------------------------------------
+
+
+def test_ocr_flag_selects_the_ocr_worker() -> None:
+    from constituent_reconciler.extract.sandbox import _extract_in_child, _extract_ocr_in_child
+
+    assert SandboxedExtractor()._worker is _extract_in_child
+    assert SandboxedExtractor(ocr=True)._worker is _extract_ocr_in_child
+    # An explicitly injected worker (the test seam) wins over the flag.
+    assert SandboxedExtractor(ocr=True, worker=_sleepy_worker)._worker is _sleepy_worker
+
+
+def test_sandboxed_ocr_extractor_parses_a_text_layer_pdf(intake_pdf: Path) -> None:
+    # A text-layer page never reaches Tesseract, so the OCR child needs no OCR
+    # dependencies; the spawned parse must match the in-process one.
+    from constituent_reconciler.extract.base import ExtractionResult
+    from constituent_reconciler.extract.pdf import PdfplumberExtractor
+
+    sandboxed = SandboxedExtractor(ocr=True).extract(intake_pdf)
+    direct = PdfplumberExtractor().extract(intake_pdf)
+
+    def fields(result: ExtractionResult) -> list[tuple[str, str]]:
+        return [(field.field_name, field.value) for page in result.pages for field in page.fields]
+
+    assert fields(sandboxed) == fields(direct)

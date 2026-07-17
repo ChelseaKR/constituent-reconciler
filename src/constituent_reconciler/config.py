@@ -40,7 +40,7 @@ _SECTION_KEYS: dict[str, frozenset[str]] = {
     "policy": frozenset({"pack", "fill", "fill_policy"}),
     "normalize": frozenset({"address_backend"}),
     "extract": frozenset(
-        {"backend", "confidence_threshold", "local_model_override", "local_model_id"}
+        {"backend", "confidence_threshold", "local_model_override", "local_model_id", "sandbox"}
     ),
     "output": frozenset(
         {
@@ -142,12 +142,21 @@ class ExtractConfig:
     the active policy pack; it is never implied by ``backend = "local"``
     alone. ``local_model_id`` names the local model to request (an Ollama
     model tag); it has no effect unless ``backend`` is ``"local"``.
+
+    ``sandbox`` (default true) parses each PDF in a resource-limited child
+    process (see ``extract/sandbox.py``): a crafted intake file that hangs,
+    balloons memory, or crashes the parser is contained and routed to human
+    review instead of taking the run down. Setting it false parses in-process;
+    the recipe author accepts the threat-model risk that the threat model's
+    "missing process boundary" section describes. It has no effect unless
+    ``backend`` selects a PDF extractor.
     """
 
     backend: str = "none"
     confidence_threshold: float = 0.5
     local_model_override: bool = False
     local_model_id: str = "llama3.2"
+    sandbox: bool = True
 
 
 @dataclass(frozen=True)
@@ -202,6 +211,11 @@ class Recipe:
     recipe may map any subset; an unmapped column leaves that part of the
     lifecycle unset (no expiry ceiling, no scope restriction) rather than
     inventing a default.
+
+    ``recipe_path`` records where the recipe was loaded from, so the run
+    manifest (``manifest.py``) can digest the exact file that configured the
+    run. A Recipe built in code carries ``None`` and the manifest records a
+    null recipe hash instead of inventing one.
     """
 
     incoming: Path
@@ -236,6 +250,7 @@ class Recipe:
     output: OutputConfig = field(default_factory=OutputConfig)
     household: HouseholdConfig = field(default_factory=HouseholdConfig)
     tsa_url: str = ""
+    recipe_path: Path | None = None
 
 
 def _resolve(base: Path, value: str) -> Path:
@@ -329,6 +344,7 @@ def load_recipe(
         confidence_threshold=float(extract_section.get("confidence_threshold", 0.5)),
         local_model_override=bool(extract_section.get("local_model_override", False)),
         local_model_id=str(extract_section.get("local_model_id", "llama3.2")),
+        sandbox=bool(extract_section.get("sandbox", True)),
     )
 
     # Off by default under every policy pack; a recipe must opt in explicitly.
@@ -392,4 +408,5 @@ def load_recipe(
         output=output,
         household=household,
         tsa_url=tsa_url if tsa_url is not None else str(provenance_section.get("tsa_url", "")),
+        recipe_path=recipe_path,
     )
