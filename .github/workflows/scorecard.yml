@@ -1,0 +1,56 @@
+# OpenSSF Scorecard (roadmap D8): supply-chain posture measured by the
+# standard tool, on a schedule and on every push to main, with results
+# published to the OpenSSF API and uploaded to Code Scanning as SARIF.
+# Sequenced deliberately after the branch ruleset was applied (2026-07), so
+# the score reflects the protected-main posture rather than re-reporting a
+# known gap. The first dated snapshot lives at docs/audits/scorecard-2026-07.md.
+name: scorecard
+
+on:
+  # Weekly, offset from the ci.yml Monday cron so the two scheduled runs do
+  # not contend for the same window.
+  schedule:
+    - cron: "26 7 * * 3"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Least-privilege default token; the job widens only what it needs.
+permissions: {}
+
+concurrency:
+  group: scorecard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analysis:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload the SARIF report to Code Scanning
+      id-token: write # publish_results signs the run for the OpenSSF API
+      actions: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Run Scorecard analysis
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Publish to the OpenSSF REST API so the badge and history exist;
+          # publishing only works from the default branch, which is the only
+          # branch this workflow runs on.
+          publish_results: true
+      # Keep the raw SARIF briefly for debugging a surprising score change.
+      - name: Upload SARIF artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scorecard-sarif
+          path: results.sarif
+          retention-days: 5
+      - name: Upload to Code Scanning
+        uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
+        with:
+          sarif_file: results.sarif

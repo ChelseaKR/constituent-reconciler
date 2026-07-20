@@ -7,6 +7,11 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **OpenSSF Scorecard in CI (roadmap D8).** `.github/workflows/scorecard.yml`
+  runs the Scorecard analysis weekly and on every push to `main`, publishes
+  results to the OpenSSF API, and uploads SARIF to Code Scanning. The first
+  dated snapshot (aggregate 6.8, run 2026-07-17 with the CLI) is committed at
+  `docs/audits/scorecard-2026-07.md` with an honest reading of each low score.
 - **Canonical GenAI observability for opt-in extraction seams.** Bedrock
   Converse and loopback-local model calls now emit the reviewed, pinned
   STANDARDS telemetry schema: provider/model identity, input/output tokens,
