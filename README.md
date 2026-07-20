@@ -18,6 +18,18 @@ every uncertain match before anything is written. Nothing merges silently.
 > [docs/ROADMAP.md](docs/ROADMAP.md); the build is specified in
 > [CLAUDE.md](CLAUDE.md).
 
+## Quickstart
+
+```sh
+make install                                                      # uv sync, Python 3.12+
+reconcile run --config examples/intake-demo/recipe.toml --out out # bundled demo, offline
+reconcile review --config examples/intake-demo/recipe.toml --reviewer "your name" --out out
+```
+
+That resolves the bundled intake demo and opens the browser review queue over
+the uncertain pairs; the full walkthrough, including PDF extraction, CRM
+write-back, and the DV policy pack, is under [Usage](#usage) below.
+
 ## The problem
 
 Most human-services nonprofits run intake on paper or PDF and keep constituent
@@ -538,22 +550,6 @@ locally (this table plus the linked doc) pending a filed issue. Last reviewed:
 Project-specific target values are recorded in
 [docs/ROADMAP.md](docs/ROADMAP.md) and findings in
 [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md).
-
-## For Claude Code
-
-Read [CLAUDE.md](CLAUDE.md) first. It is the source of truth for scope,
-conventions, and the build plan, and it states the hard guardrails (fail-closed
-gates, the privacy invariants that are merge-blocking tests, the rule against
-reimplementing the matcher). Then read [docs/ROADMAP.md](docs/ROADMAP.md) and
-build phase by phase. A phase is done when its acceptance criteria and its
-merge-blocking metrics pass, not before. v0.1 through v0.7 are implemented and green: resolve and review (v0.1), CiviCRM
-write-back and provenance (v0.2), the pdfplumber extraction seam (v0.3),
-CASS-style address normalization (v0.4), the DV policy pack (v0.5), the v1.0
-engineering deliverables — Salesforce connector, Docker self-host, schema-version
-declarations, DPG conformance note (v0.6), and the WCAG 2.2 AA web review UI plus
-import-ready CRM export files (v0.7). What remains before the 1.0 stability tag is
-a full accessibility audit, supply-chain hardening, and the real-organization
-adoption the tag is gated on.
 
 ## License
 
