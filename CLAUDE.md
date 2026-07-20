@@ -185,3 +185,20 @@ can act on. Write like a careful engineer, not a launch tweet.
    overreaching.
 5. Review surface for v0.1: local web UI or TUI, judged on what a non-technical
    reviewer can run.
+
+## Build status and entrypoint (moved from the README, 2026-07-19)
+
+This file is the source of truth for scope, conventions, and the build plan,
+and it states the hard guardrails: fail-closed gates, the privacy invariants
+that are merge-blocking tests, and the rule against reimplementing the
+matcher. Read [docs/ROADMAP.md](docs/ROADMAP.md) next and build phase by
+phase. A phase is done when its acceptance criteria and its merge-blocking
+metrics pass, not before. v0.1 through v0.7 are implemented and green:
+resolve and review (v0.1), CiviCRM write-back and provenance (v0.2), the
+pdfplumber extraction seam (v0.3), CASS-style address normalization (v0.4),
+the DV policy pack (v0.5), the v1.0 engineering deliverables — Salesforce
+connector, Docker self-host, schema-version declarations, DPG conformance
+note (v0.6), and the WCAG 2.2 AA web review UI plus import-ready CRM export
+files (v0.7). What remains before the 1.0 stability tag is a full
+accessibility audit, supply-chain hardening, and the real-organization
+adoption the tag is gated on.
