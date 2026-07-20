@@ -272,3 +272,29 @@ def test_review_calibration_must_be_a_non_negative_integer(tmp_path: Path) -> No
         path = _write(tmp_path, MINIMAL_INPUT + f"\n[review]\ncalibration = {invalid}\n")
         with pytest.raises(RecipeError, match="calibration"):
             load_recipe(path)
+
+
+# ---------------------------------------------------------------------------
+# [extract] sandbox and the recorded recipe path (FIX-10 / FIX-08 wiring)
+# ---------------------------------------------------------------------------
+
+
+def test_extract_sandbox_defaults_on(tmp_path: Path) -> None:
+    recipe = load_recipe(_write(tmp_path, MINIMAL_INPUT + '\n[extract]\nbackend = "pdfplumber"\n'))
+    assert recipe.extract.sandbox is True
+
+
+def test_extract_sandbox_opt_out_is_parsed(tmp_path: Path) -> None:
+    recipe = load_recipe(
+        _write(
+            tmp_path,
+            MINIMAL_INPUT + '\n[extract]\nbackend = "pdfplumber"\nsandbox = false\n',
+        )
+    )
+    assert recipe.extract.sandbox is False
+
+
+def test_load_recipe_records_the_recipe_path(tmp_path: Path) -> None:
+    path = _write(tmp_path, MINIMAL_INPUT)
+    recipe = load_recipe(path)
+    assert recipe.recipe_path == path

@@ -132,6 +132,8 @@ def _print_export(recipe: Recipe, summary: ExportSummary, *, dry_run: bool) -> N
         )
     if summary.provenance_path:
         print(f"  provenance:   {summary.provenance_path} ({summary.logged} entries)")
+    if summary.manifest_path:
+        print(f"  manifest:     {summary.manifest_path}")
     if summary.aggregate is not None:
         if summary.aggregate_path:
             print(f"  aggregate:    {summary.aggregate_path}")

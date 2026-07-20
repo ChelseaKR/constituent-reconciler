@@ -326,7 +326,9 @@ def test_read_pdf_records_uses_ocr_backend_for_scanned_page(
     recipe = load_recipe(
         Path(__file__).resolve().parents[1] / "examples" / "intake-demo" / "recipe.toml"
     )
-    recipe = replace(recipe, extract=ExtractConfig(backend="pdfplumber+ocr"))
+    # sandbox=False keeps the parse in-process so the monkeypatched Tesseract
+    # stub above is visible; a spawned child would re-import the real module.
+    recipe = replace(recipe, extract=ExtractConfig(backend="pdfplumber+ocr", sandbox=False))
 
     records = read_pdf_records(scanned_pdf, "incoming", recipe=recipe, id_prefix="N")
     assert len(records) == 1

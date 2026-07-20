@@ -32,7 +32,8 @@ from constituent_reconciler.provenance import ProvenanceLog
 # The known PII-bearing artifacts the pipeline writes into the out directory.
 # An explicit list, not a glob: destruction must never reach past what the
 # pipeline is known to have written (decisions.json carries ids and verdicts
-# only, aggregate_summary.json is non-identifying by construction, and the
+# only, aggregate_summary.json is non-identifying by construction,
+# run_manifest.json carries file digests and configuration only, and the
 # provenance log is the evidence of destruction itself).
 PII_ARTIFACTS: tuple[str, ...] = (
     "resolved.csv",

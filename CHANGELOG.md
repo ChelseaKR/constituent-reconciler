@@ -12,6 +12,24 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   results to the OpenSSF API, and uploads SARIF to Code Scanning. The first
   dated snapshot (aggregate 6.8, run 2026-07-17 with the CLI) is committed at
   `docs/audits/scorecard-2026-07.md` with an honest reading of each low score.
+- **Sandboxed PDF parsing is now the pipeline default (FIX-10 wiring).**
+  `read_pdf_records` runs every PDF parse in the resource-limited child
+  process that `extract/sandbox.py` introduced but nothing previously used:
+  a malformed or hostile intake file fails closed to human review instead of
+  crashing the run. `backend = "pdfplumber+ocr"` gets the same containment
+  through a dedicated OCR child worker. Recipes opt out with `[extract]
+  sandbox = false`. The threat model's "missing process boundary" finding and
+  its residual-risk list are updated to match; the boundary is containment,
+  not privilege separation, and the docs say so.
+- **Every non-dry-run export stamps `out/run_manifest.json` (FIX-08 wiring).**
+  `pipeline.export` now builds the reproducibility manifest that
+  `manifest.py` introduced but nothing previously called: BLAKE2b digests of
+  the recipe file and each input file, package and Splink versions, resolved
+  thresholds, and policy pack. The provenance log opens with a `run-start`
+  entry carrying the manifest's hash, ahead of the run's write entries, so
+  every write chains back to the exact configuration that produced it; dry
+  runs stamp nothing. A Recipe built in code (no recipe file) records a null
+  recipe hash rather than inventing one.
 - **Canonical GenAI observability for opt-in extraction seams.** Bedrock
   Converse and loopback-local model calls now emit the reviewed, pinned
   STANDARDS telemetry schema: provider/model identity, input/output tokens,

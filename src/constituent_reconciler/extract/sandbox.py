@@ -5,14 +5,21 @@ in the main process means a crafted file that hangs, balloons memory, or
 crashes the parser takes the whole run down with it — and a parser exploit
 would run with access to the entire constituent file.
 
-``SandboxedExtractor`` runs the pdfplumber parse in a spawned child process
-with best-effort resource caps applied inside the child (``resource.setrlimit``
+``SandboxedExtractor`` runs the PDF parse in a spawned child process with
+best-effort resource caps applied inside the child (``resource.setrlimit``
 on CPU seconds and address space, POSIX only) and a wall-clock timeout enforced
 by the parent. Input files over a size cap are refused before any parsing
 starts. Every failure mode — oversize input, timeout, nonzero exit, crash,
 missing result — fails closed: the extractor returns a single zero-confidence
 page with no fields plus a ``note`` explaining why, so ``read_pdf_records``
 routes the document to human review instead of crashing the run.
+
+The pipeline uses this extractor by default for every PDF backend (see
+``config.ExtractConfig.sandbox``); ``ocr=True`` selects the OCR-fallback
+extractor inside the child for ``backend = "pdfplumber+ocr"``. OCR is heavier
+than a text-layer parse, so a large legitimate scan can hit the CPU cap; that
+still fails closed to human review, and a recipe that needs unbounded OCR can
+set ``sandbox = false`` and accept the in-process risk.
 
 Non-goals, stated honestly: this is containment, not a syscall sandbox. The
 child runs the same interpreter with the same privileges and filesystem
@@ -90,12 +97,34 @@ def _extract_in_child(
     conn.close()
 
 
+def _extract_ocr_in_child(
+    path: Path, conn: Connection, cpu_seconds: int, max_address_space_bytes: int
+) -> None:
+    """Child-process entry point for the OCR-fallback extractor.
+
+    Identical contract to ``_extract_in_child``; the only difference is which
+    extractor parses. Tesseract's import stays deferred inside the OCR module,
+    so a text-layer page parses in the child without OCR dependencies.
+    """
+    _apply_resource_limits(cpu_seconds, max_address_space_bytes)
+    try:
+        from constituent_reconciler.extract.ocr import PdfplumberOcrExtractor
+
+        result = PdfplumberOcrExtractor().extract(path)
+    except Exception as exc:
+        conn.send(f"{type(exc).__name__}: {exc}")
+        raise SystemExit(1) from exc
+    conn.send(result)
+    conn.close()
+
+
 class SandboxedExtractor:
-    """Run ``PdfplumberExtractor`` in a constrained child process, fail-closed.
+    """Run a PDF extractor in a constrained child process, fail-closed.
 
     Satisfies the ``Extractor`` protocol, so it drops in wherever
-    ``PdfplumberExtractor`` was used directly. ``worker`` exists for tests to
-    inject a misbehaving child; production callers should not pass it.
+    ``PdfplumberExtractor`` (or, with ``ocr=True``, ``PdfplumberOcrExtractor``)
+    was used directly. ``worker`` exists for tests to inject a misbehaving
+    child; production callers should not pass it.
     """
 
     def __init__(
@@ -105,12 +134,15 @@ class SandboxedExtractor:
         cpu_seconds: int = _DEFAULT_CPU_SECONDS,
         max_address_space_bytes: int = _DEFAULT_MAX_ADDRESS_SPACE_BYTES,
         max_input_bytes: int = _DEFAULT_MAX_INPUT_BYTES,
-        worker: WorkerTarget = _extract_in_child,
+        ocr: bool = False,
+        worker: WorkerTarget | None = None,
     ) -> None:
         self.wall_timeout_s = wall_timeout_s
         self.cpu_seconds = cpu_seconds
         self.max_address_space_bytes = max_address_space_bytes
         self.max_input_bytes = max_input_bytes
+        if worker is None:
+            worker = _extract_ocr_in_child if ocr else _extract_in_child
         self._worker = worker
 
     def extract(self, path: Path) -> ExtractionResult:

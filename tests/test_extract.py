@@ -621,3 +621,71 @@ def test_local_seam_malformed_model_json_returns_empty(intake_pdf: Path) -> None
     with _fake_ollama(model_reply) as host:
         seam = LocalSeam(host=host)
         assert seam.refine(intake_pdf, 1) == []
+
+
+# ---------------------------------------------------------------------------
+# Sandbox wiring (FIX-10): the pipeline parses PDFs in the resource-limited
+# child by default, and a recipe may opt out explicitly.
+# ---------------------------------------------------------------------------
+
+
+def test_read_pdf_records_sandboxed_by_default_matches_unsandboxed(intake_pdf: Path) -> None:
+    from dataclasses import replace
+
+    from constituent_reconciler.config import ExtractConfig, load_recipe
+    from constituent_reconciler.pipeline import read_pdf_records
+
+    recipe = load_recipe(
+        Path(__file__).resolve().parents[1] / "examples" / "intake-demo" / "recipe.toml"
+    )
+    sandboxed_recipe = replace(recipe, extract=ExtractConfig(backend="pdfplumber"))
+    assert sandboxed_recipe.extract.sandbox is True
+    direct_recipe = replace(recipe, extract=ExtractConfig(backend="pdfplumber", sandbox=False))
+
+    sandboxed = read_pdf_records(intake_pdf, "incoming", recipe=sandboxed_recipe, id_prefix="N")
+    direct = read_pdf_records(intake_pdf, "incoming", recipe=direct_recipe, id_prefix="N")
+    assert [(r.unique_id, r.raw) for r in sandboxed] == [(r.unique_id, r.raw) for r in direct]
+
+
+def test_read_pdf_records_sandbox_contains_a_corrupt_pdf(tmp_path: Path) -> None:
+    # The fail-closed leg: a file that crashes the parser yields no records
+    # and no exception; the hostile document is contained in the child.
+    from dataclasses import replace
+
+    from constituent_reconciler.config import ExtractConfig, load_recipe
+    from constituent_reconciler.pipeline import read_pdf_records
+
+    corrupt = tmp_path / "hostile.pdf"
+    corrupt.write_bytes(b"%PDF-1.7 but not really: crafted garbage")
+    recipe = replace(
+        load_recipe(
+            Path(__file__).resolve().parents[1] / "examples" / "intake-demo" / "recipe.toml"
+        ),
+        extract=ExtractConfig(backend="pdfplumber"),
+    )
+
+    records = read_pdf_records(corrupt, "incoming", recipe=recipe, id_prefix="N")
+    assert records == []
+
+
+def test_read_pdf_records_without_sandbox_raises_on_a_corrupt_pdf(tmp_path: Path) -> None:
+    # The opt-out is honest: in-process parsing propagates the parser's crash,
+    # which is exactly the exposure the sandbox default removes.
+    from dataclasses import replace
+
+    from pdfplumber.utils.exceptions import PdfminerException
+
+    from constituent_reconciler.config import ExtractConfig, load_recipe
+    from constituent_reconciler.pipeline import read_pdf_records
+
+    corrupt = tmp_path / "hostile.pdf"
+    corrupt.write_bytes(b"%PDF-1.7 but not really: crafted garbage")
+    recipe = replace(
+        load_recipe(
+            Path(__file__).resolve().parents[1] / "examples" / "intake-demo" / "recipe.toml"
+        ),
+        extract=ExtractConfig(backend="pdfplumber", sandbox=False),
+    )
+
+    with pytest.raises(PdfminerException):
+        read_pdf_records(corrupt, "incoming", recipe=recipe, id_prefix="N")

@@ -7,10 +7,10 @@ the security TODO in [`RESPONSIBLE-TECH-AUDITS.md`](./RESPONSIBLE-TECH-AUDITS.md
 and pairs with [`SECURITY.md`](../SECURITY.md), which owns reporting and the
 out-of-scope list.
 
-Status: committed 2026-07-02 and re-verified 2026-07-12 against the implemented
-Bedrock and local-model seams. Revisit whenever the
-extraction surface changes, and at minimum when the sandboxed extraction path
-lands.
+Status: committed 2026-07-02, re-verified 2026-07-12 against the implemented
+Bedrock and local-model seams, and updated 2026-07-17 when the sandboxed
+extraction path became the pipeline default. Revisit whenever the extraction
+surface changes.
 
 ## System description and trust boundaries
 
@@ -32,11 +32,17 @@ The boundaries that matter:
    is untrusted. Intake documents arrive from the public: a constituent, a
    partner agency, an email inbox. The operator who runs the tool is trusted;
    the files they feed it are not.
-2. **The missing process boundary.** pdfplumber and pdfminer run in the same
-   process as the pipeline, with the pipeline's full privileges and its view of
-   the filesystem. There is no sandbox between hostile input and the parser
-   today. This is the central finding of this document; the planned mitigation
-   is below.
+2. **The process boundary at the parser.** Since 2026-07-17 the pipeline
+   parses each PDF in a spawned child process by default
+   (`src/constituent_reconciler/extract/sandbox.py`, wired through
+   `read_pdf_records()`): best-effort rlimits on CPU and address space inside
+   the child, a wall-clock timeout and input-size cap in the parent, and a
+   fail-closed zero-confidence result that routes the document to review. The
+   boundary is containment, not privilege separation — the child runs the
+   same interpreter with the same filesystem view, `RLIMIT_AS` is not
+   enforced on macOS, and Windows has only the timeout. A recipe may also
+   turn it off (`[extract] sandbox = false`), returning to in-process
+   parsing.
 3. **The network boundary.** The pipeline is offline by default. It has two
    deliberate egress points, both policy-gated. The cloud extraction seam
    (`src/constituent_reconciler/extract/seam.py`) may send a low-confidence
@@ -119,16 +125,23 @@ The boundaries that matter:
   `tests/test_review.py`, at the handler and over the socket. The security
   section of `RESPONSIBLE-TECH-AUDITS.md` records this as resolved.
 
+### Present (added 2026-07-17)
+
+- **Sandboxed, resource-limited extraction (T1, T2, T4).** The
+  pdfplumber/pdfminer parse runs in a spawned child with rlimits (CPU,
+  address space where the platform enforces it), a parent-side wall-clock
+  timeout, and an input-size cap refused before any parse. Every failure leg
+  fails closed to a zero-confidence page whose note names the reason without
+  embedding page content, so the document lands in human review.
+  `tests/test_sandbox.py` exercises the happy path and each fail-closed leg;
+  `tests/test_extract.py` proves the pipeline default contains a corrupt PDF
+  that crashes an in-process parse. Two honest limits: the child keeps the
+  pipeline's privileges (containment, not a syscall sandbox), and when a
+  cloud or local seam is enabled for a low-confidence page, the page render
+  for the seam still happens in the parent process.
+
 ### Planned
 
-- **Sandboxed, resource-limited extraction (T1, T2, T4).** The audits'
-  security section tracks this as the planned hardening: run the
-  pdfplumber/pdfminer parse in a separate process with resource limits (CPU
-  time, address space, an input-size cap) and a timeout, returning typed
-  results over a narrow channel. A parser crash or bomb then fails that file
-  with a clear, content-free error instead of taking down or compromising the
-  run. Until it lands, parsing runs in-process and T1/T2 are accepted risks,
-  reduced by the compensating controls below.
 - **Typed, content-free parse errors (T4).** Wrap extraction failures in an
   error type that names the file and page but never embeds page text, so a
   traceback cannot carry PII.
@@ -140,11 +153,12 @@ The boundaries that matter:
 
 ## Residual risks and out of scope
 
-- **In-process parsing until the sandbox lands.** An organization handling
-  PDFs from unknown senders should treat the machine running extraction as
-  exposed to that content. The Docker self-host image is a reasonable
-  compensating control: it confines a parser compromise to the container's
-  view of the world.
+- **The sandbox is containment, not privilege separation.** The child parser
+  keeps the pipeline's user, filesystem view, and network reach; a parser
+  exploit that achieves code execution is slowed, not stopped. An
+  organization handling PDFs from unknown senders should still prefer the
+  Docker self-host image, which confines a parser compromise to the
+  container's view of the world, and should not set `sandbox = false`.
 - **Egress under permissive packs is by design.** A non-DV pack with the
   Bedrock backend configured will send low-confidence page content to AWS.
   That is an explicit deployer choice, not a defect; the model and data cards
