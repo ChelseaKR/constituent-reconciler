@@ -1,7 +1,8 @@
 name: release
 
-# Tag-triggered release (REL-14, RELEASE-AND-VERSIONING-STANDARD.md §4). A
-# push of a `vX.Y.Z` tag re-verifies the tagged commit from scratch (this
+# Trusted-main release (REL-14, RELEASE-AND-VERSIONING-STANDARD.md §4). A
+# maintainer supplies an existing signed `vX.Y.Z` tag to the reviewed workflow
+# on main, which re-verifies the tagged commit from scratch (this
 # repo's PR green check on `ci.yml` is never trusted for a release — main can
 # drift after a PR merges), builds the sdist/wheel, generates a CycloneDX SBOM
 # (closing the P1-7 gap declared in docs/RESPONSIBLE-TECH-AUDITS.md), attests
@@ -19,47 +20,82 @@ name: release
 # remediation pass performs.
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing signed stable SemVer tag (vX.Y.Z)"
+        required: true
+        type: string
 
 permissions:
   contents: read
 
-# A release publishes a GitHub Release — never race two tag pushes against
-# each other; a re-run queues instead of running concurrently.
+# A release publishes a GitHub Release; queue concurrent approvals instead of
+# racing two publication runs.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
-  # The tag must match pyproject.toml's version exactly (REL-02 / §2 tag <->
-  # metadata consistency). `__version__` already derives from installed
-  # package metadata, so checking the tag against pyproject.toml is checking
-  # the single source of truth.
-  version-check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - name: Tag matches pyproject.toml version
-        run: |
-          tag_version="${GITHUB_REF_NAME#v}"
-          pkg_version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
-          echo "tag=$tag_version pyproject=$pkg_version"
-          if [ "$tag_version" != "$pkg_version" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match pyproject.toml version $pkg_version"
-            exit 1
-          fi
-
   # Never publish untested code: re-run the merge-blocking gates at the
   # tagged commit, not the PR's stale green check.
   release-tests:
     runs-on: ubuntu-latest
+    outputs:
+      release_commit: ${{ steps.tag.outputs.commit }}
+      release_tag: ${{ steps.tag.outputs.tag }}
+      tag_object_sha: ${{ steps.tag.outputs.tag_object_sha }}
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
+          ref: main
+          fetch-depth: 0
           persist-credentials: false
+      - name: Resolve and verify the reviewed signed tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG}"
+          test "${GITHUB_REF}" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "$(git rev-parse origin/main)" = "${GITHUB_SHA}"
+          [[ "${TAG}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
+          test "$(git cat-file -t "refs/tags/${TAG}")" = tag
+          RELEASE_COMMIT="$(git rev-parse --verify "${TAG}^{commit}")"
+          git merge-base --is-ancestor "${RELEASE_COMMIT}" origin/main
+          git config gpg.format ssh
+          git config gpg.ssh.allowedSignersFile "${GITHUB_WORKSPACE}/.github/allowed_signers"
+          git verify-tag -- "${TAG}"
+          {
+            echo "tag=${TAG}"
+            echo "commit=${RELEASE_COMMIT}"
+            echo "tag_object_sha=$(git rev-parse "refs/tags/${TAG}")"
+          } >> "${GITHUB_OUTPUT}"
+          git checkout --detach "${RELEASE_COMMIT}"
+      - name: Check package version and prepare release notes
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          PACKAGE_VERSION="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          test "${VERSION}" = "${PACKAGE_VERSION}"
+          awk -v ver="${VERSION}" '
+            $0 ~ ("^## \\[" ver "\\]") { found=1; print; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          test -s release-notes.md
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
       - uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
         with:
           enable-cache: false
@@ -77,37 +113,11 @@ jobs:
           sudo mv osv-scanner /usr/local/bin/osv-scanner
           make security
 
-  # REL-10: the tag must have a matching CHANGELOG section — extracted
-  # verbatim into the GitHub Release body. A missing section fails the
-  # release before anything is built or published.
-  changelog-section:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - name: Extract this version's CHANGELOG section
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          awk -v ver="$version" '
-            $0 ~ ("^## \\[" ver "\\]") { found=1; print; next }
-            found && /^## \[/ { exit }
-            found { print }
-          ' CHANGELOG.md > release-notes.md
-          if [ ! -s release-notes.md ]; then
-            echo "::error::CHANGELOG.md has no '## [$version]' section (REL-10) — add one before tagging" >&2
-            exit 1
-          fi
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: release-notes
-          path: release-notes.md
-
   # Build the distribution, generate its SBOM, and attest build provenance —
   # no caching (CI-CD-STANDARD: a cache hit is an unverified input into an
   # artifact we're about to publish and attest).
   build:
-    needs: [version-check, release-tests, changelog-section]
+    needs: release-tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -116,6 +126,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
+          ref: ${{ needs.release-tests.outputs.release_commit }}
           persist-credentials: false
       - uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
         with:
@@ -148,14 +159,11 @@ jobs:
   # Create the GitHub Release with the built artifacts, SBOM, and the
   # matching CHANGELOG section as release notes.
   github-release:
-    needs: [build, changelog-section]
+    needs: [release-tests, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the GitHub Release and upload assets
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: dist
@@ -169,9 +177,14 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-tests.outputs.release_tag }}
+          TAG_OBJECT_SHA: ${{ needs.release-tests.outputs.tag_object_sha }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
+          set -euo pipefail
+          LIVE_TAG_OBJECT="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq .object.sha)"
+          test "${LIVE_TAG_OBJECT}" = "${TAG_OBJECT_SHA}"
+          gh release create "${TAG}" \
+            --title "${TAG}" \
             --notes-file release-notes.md \
             --verify-tag \
             dist/*

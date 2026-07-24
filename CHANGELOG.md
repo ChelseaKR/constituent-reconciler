@@ -6,6 +6,12 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 ## [Unreleased]
 
+### Fixed
+- **Release authority now starts from reviewed `main`.** A maintainer supplies
+  an existing SSH-signed stable tag; the read-only verifier checks signer,
+  main ancestry, version, changelog, and the full gate before exact artifacts
+  reach a checkout-free publisher that rechecks the tag object.
+
 ### Added
 - **OpenSSF Scorecard in CI (roadmap D8).** `.github/workflows/scorecard.yml`
   runs the Scorecard analysis weekly and on every push to `main`, publishes
