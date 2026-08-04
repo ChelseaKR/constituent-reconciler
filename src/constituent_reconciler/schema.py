@@ -36,6 +36,33 @@ REPORT_SCHEMA_VERSION = 4
 # the version-1 lists, which are kept as-is so ``apply`` reads both versions.
 DECISIONS_SCHEMA_VERSION = 2
 
+# The count-only migration_summary.json written by ``reconcile compare``:
+# matched, single-side, ambiguous, and conflicting identity counts, per-side
+# ingest accounting in count form, and the thresholds used. Never a field
+# value. Versioned on its own because the
+# artifact is read outside the run pipeline's report family (a migration
+# runbook or a funder memo), and its consumers should not have to track the
+# run-report schema to parse it.
+MIGRATION_SUMMARY_SCHEMA_VERSION = 1
+
+# The reviewed correction file ``reconcile compare-apply`` writes for the
+# target side (target_corrections.csv) and the ``export`` section it adds to
+# compare_manifest.json. Version 1: one row per identity the target must add
+# or correct, columns from the chosen import field map plus the external-id
+# column, and a manifest section carrying digests and counts only. A future
+# column or manifest-key change bumps this and ships a migration note.
+CUTOVER_CORRECTIONS_SCHEMA_VERSION = 1
+# The repair-plan artifact (repair_plan.json) that ``reconcile plan-split``
+# writes: the old external id, the proposed split records, the fields needing
+# restoration, and the operations the destination supports. A versioned
+# surface from its first byte, per docs/adr/0012-connector-repair-capabilities.md.
+REPAIR_PLAN_SCHEMA_VERSION = 1
+
+# The connector repair-capability declaration shape (connectors/repair.py):
+# destination, enumerated verified versions, operation vocabulary, and the
+# vendor evidence fields.
+REPAIR_CAPABILITY_SCHEMA_VERSION = 1
+
 
 def versions() -> dict[str, int]:
     """Return the declared schema versions as a mapping."""
@@ -45,4 +72,8 @@ def versions() -> dict[str, int]:
         "connector_interface": CONNECTOR_INTERFACE_VERSION,
         "report_schema": REPORT_SCHEMA_VERSION,
         "decisions_schema": DECISIONS_SCHEMA_VERSION,
+        "migration_summary": MIGRATION_SUMMARY_SCHEMA_VERSION,
+        "cutover_corrections": CUTOVER_CORRECTIONS_SCHEMA_VERSION,
+        "repair_plan": REPAIR_PLAN_SCHEMA_VERSION,
+        "repair_capability": REPAIR_CAPABILITY_SCHEMA_VERSION,
     }

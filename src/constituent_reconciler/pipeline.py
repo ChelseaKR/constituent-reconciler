@@ -605,7 +605,8 @@ def _ingest_source(
     Planning and reading are separate steps (``_plan_source`` and
     ``_read_plan``) so ``run`` can total every source's files before opening
     the first one; this wrapper keeps the single-source path available as one
-    call for callers with no progress denominator to build.
+    call for callers with no progress denominator to build (``compare.py``,
+    the corpus-generation tooling, and their tests).
     """
 
     plan = _plan_source(path, recipe=recipe, accounting=accounting)
@@ -725,6 +726,101 @@ class _StageTimer:
         self._started = now
 
 
+def ingest_normalized_records(
+    recipe: Recipe,
+    *,
+    corrections: Iterable[Correction] = (),
+    accounting: IngestAccumulator | None = None,
+    active_cache: stage_cache.ActiveCache | None = None,
+    progress: ProgressSink = NULL_SINK,
+    timer: _StageTimer | None = None,
+) -> dict[str, Record]:
+    """Read every source, enforce id uniqueness, apply corrections, normalize.
+
+    The deterministic front half of ``run``, shared with repair planning
+    (``repair.py``), which needs the run's records without scoring anything or
+    touching a connector. Corrections replace raw field values before
+    normalization, exactly as they do on a full run.
+
+    This is the single source of ingest, extract, and normalize progress:
+    ``progress`` receives content-free events (``progress.py``) as each stage
+    starts, advances, and finishes, with completed/total counts from the
+    pre-read file/document plan or the record batch. The default sink
+    discards everything, so a caller who ignores progress (``repair.py``)
+    sees no change in behavior. ``run`` builds one ``_StageTimer`` for the
+    whole pipeline and passes it in via ``timer``, so this function's
+    "ingest" and "normalize" marks land in the same ``stage_durations`` the
+    run summary reports; a caller that passes no timer gets a private one
+    whose marks are never read.
+
+    ``active_cache`` threads the optional stage cache (UC-01) through
+    extraction and normalization exactly as ``run`` does. Repair planning
+    passes none, so its ingest is always uncached and its normalization
+    falls through to plain ``normalize_record``, matching prior behavior.
+    """
+
+    if accounting is None:
+        accounting = IngestAccumulator()
+    if timer is None:
+        timer = _StageTimer()
+
+    sources: list[tuple[Path, str, str]] = []
+    if recipe.existing is not None:
+        sources.append((recipe.existing, "existing", "E"))
+    sources.append((recipe.incoming, "incoming", "N"))
+    plans = [
+        (_plan_source(path, recipe=recipe, accounting=accounting), source, prefix)
+        for path, source, prefix in sources
+    ]
+    tracker = _IngestTracker(
+        sink=progress,
+        files_total=sum(len(plan) for plan, _, _ in plans),
+        documents_total=sum(1 for plan, _, _ in plans for kind, _ in plan if kind != "csv"),
+    )
+    tracker.start()
+    raw_records: list[Record] = []
+    for plan, source, prefix in plans:
+        raw_records += _read_plan(
+            plan,
+            source,
+            recipe=recipe,
+            id_prefix=prefix,
+            accounting=accounting,
+            active_cache=active_cache,
+            tracker=tracker,
+        )
+    _check_distinct_ids(raw_records)
+    raw_records = _apply_corrections(
+        raw_records, _group_corrections(corrections, fields=recipe.fields)
+    )
+    timer.mark("ingest")
+    tracker.finish(timer.durations["ingest"])
+
+    progress.emit(ProgressEvent("normalize", "started", completed=0, total=len(raw_records)))
+    records: dict[str, Record] = {}
+    for r in raw_records:
+        records[r.unique_id] = stage_cache.normalize_via_cache(
+            active_cache,
+            r,
+            recipe,
+            failures=accounting.normalization_failures,
+        )
+        progress.emit(
+            ProgressEvent("normalize", "advanced", completed=len(records), total=len(raw_records))
+        )
+    timer.mark("normalize")
+    progress.emit(
+        ProgressEvent(
+            "normalize",
+            "finished",
+            completed=len(records),
+            total=len(raw_records),
+            duration_seconds=timer.durations["normalize"],
+        )
+    )
+    return records
+
+
 def run(
     recipe: Recipe,
     *,
@@ -753,66 +849,23 @@ def run(
     ``progress`` receives content-free events (``progress.py``) as the
     ingest, extract, normalize, and score stages start, advance, and finish,
     with completed/total counts where a denominator exists and the same stage
-    durations the run summary records. The default sink discards everything,
-    so a caller who ignores progress sees no change in behavior.
+    durations the run summary records. Ingest, extract, and normalize events
+    come from ``ingest_normalized_records``, the same deterministic front
+    half repair planning shares, so the two never carry separate tracking
+    logic. The default sink discards everything, so a caller who ignores
+    progress sees no change in behavior.
     """
 
     active = stage_cache.ActiveCache(cache) if cache is not None else None
     timer = _StageTimer()
     accounting = IngestAccumulator()
-    sources: list[tuple[Path, str, str]] = []
-    if recipe.existing is not None:
-        sources.append((recipe.existing, "existing", "E"))
-    sources.append((recipe.incoming, "incoming", "N"))
-    plans = [
-        (_plan_source(path, recipe=recipe, accounting=accounting), source, prefix)
-        for path, source, prefix in sources
-    ]
-    tracker = _IngestTracker(
-        sink=progress,
-        files_total=sum(len(plan) for plan, _, _ in plans),
-        documents_total=sum(1 for plan, _, _ in plans for kind, _ in plan if kind != "csv"),
-    )
-    tracker.start()
-    raw_records: list[Record] = []
-    for plan, source, prefix in plans:
-        raw_records += _read_plan(
-            plan,
-            source,
-            recipe=recipe,
-            id_prefix=prefix,
-            accounting=accounting,
-            active_cache=active,
-            tracker=tracker,
-        )
-    _check_distinct_ids(raw_records)
-    raw_records = _apply_corrections(
-        raw_records, _group_corrections(corrections, fields=recipe.fields)
-    )
-    timer.mark("ingest")
-    tracker.finish(timer.durations["ingest"])
-
-    progress.emit(ProgressEvent("normalize", "started", completed=0, total=len(raw_records)))
-    records: dict[str, Record] = {}
-    for r in raw_records:
-        records[r.unique_id] = stage_cache.normalize_via_cache(
-            active,
-            r,
-            recipe,
-            failures=accounting.normalization_failures,
-        )
-        progress.emit(
-            ProgressEvent("normalize", "advanced", completed=len(records), total=len(raw_records))
-        )
-    timer.mark("normalize")
-    progress.emit(
-        ProgressEvent(
-            "normalize",
-            "finished",
-            completed=len(records),
-            total=len(raw_records),
-            duration_seconds=timer.durations["normalize"],
-        )
+    records = ingest_normalized_records(
+        recipe,
+        corrections=corrections,
+        accounting=accounting,
+        active_cache=active,
+        progress=progress,
+        timer=timer,
     )
 
     # Scoring has no honest denominator before it runs: the candidate-pair

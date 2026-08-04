@@ -35,19 +35,33 @@ from constituent_reconciler.stage_cache import CACHE_DIR_NAME, EXTRACT_STAGE, NO
 
 # The known PII-bearing artifacts the pipeline writes into the out directory.
 # An explicit list, not a glob: destruction must never reach past what the
-# pipeline is known to have written (decisions.json carries ids and verdicts
-# only, aggregate_summary.json is non-identifying by construction,
-# run_manifest.json carries file digests and configuration only, and the
-# provenance log is the evidence of destruction itself). The stage cache is
-# the one directory-shaped PII artifact; its files are inventoried by
-# ``_cache_entries`` below, bounded to the cache root the pipeline wrote and
-# to the exact entry shape the cache writes.
+# pipeline is known to have written (decisions.json and compare_decisions.json
+# carry ids and verdicts only, aggregate_summary.json is non-identifying by
+# construction, run_manifest.json and compare_manifest.json carry file digests
+# and configuration only, migration_summary.json carries counts only, and the
+# provenance log is the evidence of destruction itself). The cutover artifacts
+# come from ``reconcile compare`` and ``reconcile compare-apply`` (compare.py,
+# compare_apply.py) and hold field values, ids, or both, so they sort with the
+# record-bearing files. corrections.json holds reviewer-supplied replacement
+# values (review/session.py), which are field values, so it is listed too.
+# The stage cache is the one directory-shaped PII artifact; its files are
+# inventoried by ``_cache_entries`` below, bounded to the cache root the
+# pipeline wrote and to the exact entry shape the cache writes.
+# repair_plan.json is the split-repair plan ``reconcile plan-split`` writes:
+# it holds raw field values for the members of one written cluster, so it is
+# destroyed here and the provenance log keeps only its digest.
 PII_ARTIFACTS: tuple[str, ...] = (
     "resolved.csv",
     "review_queue.csv",
     "withheld.csv",
+    "corrections.json",
     "salesforce_import.csv",
     "civicrm_import.csv",
+    "cutover_report.csv",
+    "cutover_review.csv",
+    "target_corrections.csv",
+    "cutover_withheld.csv",
+    "repair_plan.json",
 )
 
 PROVENANCE_FILENAME = "provenance.jsonl"

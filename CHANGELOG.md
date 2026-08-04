@@ -26,6 +26,106 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   emits the same write and review-artifact events as a real run because both
   stages still execute there. The UC-01 large-corpus before/after numbers
   remain outstanding (#78).
+- **Mixed CSV and PDF corpus variant for the stage baseline (issue #78).**
+  `tools/corpusgen/generate.py --pdf-share` writes part of the incoming side
+  as seeded, digitally created text-layer PDF intake documents, one record
+  per page, with a manifest accounting for which rows each document carries.
+  `make perf-baseline-pdf` measures the six stages over that corpus, so the
+  extract row reports the time the pipeline's own pdfplumber reader spent
+  instead of the honest 0.0s a CSV-only corpus produces, and the UC-01 stage
+  cache has a real before number for the extraction half. Ingest reports its
+  wall clock with the reader's time removed, so the two rows partition the
+  walk. The measured artifacts are committed at
+  `eval/large-corpus-stage-baseline-pdf-2026-08-04.{md,json}`: 36.9s of
+  extraction over 3,756 pages in 151 documents, on the same machine class as
+  the CSV-only baseline that reports 0.0s. The PDF writer
+  (`tools/corpusgen/pdfwrite.py`) is stdlib-only dev tooling: no new package
+  dependency, no runtime import, deterministic byte for byte, and able to
+  encode the non-ASCII names the transliteration channel plants, which the
+  existing one-page `testing.make_pdf` helper cannot. The harness refuses a
+  corpus whose PDFs, CSVs, or manifest changed after generation, or that
+  gained a file in its incoming directory afterwards, and the generator
+  refuses to clear an `--out-dir` it cannot recognize as a corpus it wrote.
+  Both artifacts state which fields a PDF-carried record loses (address and
+  consent have no extraction pattern, and prose dates do not match the
+  numeric date pattern) and quote the run's own banding counts, so the
+  run-count difference is documented without claiming a cause the run did
+  not measure.
+- **Read-only split repair planning (UC-03, second pull request).**
+  `reconcile plan-split --manifest <run manifest> --cluster <id>` turns one
+  written cluster a reviewer identified as a bad merge into a local repair
+  plan. Planning requires a stated reason and a reviewer identity, verifies
+  the recipe and source batch against the manifest's digests, and takes the
+  written cluster's members, external id, fill policy, and field lineage from
+  the intact provenance chain before recomputing the golden record over
+  exactly that member set; any drift refuses rather than guessing.
+  Reconstruction is fully offline and contacts no destination. The plan file
+  (`repair_plan.json`, schema version 1) records the old external id, one
+  proposed split record per member, the fields whose written value came from
+  a member being split away, and the operations the destination supports;
+  its raw values live only in that local file, which joins
+  `destruction.PII_ARTIFACTS`, the retention inventory, and the threat model,
+  while provenance stores the plan's digest in a new `repair-plan` entry.
+  Every split pair becomes a binding rejected cannot-link in the decisions
+  file, and a test proves the next run cannot re-form the cluster. Beside the
+  planner, `connectors/repair.py` adds the ADR 0012 capability-declaration
+  surface: exact enumerated destination versions, operations marked
+  destructive or not, and required vendor-evidence fields, with wildcard or
+  range versions refused at construction. No adapter publishes a declaration,
+  conformance tests assert that undeclared means no repair operations, and
+  unsupported destinations get manual instructions with no flag to force a
+  generic operation. `apply_repair` execution and the CiviCRM pilot remain
+  unimplemented.
+- **Cutover review and correction-file export (UC-02, second PR).** Two new
+  subcommands finish the migration-assurance flow. `reconcile compare-review`
+  serves the same local web review queue, session, and decisions machinery
+  `reconcile run` uses, over a comparison's undecided pairs; verdicts save to
+  `compare_decisions.json` and reviewer field corrections to
+  `corrections.json`, both re-scored on apply. `reconcile compare-apply` then
+  emits `target_corrections.csv`, a local, import-ready correction file for
+  the target side, built with the same import field maps and local writer as
+  the `salesforce_csv` and `civicrm_csv` exports (`--format` chooses the
+  shape; the default keeps canonical column names). The export fails closed
+  three ways: it refuses while any review pair is undecided or awaiting a
+  second reviewer (a comparison with zero review pairs may export without a
+  review step), it refuses when `compare_manifest.json` is missing or no
+  longer matches the inputs, and identities without active consent are
+  withheld and counted (`cutover_withheld.csv`, ids and reason only) whenever
+  either side's recipe requires consent. After a successful export the
+  comparison manifest gains an `export` section binding the correction and
+  decisions files by digest with counts only, under the new versioned
+  `cutover_corrections` schema. No comparison command can reach a live
+  connector; `tests/test_compare_apply.py` holds that invariant alongside
+  the review, manifest, and consent gates. `target_corrections.csv`,
+  `cutover_withheld.csv`, and `corrections.json` join the destruction
+  inventory, closing a pre-existing gap for the run pipeline's corrections
+  file, and docs/DATA-FLOW-AND-RETENTION.md covers all of them.
+- **Large-corpus stage-timing baseline (UC-01 "before" side).**
+  `tools/corpusgen/stage_baseline.py`, run with `make perf-baseline`, times
+  the six pipeline stages (ingest, extract, normalize, score, review
+  artifact, write) over the seeded 50k synthetic corpus and records peak
+  resident memory per stage, with the pinned corpus parameters, an input
+  digest, and the measuring machine's environment captured content-free:
+  counts and durations only, no field values, no user paths. The dated
+  report and its JSON companion are committed at
+  `eval/large-corpus-stage-baseline-2026-08-03.{md,json}` as the pre-cache
+  numbers the UC-01 stage cache is measured against; the future cached run
+  diffs its own JSON against this one. Both artifacts state plainly that
+  they describe one run on one named machine class and are not a
+  performance promise. A CI-sized smoke test proves the harness on a tiny
+  corpus and asserts byte-for-byte that its composed stages produce the
+  same artifacts `pipeline.run` and `pipeline.export` produce, so harness
+  drift fails CI instead of skewing a committed baseline.
+- **External-gates runbook.** `docs/EXTERNAL-GATES-RUNBOOK.md` writes down the
+  maintainer's exact hand-run steps for the five "External gate" rows in
+  `docs/ROADMAP-CLOSEOUT.md`'s canonical 1.0 gates table: the screen-reader
+  walkthrough with reviewed Spanish copy and ACR, the ruleset apply plus the
+  signed-tag release ceremony, the recorded CiviCRM demonstration, real
+  adopting organizations, and the schema-stability window. Each section names
+  the repository prerequisites that already exist, the ordered steps, the
+  evidence artifact and where it gets recorded, and honest failure notes. The
+  closeout's no-fabricated-evidence principle governs throughout; the runbook
+  never substitutes a fixture for a human result.
 - **Content-addressed stage cache for extraction and normalization (UC-01).**
   A recipe's new `[cache]` section (validated fail-closed; absent means off)
   stores extraction and normalization results as content-addressed files
@@ -57,8 +157,50 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   wall-clock and peak-memory before/after numbers from the plan item's
   acceptance criteria. No benchmark has been run, so none is claimed;
   docs/CLAIMS-AUDIT.md records the gap (#78). The progress-event work the
-  cache change deferred lands in this same release; see the progress-events
-  entry above.
+  cache change deferred (see docs/NOVEL-USE-CASES-PLAN.md) lands in this
+  same release; see the progress-events entry above.
+- **Read-only migration cutover comparison (UC-02, first PR).** `reconcile
+  compare --left <recipe or csv> --right <recipe or csv>` resolves a legacy
+  CRM export against a target export without building any connector. Records
+  carry a left/right side label through the existing mapping, normalization,
+  and matcher backend, and the command classifies every identity as matched,
+  left-only, or right-only, flags value conflicts on matched people, and
+  marks identities an undecided pair touches as needing review. Field values
+  stay in two local artifacts, `cutover_report.csv` and `cutover_review.csv`,
+  both added to the destruction inventory. The count-only
+  `migration_summary.json` carries its own versioned schema
+  (`migration_summary` in `reconcile schema`), and `compare_manifest.json`
+  binds both mapping recipes and the digest of every input file. Recipes that
+  disagree on thresholds or address backend are refused rather than silently
+  reconciled, and a merge-blocking test proves no compare code path can
+  construct a write connector, in the spirit of `tests/test_no_egress.py`.
+  The post-review correction-file export is the second UC-02 change and is
+  not part of this one.
+- **Multiyear roadmap, 2026 H2 through 2029.** `docs/ROADMAP-MULTIYEAR.md`
+  arranges the Now/Next/Later plan and the closeout's external 1.0 gates into
+  four horizons, each organized by workstream, under the one-maintainer
+  60/30/10 capacity model. External gates stay visibly external and are never
+  booked as engineering; where the future depends on adopters or partners the
+  document states the gate instead of a date. It carries the closeout's
+  product principles and the plan's exclusions forward as permanent non-goals
+  and sets a per-release and per-half review cadence in which adopter
+  evidence outranks synthetic personas. `docs/ROADMAP.md` gains a pointer
+  marking it a historical record, and `docs/NOVEL-USE-CASES-PLAN.md` one
+  marking it the near-term detail under the new umbrella document.
+- **Repair-capability decision record (UC-03 study).**
+  `docs/adr/0012-connector-repair-capabilities.md` decides the protocol for
+  post-write split repair ahead of implementation: `inspect_repair` and
+  `apply_repair` as optional connector capabilities separate from
+  `Connector.write_all`, a declaration that names the exact destination and
+  version pairs an adapter verified, read-only repeatable planning, a
+  mandatory second reviewer for remote destructive operations, manual
+  instructions instead of a forced generic delete on unsupported
+  destinations, CiviCRM as the pilot, and the threat-model and
+  destruction-inventory updates required before any repair plan is stored.
+  Vendor delete/merge/restore semantics are named as open inputs to be read
+  from current documentation and a live disposable instance, not asserted.
+  `docs/NOVEL-USE-CASES-PLAN.md` and `docs/ROADMAP-CLOSEOUT.md` cross-reference
+  the record. Documentation only; no code changes.
 - **Airtable native-upsert connector (roadmap E3).** The new `airtable`
   destination batches at Airtable's ten-record limit, uses
   `performUpsert` on the configured external-id field, reads a personal access

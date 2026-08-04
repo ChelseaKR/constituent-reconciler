@@ -54,6 +54,31 @@ display, and under the `dv` pack a non-loopback bind is refused. Its only
 side effect on disk is `decisions.json`, which carries record ids and verdicts
 and no field values (`review/session.py`).
 
+`reconcile compare` (`compare.py`) reads two exports as read-only sources and
+writes only into `--out`: the cutover report and review-pair artifacts below
+plus a count-only summary and a digest manifest. The command constructs no
+connector on any path, so a recipe's `[output]` section cannot cause a write
+to either live system; `tests/test_compare.py` enforces that invariant.
+Ingest on a compare side is the run pipeline's ingest, so the cloud-seam
+rules above apply unchanged: a PDF side whose recipe enables the Bedrock
+backend may route low-confidence pages through the policy-gated seam, and the
+`dv` and `hipaa` packs fuse it off before any data flows. The compare tests
+pin the fused-off seam under the `dv` pack alongside the no-connector
+invariant.
+
+Two follow-on commands complete the comparison flow. `reconcile
+compare-review` serves the same loopback review UI over the comparison's
+undecided pairs; its disk side effects are `compare_decisions.json` (pair ids
+and verdicts, no field values) and, when a reviewer corrects a value,
+`corrections.json` (which does hold the replacement values). `reconcile
+compare-apply` (`compare_apply.py`) then writes `target_corrections.csv`, a
+local, import-ready correction file for the target side, only after every
+review pair is decided and after the consent gate withholds any identity
+without active consent. It refuses when the comparison manifest is missing or
+no longer matches the inputs, and it constructs no connector beyond the local
+import-file writer; `tests/test_compare_apply.py` enforces the review gate,
+the consent gate, and the no-live-connector invariant.
+
 ```mermaid
 flowchart TD
     SRC[Operator's source files<br/>existing/incoming CSVs, intake PDFs<br/>read in place, never copied] --> ING[ingest + offline extract<br/>pipeline.py, extract/pdf.py]
@@ -81,11 +106,20 @@ this table is aspirational.
 | `resolved.csv` | `connectors/csv_out.py` | the `--out` directory | Yes: golden-record field values, member ids, consent | The default write target. Skipped on `--dry-run`. |
 | `civicrm_import.csv`, `salesforce_import.csv` | `connectors/crm_csv.py` | the `--out` directory | Yes: import-shaped field values | Local files, so permitted under the `dv` pack. Skipped on `--dry-run`. |
 | Live CRM records | `connectors/civicrm.py`, `connectors/salesforce.py` | the remote CRM | Yes | Non-local; refused fail-closed under the `dv` pack (`pipeline.build_connector`). |
+| `repair_plan.json` | `repair.py` via `reconcile plan-split` | the run's `--out` directory, beside the manifest | Yes: proposed split records and restoration values for the members of one written cluster | Local only, never sent anywhere. The provenance log stores its digest, not its content. Regenerable at will from the manifest and sources, so destroying it loses nothing. |
 | `withheld.csv` | `pipeline._write_withheld` | the `--out` directory | Ids only | Cluster id, member record ids, reason. No field values, but ids resolve to people through the organization's own systems. |
 | `decisions.json` | `review/session.py` | the `--out` directory | Ids only | Pair ids and verdicts. No field values, by design. |
 | `stage_cache/` entry files | `stage_cache.py` via `pipeline.run` | `<out>/stage_cache`, or the recipe's explicit `[cache] dir` boundary | Yes: extracted and normalized field values, keyed by content digest | Written only when a recipe opts in. Covered by `reconcile destroy`; an explicit boundary is covered via `--cache-dir`. |
 | `provenance.jsonl` | `provenance.py` | the `--out` directory | No field values | Each entry: BLAKE2b hash of the written payload, record and member ids, consent flag, timestamp, chain hashes. Payloads are referenced by hash, never stored. |
 | `aggregate_summary.json` | `pipeline._write_aggregate_summary` over `suppression.py` | the `--out` directory | No | Total and suppressed category counts. Written only under a pack with `aggregate_export` (the `dv` pack), and not on `--dry-run`. |
+| `cutover_report.csv` | `compare.write_cutover_report` | the `--out` directory | Yes: per-identity field values from both compared exports, with conflict flags | Written by `reconcile compare` only. In the destruction inventory (`destruction.PII_ARTIFACTS`). |
+| `cutover_review.csv` | `compare.write_cutover_review` | the `--out` directory | Yes: field values of the undecided cross-export pairs | Written by `reconcile compare` only. In the destruction inventory. |
+| `migration_summary.json` | `compare.write_migration_summary` | the `--out` directory | No | Identity and conflict counts under the versioned `migration_summary` schema; no field values, asserted by `tests/test_compare.py`. |
+| `compare_manifest.json` | `compare.write_compare_manifest` | the `--out` directory | No field values | Digests of both recipes and every input file, both column mappings, thresholds. `reconcile compare-apply` adds an `export` section binding the correction and decisions files by digest, with row and withheld counts only. |
+| `compare_decisions.json` | `review/session.py` via `reconcile compare-review` | the `--out` directory | Ids only | Pair ids, verdicts, reviewer names, timestamps: the same shape as `decisions.json`. |
+| `corrections.json` | `review/session.py` (either review surface) | the `--out` directory | Yes: reviewer-supplied replacement field values | Written only when a reviewer corrects a value during review. In the destruction inventory (`destruction.PII_ARTIFACTS`). |
+| `target_corrections.csv` | `compare_apply.export_corrections` | the `--out` directory | Yes: import-shaped golden field values for the target side | Written by `reconcile compare-apply` only, after review completeness and the consent gate. In the destruction inventory. |
+| `cutover_withheld.csv` | `compare_apply._write_cutover_withheld` | the `--out` directory | Ids only | Identity id, member record ids, withhold reason. Written only when consent withholds an identity from the correction file. In the destruction inventory. |
 | `eval/report.md` | `report.py` via `reconcile eval` | the path given to `--out` | No | Match-quality rates on seeded synthetic fixtures; the fixtures contain no real personal data. |
 | Terminal output | `report.render_run_summary`, `suppression.render_summary` | the operator's terminal | No | Per-stage counts and the suppressed aggregate. |
 | Cloud seam egress | `extract/seam.py` | Amazon Bedrock | Yes, when enabled | Low-confidence PDF pages only. A no-op under `dv` and `hipaa`, asserted by `tests/test_no_egress.py`. |
@@ -104,10 +138,13 @@ The default pack enforces no confidentiality invariants beyond the ordinary
 fail-closed gate (`policy.py`), so retention is governed entirely by the
 organization's existing records schedule. The model:
 
-* `review_queue.csv`, `resolved.csv`, and the CRM import CSVs carry the same
-  personal data as the source CRM export they came from. Put them under the
-  same schedule as that export, and delete the output directory once a run's
-  results have been applied.
+* `review_queue.csv`, `resolved.csv`, the CRM import CSVs, and
+  `repair_plan.json` carry the same personal data as the source CRM export
+  they came from. Put them under the same schedule as that export, and delete
+  the output directory once a run's results have been applied. A repair plan
+  in particular should be destroyed as soon as the repair is done or
+  abandoned: it concentrates the raw values of the people in a bad merge, and
+  it can be regenerated whenever it is needed again.
 * `provenance.jsonl`, `decisions.json`, and `withheld.csv` hold ids and hashes
   rather than field values and may outlive the record artifacts, which is what
   lets the audit trail survive routine cleanup.
@@ -123,16 +160,23 @@ their limits in [RESPONSIBLE-TECH-AUDITS.md](./RESPONSIBLE-TECH-AUDITS.md) and
 [RESEARCH-ROADMAP.md](./RESEARCH-ROADMAP.md). Under this pack the model is:
 
 **Destroy routinely.** The output-directory artifacts that hold individual
-records are `review_queue.csv` and `resolved.csv` (or the CRM import CSV when
-one is used). Destroy them once their purpose is served: the resolved records
-have landed in the organization's comparable database and the review decisions
-have been applied. The stage-cache entry files hold extracted and normalized
-survivor field values and belong on the same schedule; the destruction command
-reaches them wherever the recipe put the cache. `withheld.csv` and
-`decisions.json` hold record ids without field values, but those ids resolve
-to survivors inside the organization's own systems, so they go on the same
-destruction schedule. Source intake files are destroyed under the
-organization's own intake procedure.
+records are `review_queue.csv`, `resolved.csv` (or the CRM import CSV when
+one is used), and `repair_plan.json` when a split repair was planned. Destroy
+them once their purpose is served: the resolved records have landed in the
+organization's comparable database, the review decisions have been applied,
+and the repair is done or abandoned. The repair plan deserves the shortest
+life of the three, because it concentrates the raw values of the survivors
+caught in one bad merge and can be regenerated on demand. A migration
+comparison's record-bearing artifacts (`cutover_report.csv`,
+`cutover_review.csv`, `target_corrections.csv`, and `corrections.json`) follow
+the same schedule once the correction file has been imported. The stage-cache
+entry files hold extracted and normalized survivor field values and belong on
+the same schedule; the destruction command reaches them wherever the recipe
+put the cache. `withheld.csv` and `decisions.json` hold record ids without
+field values, but those ids resolve to survivors inside the organization's own
+systems, so they go on the same destruction schedule, as do
+`compare_decisions.json` and `cutover_withheld.csv`. Source intake files are
+destroyed under the organization's own intake procedure.
 
 **Retain.** `aggregate_summary.json` may be kept: it is already
 non-identifying, small cells are suppressed (`suppression.py`), and it is the
@@ -194,9 +238,10 @@ entity's own retention schedule to all of it.
 The flow half of this model is enforced by merge-blocking tests: non-egress
 under the `dv` pack and the stage cache's local write boundary
 (`tests/test_no_egress.py`), the consent gate (`tests/test_consent.py`),
-suppression in the aggregate (`tests/test_suppression.py`), and the
-minimization of the review artifacts (`tests/test_review.py`). The
-destruction executor and its provenance certificates are enforced by
-`tests/test_destruction.py`, and cache-entry destruction by
-`tests/test_stage_cache.py`; choosing the retention window remains operator
-procedure.
+suppression in the aggregate (`tests/test_suppression.py`), the minimization
+of the review artifacts (`tests/test_review.py`), and the comparison flow's
+review, consent, and no-live-connector gates (`tests/test_compare.py`,
+`tests/test_compare_apply.py`). The destruction executor and its provenance
+certificates are enforced by `tests/test_destruction.py`, and cache-entry
+destruction by `tests/test_stage_cache.py`; choosing the retention window
+remains operator procedure.
