@@ -7,6 +7,20 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **Repair-capability decision record (UC-03 study).**
+  `docs/adr/0012-connector-repair-capabilities.md` decides the protocol for
+  post-write split repair ahead of implementation: `inspect_repair` and
+  `apply_repair` as optional connector capabilities separate from
+  `Connector.write_all`, a declaration that names the exact destination and
+  version pairs an adapter verified, read-only repeatable planning, a
+  mandatory second reviewer for remote destructive operations, manual
+  instructions instead of a forced generic delete on unsupported
+  destinations, CiviCRM as the pilot, and the threat-model and
+  destruction-inventory updates required before any repair plan is stored.
+  Vendor delete/merge/restore semantics are named as open inputs to be read
+  from current documentation and a live disposable instance, not asserted.
+  `docs/NOVEL-USE-CASES-PLAN.md` and `docs/ROADMAP-CLOSEOUT.md` cross-reference
+  the record. Documentation only; no code changes.
 - **Airtable native-upsert connector (roadmap E3).** The new `airtable`
   destination batches at Airtable's ten-record limit, uses
   `performUpsert` on the configured external-id field, reads a personal access
