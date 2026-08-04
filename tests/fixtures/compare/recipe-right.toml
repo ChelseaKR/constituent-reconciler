@@ -1,0 +1,17 @@
+# Target-side recipe for the migration-comparison fixtures. Column names
+# differ from the legacy export on purpose: the comparison must line the two
+# systems up through their mapping recipes, not through shared headers.
+
+[input]
+incoming = "right.csv"
+
+[mapping]
+first_name = "given_name"
+last_name = "family_name"
+dob = "dob"
+email = "email_address"
+
+[thresholds]
+prior = 0.01
+auto = 0.97
+review = 0.80

@@ -44,8 +44,9 @@ class UrllibTransport:
     def patch(self, url: str, *, headers: dict[str, str], body: bytes) -> tuple[int, bytes]:
         request = urllib.request.Request(url, data=body, headers=headers, method="PATCH")  # noqa: S310
         try:
-            # nosemgrep: dynamic-urllib-use-detected (operator-configured URL; scheme
-            # is validated by AirtableConnector before this transport is called).
+            # The URL is operator-configured and scheme-validated by
+            # AirtableConnector before this transport is called.
+            # nosemgrep: dynamic-urllib-use-detected (operator-configured url, see noqa above)
             with urllib.request.urlopen(request, timeout=self.timeout) as response:  # noqa: S310
                 return int(response.status), response.read()
         except urllib.error.HTTPError as error:

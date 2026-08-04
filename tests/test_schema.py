@@ -11,7 +11,9 @@ from constituent_reconciler.config import load_recipe
 from constituent_reconciler.schema import (
     CONFIG_SCHEMA_VERSION,
     CONNECTOR_INTERFACE_VERSION,
+    CUTOVER_CORRECTIONS_SCHEMA_VERSION,
     DECISIONS_SCHEMA_VERSION,
+    MIGRATION_SUMMARY_SCHEMA_VERSION,
     REPAIR_CAPABILITY_SCHEMA_VERSION,
     REPAIR_PLAN_SCHEMA_VERSION,
     REPORT_SCHEMA_VERSION,
@@ -33,6 +35,8 @@ def test_versions_mapping_matches_constants() -> None:
         "connector_interface": CONNECTOR_INTERFACE_VERSION,
         "report_schema": REPORT_SCHEMA_VERSION,
         "decisions_schema": DECISIONS_SCHEMA_VERSION,
+        "migration_summary": MIGRATION_SUMMARY_SCHEMA_VERSION,
+        "cutover_corrections": CUTOVER_CORRECTIONS_SCHEMA_VERSION,
         "repair_plan": REPAIR_PLAN_SCHEMA_VERSION,
         "repair_capability": REPAIR_CAPABILITY_SCHEMA_VERSION,
     }
@@ -46,6 +50,7 @@ def test_schema_command_prints_versions(capsys: object) -> None:
     assert "connector_interface:" in out
     assert "report_schema:" in out
     assert "decisions_schema:" in out
+    assert "migration_summary:" in out
 
 
 def test_aggregate_summary_carries_report_schema_version(tmp_path: Path) -> None:

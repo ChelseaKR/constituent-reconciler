@@ -24,9 +24,11 @@ CONNECTOR_INTERFACE_VERSION = 1
 # and the provenance log entry shape. Version 2 added the run manifest and the
 # provenance "run-start" entry, whose consent field is null rather than a
 # boolean; version 3 added field-level lineage (``field_sources``, member ids
-# only) and the named survivorship ``fill_policy``. Version-1 logs still verify
-# unchanged.
-REPORT_SCHEMA_VERSION = 3
+# only) and the named survivorship ``fill_policy``; version 4 added the
+# stage-cache policy and hit/miss counts to the run manifest and cache counts
+# plus stage durations to run_summary.json, all content-free. Version-1 logs
+# still verify unchanged.
+REPORT_SCHEMA_VERSION = 4
 
 # The decisions.json shape: approved/rejected lists of [left, right] record-id
 # pairs, written by the review session and consumed by ``reconcile apply``.
@@ -34,6 +36,22 @@ REPORT_SCHEMA_VERSION = 3
 # the version-1 lists, which are kept as-is so ``apply`` reads both versions.
 DECISIONS_SCHEMA_VERSION = 2
 
+# The count-only migration_summary.json written by ``reconcile compare``:
+# matched, single-side, ambiguous, and conflicting identity counts, per-side
+# ingest accounting in count form, and the thresholds used. Never a field
+# value. Versioned on its own because the
+# artifact is read outside the run pipeline's report family (a migration
+# runbook or a funder memo), and its consumers should not have to track the
+# run-report schema to parse it.
+MIGRATION_SUMMARY_SCHEMA_VERSION = 1
+
+# The reviewed correction file ``reconcile compare-apply`` writes for the
+# target side (target_corrections.csv) and the ``export`` section it adds to
+# compare_manifest.json. Version 1: one row per identity the target must add
+# or correct, columns from the chosen import field map plus the external-id
+# column, and a manifest section carrying digests and counts only. A future
+# column or manifest-key change bumps this and ships a migration note.
+CUTOVER_CORRECTIONS_SCHEMA_VERSION = 1
 # The repair-plan artifact (repair_plan.json) that ``reconcile plan-split``
 # writes: the old external id, the proposed split records, the fields needing
 # restoration, and the operations the destination supports. A versioned
@@ -54,6 +72,8 @@ def versions() -> dict[str, int]:
         "connector_interface": CONNECTOR_INTERFACE_VERSION,
         "report_schema": REPORT_SCHEMA_VERSION,
         "decisions_schema": DECISIONS_SCHEMA_VERSION,
+        "migration_summary": MIGRATION_SUMMARY_SCHEMA_VERSION,
+        "cutover_corrections": CUTOVER_CORRECTIONS_SCHEMA_VERSION,
         "repair_plan": REPAIR_PLAN_SCHEMA_VERSION,
         "repair_capability": REPAIR_CAPABILITY_SCHEMA_VERSION,
     }

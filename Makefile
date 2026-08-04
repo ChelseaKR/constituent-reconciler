@@ -1,4 +1,4 @@
-.PHONY: install verify format-check lint type test security axe-fixtures axe eval eval-extraction eval-bias eval-large run docker bundle clean
+.PHONY: install verify format-check lint type test security axe-fixtures axe eval eval-extraction eval-bias eval-large perf-baseline run docker bundle clean
 
 # Reproduce the full local toolchain. CI mirrors `make verify` byte for byte.
 # `uv sync --frozen` refuses to run (and exits non-zero) if uv.lock is stale
@@ -86,6 +86,20 @@ eval-large:
 	.venv/bin/python -m tools.corpusgen.run_large_eval \
 		--out-dir eval/large-corpus \
 		--report-out eval/large-corpus-report.md \
+		--regenerate
+
+# Stage-timing baseline over the large synthetic corpus (UC-01 "before"
+# numbers): per-stage wall clock and peak memory for ingest, extract,
+# normalize, score, review artifact, and write, as a dated report plus a JSON
+# companion the future cached run diffs against. Local command, not a CI job,
+# for the same reason as eval-large; the harness itself is smoke-tested on a
+# tiny corpus by tests/test_stage_baseline.py.
+PERF_DATE := $(shell date +%Y-%m-%d)
+perf-baseline:
+	.venv/bin/python -m tools.corpusgen.stage_baseline \
+		--out-dir eval/large-corpus \
+		--report-out eval/large-corpus-stage-baseline-$(PERF_DATE).md \
+		--json-out eval/large-corpus-stage-baseline-$(PERF_DATE).json \
 		--regenerate
 
 # Run the demo end to end and write outputs to ./out.

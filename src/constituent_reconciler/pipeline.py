@@ -12,12 +12,13 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from constituent_reconciler import consent, decisions, household, matching, suppression
+from constituent_reconciler import consent, decisions, household, matching, stage_cache, suppression
 from constituent_reconciler.config import Recipe
 from constituent_reconciler.connectors import get_factory
 from constituent_reconciler.connectors.airtable import Transport as AirtableTransport
@@ -207,31 +208,24 @@ def _read_consent(
     )
 
 
-def read_pdf_records(  # noqa: C901 - branches mirror ingest accounting cases.
-    path: Path,
-    source: str,
-    *,
-    recipe: Recipe,
-    id_prefix: str,
-    _seen: dict[str, int] | None = None,
-    accounting: IngestAccumulator | None = None,
-) -> list[Record]:
-    """Extract records from a PDF, routing low-confidence pages through the seam.
+def _extract_pdf_rows(path: Path, recipe: Recipe) -> stage_cache.ExtractedRows:
+    """Parse one PDF into kept rows plus page accounting, without minting ids.
 
-    Each page that yields at least a first_name or last_name becomes one Record.
-    Pages that produce nothing useful are skipped. Low-confidence pages are
-    offered to the cloud seam when the policy pack allows it; under DV and HIPAA
-    packs the seam is always a NoOp regardless of the recipe's backend setting.
-
-    ``backend = "pdfplumber+ocr"`` selects the OCR-fallback extractor, which
-    OCRs any page with no embedded text layer instead of yielding an empty
-    page; every other backend value uses the plain pdfplumber text-layer
-    extractor.
+    Low-confidence pages are offered to the cloud seam when the policy pack
+    allows it; under DV and HIPAA packs the seam is always a NoOp regardless
+    of the recipe's backend setting. ``backend = "pdfplumber+ocr"`` selects
+    the OCR-fallback extractor, which OCRs any page with no embedded text
+    layer instead of yielding an empty page; every other backend value uses
+    the plain pdfplumber text-layer extractor.
 
     Unless the recipe sets ``[extract] sandbox = false``, the parse runs in a
     resource-limited child process (``extract/sandbox.py``): a hostile or
     malformed PDF fails closed to a zero-confidence page that is dropped and
-    accounted for here, instead of crashing the run.
+    accounted for here, instead of crashing the run. A parse the sandbox
+    ended early (``extraction.note`` is set) is marked not cacheable, because
+    a resource-limit kill reflects the machine's load rather than the file
+    bytes; the stage cache must not freeze it as this document's permanent
+    result.
     """
     from constituent_reconciler.extract.base import Extractor
     from constituent_reconciler.extract.pdf import PdfplumberExtractor
@@ -256,8 +250,9 @@ def read_pdf_records(  # noqa: C901 - branches mirror ingest accounting cases.
     )
     extraction = extractor.extract(path)
 
-    seen = _seen if _seen is not None else {}
-    records: list[Record] = []
+    rows: list[stage_cache.Row] = []
+    pages_extracted = 0
+    pages_dropped = 0
     for page in extraction.pages:
         page_fields = list(page.fields)
 
@@ -269,23 +264,112 @@ def read_pdf_records(  # noqa: C901 - branches mirror ingest accounting cases.
         raw, spans = _collect_mapped_fields(page_fields, recipe.mapping)
 
         if not raw.get("first_name") and not raw.get("last_name"):
-            if accounting is not None:
-                accounting.pages_dropped += 1
+            pages_dropped += 1
             continue
-        if accounting is not None:
-            accounting.pages_extracted += 1
+        pages_extracted += 1
+        rows.append((raw, spans))
 
-        unique_id = _content_id(source, raw, id_prefix, seen)
-        records.append(
-            Record(
-                unique_id=unique_id,
-                source=source,
-                raw=raw,
-                spans=spans,
-            )
+    return stage_cache.ExtractedRows(
+        rows=rows,
+        pages_extracted=pages_extracted,
+        pages_dropped=pages_dropped,
+        cacheable=extraction.note is None,
+    )
+
+
+def _extract_text_rows(path: Path, recipe: Recipe) -> stage_cache.ExtractedRows:
+    """Parse one .txt or .eml file into kept rows plus page accounting.
+
+    Parsing is stdlib-only and fully offline; the cloud seam is never consulted
+    for text sources. A body that produces nothing useful is dropped and
+    counted, same as an empty PDF page.
+    """
+    from constituent_reconciler.extract.text import extract_eml, extract_text_file
+
+    if path.suffix.lower() == ".eml":
+        extraction = extract_eml(path)
+    else:
+        extraction = extract_text_file(path)
+
+    rows: list[stage_cache.Row] = []
+    pages_extracted = 0
+    pages_dropped = 0
+    for page in extraction.pages:
+        raw, spans = _collect_mapped_fields(page.fields, recipe.mapping)
+
+        if not raw.get("first_name") and not raw.get("last_name"):
+            pages_dropped += 1
+            continue
+        pages_extracted += 1
+        rows.append((raw, spans))
+
+    return stage_cache.ExtractedRows(
+        rows=rows,
+        pages_extracted=pages_extracted,
+        pages_dropped=pages_dropped,
+        cacheable=extraction.note is None,
+    )
+
+
+def _mint_document_records(
+    rows: Iterable[stage_cache.Row],
+    source: str,
+    *,
+    id_prefix: str,
+    seen: dict[str, int],
+) -> list[Record]:
+    """Turn extracted rows into Records, minting content-derived ids.
+
+    Minting happens outside the extraction (and outside its cache entry)
+    because the duplicate-row counter spans every file of a source; a cached
+    file's rows must take the same ids they would take in a fresh parse of
+    the whole source.
+    """
+
+    return [
+        Record(
+            unique_id=_content_id(source, raw, id_prefix, seen),
+            source=source,
+            raw=raw,
+            spans=spans,
         )
+        for raw, spans in rows
+    ]
 
-    return records
+
+def read_pdf_records(
+    path: Path,
+    source: str,
+    *,
+    recipe: Recipe,
+    id_prefix: str,
+    _seen: dict[str, int] | None = None,
+    accounting: IngestAccumulator | None = None,
+    active_cache: stage_cache.ActiveCache | None = None,
+) -> list[Record]:
+    """Extract records from a PDF, via the stage cache when one is active.
+
+    Each page that yields at least a first_name or last_name becomes one
+    Record; pages that produce nothing useful are dropped and accounted for.
+    The parse itself (and its seam and sandbox behavior) is described on
+    ``_extract_pdf_rows``. With an active cache and the plain ``pdfplumber``
+    backend, the parse result is served content-addressed by the file's
+    digest; backends whose output is not a pure function of the file bytes
+    bypass the cache (``stage_cache.extraction_cacheable``).
+    """
+
+    extracted = stage_cache.extraction_via_cache(
+        active_cache,
+        path,
+        recipe,
+        reader="pdf",
+        extract_fresh=lambda: _extract_pdf_rows(path, recipe),
+    )
+    if accounting is not None:
+        accounting.pages_extracted += extracted.pages_extracted
+        accounting.pages_dropped += extracted.pages_dropped
+    seen = _seen if _seen is not None else {}
+    return _mint_document_records(extracted.rows, source, id_prefix=id_prefix, seen=seen)
 
 
 def read_text_records(
@@ -296,44 +380,28 @@ def read_text_records(
     id_prefix: str,
     _seen: dict[str, int] | None = None,
     accounting: IngestAccumulator | None = None,
+    active_cache: stage_cache.ActiveCache | None = None,
 ) -> list[Record]:
-    """Extract records from a .txt or .eml intake file.
+    """Extract records from a .txt or .eml intake file, via the cache if active.
 
-    Parsing is stdlib-only and fully offline; the cloud seam is never consulted
-    for text sources. A body that yields at least a first_name or last_name
-    becomes one Record whose spans are line offsets into the text body. A
-    body that produces nothing useful is skipped, same as an empty PDF page.
+    A body that yields at least a first_name or last_name becomes one Record
+    whose spans are line offsets into the text body. Text parsing is
+    stdlib-only, so with an active cache the result is always served
+    content-addressed by the file's digest.
     """
-    from constituent_reconciler.extract.text import extract_eml, extract_text_file
 
-    if path.suffix.lower() == ".eml":
-        extraction = extract_eml(path)
-    else:
-        extraction = extract_text_file(path)
-
+    extracted = stage_cache.extraction_via_cache(
+        active_cache,
+        path,
+        recipe,
+        reader="text",
+        extract_fresh=lambda: _extract_text_rows(path, recipe),
+    )
+    if accounting is not None:
+        accounting.pages_extracted += extracted.pages_extracted
+        accounting.pages_dropped += extracted.pages_dropped
     seen = _seen if _seen is not None else {}
-    records: list[Record] = []
-    for page in extraction.pages:
-        raw, spans = _collect_mapped_fields(page.fields, recipe.mapping)
-
-        if not raw.get("first_name") and not raw.get("last_name"):
-            if accounting is not None:
-                accounting.pages_dropped += 1
-            continue
-        if accounting is not None:
-            accounting.pages_extracted += 1
-
-        unique_id = _content_id(source, raw, id_prefix, seen)
-        records.append(
-            Record(
-                unique_id=unique_id,
-                source=source,
-                raw=raw,
-                spans=spans,
-            )
-        )
-
-    return records
+    return _mint_document_records(extracted.rows, source, id_prefix=id_prefix, seen=seen)
 
 
 def _ingest_source(  # noqa: C901 - routes all supported source types and skips.
@@ -343,6 +411,7 @@ def _ingest_source(  # noqa: C901 - routes all supported source types and skips.
     recipe: Recipe,
     id_prefix: str,
     accounting: IngestAccumulator | None = None,
+    active_cache: stage_cache.ActiveCache | None = None,
 ) -> list[Record]:
     """Route a source path to the right reader based on file type.
 
@@ -387,6 +456,7 @@ def _ingest_source(  # noqa: C901 - routes all supported source types and skips.
                     id_prefix=id_prefix,
                     _seen=seen,
                     accounting=accounting,
+                    active_cache=active_cache,
                 )
                 records += chunk
                 if accounting is not None:
@@ -399,6 +469,7 @@ def _ingest_source(  # noqa: C901 - routes all supported source types and skips.
                     id_prefix=id_prefix,
                     _seen=seen,
                     accounting=accounting,
+                    active_cache=active_cache,
                 )
                 records += chunk
                 if accounting is not None:
@@ -423,6 +494,7 @@ def _ingest_source(  # noqa: C901 - routes all supported source types and skips.
             id_prefix=id_prefix,
             _seen=seen,
             accounting=accounting,
+            active_cache=active_cache,
         )
         if accounting is not None:
             accounting.note_read(path)
@@ -435,6 +507,7 @@ def _ingest_source(  # noqa: C901 - routes all supported source types and skips.
             id_prefix=id_prefix,
             _seen=seen,
             accounting=accounting,
+            active_cache=active_cache,
         )
         if accounting is not None:
             accounting.note_read(path)
@@ -550,6 +623,19 @@ def _apply_corrections(
     return corrected
 
 
+class _StageTimer:
+    """Wall-clock seconds per pipeline stage, content-free by construction."""
+
+    def __init__(self) -> None:
+        self.durations: dict[str, float] = {}
+        self._started = time.perf_counter()
+
+    def mark(self, stage: str) -> None:
+        now = time.perf_counter()
+        self.durations[stage] = round(now - self._started, 6)
+        self._started = now
+
+
 def ingest_normalized_records(
     recipe: Recipe,
     *,
@@ -603,6 +689,7 @@ def run(
     force_auto: Iterable[frozenset[str]] = (),
     force_drop: Iterable[frozenset[str]] = (),
     corrections: Iterable[Correction] = (),
+    cache: stage_cache.StageCache | None = None,
 ) -> RunResult:
     """Execute the pipeline and return the result.
 
@@ -610,12 +697,57 @@ def run(
     approved review pair becomes a confident merge, a rejected one is dropped.
     Corrections replace raw field values before normalization, so matching,
     golden-record reduction, lineage, and export all see the reviewed value.
+
+    ``cache`` is the optional stage cache (UC-01). When one is passed, the
+    deterministic extraction and normalization stages read and write it; the
+    caller owns constructing it (``stage_cache.for_recipe``) and deciding to
+    pass it, which keeps a plain ``run`` free of disk writes. Candidate
+    generation, scoring, banding, and clustering never touch the cache:
+    term frequencies and cross-batch candidates change pair probabilities
+    whenever the population changes, so those stages are computed fresh on
+    every run regardless of what is cached.
     """
 
+    active = stage_cache.ActiveCache(cache) if cache is not None else None
+    timer = _StageTimer()
     accounting = IngestAccumulator()
-    records = ingest_normalized_records(recipe, corrections=corrections, accounting=accounting)
+    raw_records: list[Record] = []
+    if recipe.existing is not None:
+        raw_records += _ingest_source(
+            recipe.existing,
+            "existing",
+            recipe=recipe,
+            id_prefix="E",
+            accounting=accounting,
+            active_cache=active,
+        )
+    raw_records += _ingest_source(
+        recipe.incoming,
+        "incoming",
+        recipe=recipe,
+        id_prefix="N",
+        accounting=accounting,
+        active_cache=active,
+    )
+    _check_distinct_ids(raw_records)
+    raw_records = _apply_corrections(
+        raw_records, _group_corrections(corrections, fields=recipe.fields)
+    )
+    timer.mark("ingest")
+
+    records = {
+        r.unique_id: stage_cache.normalize_via_cache(
+            active,
+            r,
+            recipe,
+            failures=accounting.normalization_failures,
+        )
+        for r in raw_records
+    }
+    timer.mark("normalize")
 
     scored = matching.score_pairs(records.values(), recipe.fields, prior=recipe.prior)
+    timer.mark("score")
     pairs = decisions.band_pairs(
         scored,
         auto_threshold=recipe.auto_threshold,
@@ -630,13 +762,21 @@ def run(
     golden = decisions.golden_records(
         clusters, records, recipe.fields, fill_policy=recipe.fill_policy
     )
+    timer.mark("resolve")
 
+    stats = (
+        active.stats.freeze(enabled=True)
+        if active is not None
+        else stage_cache.CacheStatsCollector().freeze(enabled=False)
+    )
     return RunResult(
         records=records,
         pairs=tuple(pairs),
         clusters=tuple(clusters),
         golden=tuple(golden),
         ingest=accounting.freeze(),
+        cache=stats,
+        stage_durations=timer.durations,
     )
 
 
@@ -720,7 +860,12 @@ def _write_run_summary(
     withheld: Sequence[consent.Withheld],
     out_dir: Path,
 ) -> Path:
-    """Write a count-only summary that can feed the narrative report."""
+    """Write a count-only summary that can feed the narrative report.
+
+    The cache block and the stage durations are counts and seconds; nothing
+    in them names a path, a record, or a field value, so the summary stays
+    content-free under every policy pack.
+    """
 
     import json
 
@@ -739,6 +884,12 @@ def _write_run_summary(
         "resolved_records": len(result.golden),
         "merged_records": sum(max(len(record.members) - 1, 0) for record in result.golden),
         "withheld_no_consent": len(withheld),
+        "cache": {
+            "enabled": result.cache.enabled,
+            "hits": dict(result.cache.hits),
+            "misses": dict(result.cache.misses),
+        },
+        "stage_durations_seconds": dict(result.stage_durations),
     }
     summary_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return summary_path
@@ -973,7 +1124,7 @@ def export(
     logged = 0
     if not dry_run:
         input_paths = [p for p in (recipe.existing, recipe.incoming) if p is not None]
-        manifest = build_manifest(recipe.recipe_path, input_paths, recipe)
+        manifest = build_manifest(recipe.recipe_path, input_paths, recipe, cache=result.cache)
         manifest_path = write_manifest(manifest, out_dir)
         log = ProvenanceLog(provenance_path, log_authority)
         log.append_run_start(manifest_hash(manifest))
