@@ -90,12 +90,23 @@ class Side:
 
 
 def _identity_recipe(path: Path) -> Recipe:
-    """Build a Recipe for a bare CSV whose header uses canonical field names."""
+    """Build a Recipe for a bare CSV whose header uses canonical field names.
+
+    The mapping binds each canonical name to the exact header token the file
+    carries. Rows are read back through ``csv.DictReader``, which keys them by
+    the raw header cell, so a padded cell such as ``" last_name"`` must stay
+    the lookup key; matching on the stripped name but looking rows up by the
+    canonical name would read every padded column as empty for every record.
+    """
 
     with path.open(newline="", encoding="utf-8-sig") as handle:
         header = next(csv.reader(handle), [])
-    columns = {column.strip() for column in header}
-    mapping = {name: name for name in CANONICAL_FIELDS if name in columns}
+    token_by_name: dict[str, str] = {}
+    for column in header:
+        stripped = column.strip()
+        if stripped in CANONICAL_FIELDS and stripped not in token_by_name:
+            token_by_name[stripped] = column
+    mapping = {name: token_by_name[name] for name in CANONICAL_FIELDS if name in token_by_name}
     if "first_name" not in mapping or "last_name" not in mapping:
         raise CompareError(
             f"{path} has no first_name and last_name columns; a bare CSV side must "
@@ -203,8 +214,10 @@ class Identity:
     ``status`` partitions identities by membership: ``matched`` has records on
     both sides, ``left-only`` and ``right-only`` have records on one.
     ``ambiguous`` overlaps that partition rather than replacing it: an
-    identity is ambiguous when an undecided (review-band) pair connects it to
-    another identity, so its status could change once a person decides.
+    identity is ambiguous when any undecided (review-band) pair touches it,
+    whether that pair connects it to another identity or sits between two of
+    its own members that confident merges glued together, so its shape could
+    change once a person decides.
     ``conflicts`` maps a compared field to the display values of each side
     when both sides carry a value and the normalized values disagree.
     """
@@ -359,11 +372,12 @@ def run_compare(left: Side, right: Side) -> CompareResult:
         for member in cluster.members:
             cluster_of[member] = cluster.cluster_id
 
-    review_pairs = tuple(
-        pair
-        for pair in pairs
-        if pair.band is Band.REVIEW and cluster_of[pair.left] != cluster_of[pair.right]
-    )
+    # Every review-band pair reaches a human, the same routing reconcile run
+    # gives review_queue.csv. That includes a pair whose endpoints confident
+    # merges already glued into one cluster: the low-confidence evidence
+    # against that transitive merge is exactly what a reviewer needs to see,
+    # so it marks the identity ambiguous instead of vanishing.
+    review_pairs = tuple(pair for pair in pairs if pair.band is Band.REVIEW)
     ambiguous_ids = {cluster_of[pair.left] for pair in review_pairs} | {
         cluster_of[pair.right] for pair in review_pairs
     }
@@ -397,6 +411,23 @@ def _status_counts(result: CompareResult) -> tuple[int, int, int]:
     return matched, left_only, right_only
 
 
+def _ingest_counts(ingest: IngestReport) -> dict[str, int]:
+    """Count-only ingest accounting for one side: numbers, never a path.
+
+    ``IngestReport`` promises that no row, page, or file is silent, and the
+    migration summary carries that promise in count form so a dropped PDF
+    page shows up even when only the JSON artifact is read. File paths stay
+    out; the terminal summary lists them locally.
+    """
+
+    return {
+        "files_read": len(ingest.files_read),
+        "files_skipped": len(ingest.files_skipped),
+        "pages_extracted": ingest.pages_extracted,
+        "pages_dropped": ingest.pages_dropped,
+    }
+
+
 def summary_payload(result: CompareResult) -> dict[str, object]:
     """The count-only migration summary. No field value enters this payload."""
 
@@ -418,6 +449,10 @@ def summary_payload(result: CompareResult) -> dict[str, object]:
         "review_pairs": len(result.review_pairs),
         "identities_with_conflicts": sum(1 for i in result.identities if i.conflicts),
         "conflict_counts": conflict_counts,
+        "ingest": {
+            LEFT: _ingest_counts(result.left_ingest),
+            RIGHT: _ingest_counts(result.right_ingest),
+        },
         "thresholds": {
             "prior": result.prior,
             "auto": result.auto_threshold,
@@ -482,9 +517,11 @@ def write_cutover_report(result: CompareResult, out_dir: Path) -> Path:
 def write_cutover_review(result: CompareResult, out_dir: Path) -> Path:
     """Write ``cutover_review.csv``: the undecided pairs a person must look at.
 
-    Each row is a review-band pair whose endpoints sit in different
-    identities, with both records' raw values side by side. A PII artifact,
-    local only.
+    Each row is a review-band pair with both records' raw values side by
+    side. Pairs between identities appear here, and so does a pair inside one
+    identity whose members confident merges glued together, because that pair
+    is the evidence a reviewer needs to question the transitive merge. A PII
+    artifact, local only.
     """
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -557,6 +594,11 @@ def _ingest_lines(label: str, ingest: IngestReport) -> list[str]:
     if ingest.files_skipped:
         lines.append(f"{label + ' files skipped:':<22}{len(ingest.files_skipped)}")
         lines += [f"    {skipped.path} ({skipped.reason})" for skipped in ingest.files_skipped]
+    if ingest.pages_extracted or ingest.pages_dropped:
+        lines.append(
+            f"{label + ' pdf pages:':<22}{ingest.pages_extracted} extracted, "
+            f"{ingest.pages_dropped} dropped (no name found)"
+        )
     return lines
 
 

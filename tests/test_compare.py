@@ -13,6 +13,7 @@ from __future__ import annotations
 import csv
 import inspect
 import json
+from collections.abc import Iterable
 from pathlib import Path
 
 import pytest
@@ -83,6 +84,66 @@ def test_same_name_different_dob_stays_reviewable_not_merged(result: CompareResu
     assert all(identity.ambiguous for identity in devon)
     assert {identity.status for identity in devon} == {compare.LEFT_ONLY, compare.RIGHT_ONLY}
     assert len(result.review_pairs) == 1
+
+
+def test_a_review_pair_inside_one_auto_glued_cluster_stays_reviewable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The reviewer's threshold scenario: L1-L2 at 0.98 and L1-R1 at 0.99 are
+    # confident merges that glue all three records into one cluster, while
+    # L2-R1 at 0.85 lands in the review band. That uncertain pair must reach a
+    # human and mark the identity ambiguous, the way reconcile run routes
+    # every review-band pair to review_queue.csv, instead of vanishing inside
+    # a clean matched identity.
+    left_csv = tmp_path / "scenario-left.csv"
+    left_csv.write_text(
+        "first_name,last_name,dob\nLena,Ortiz,1990-01-01\nLena,Ortis,1990-01-01\n",
+        encoding="utf-8",
+    )
+    right_csv = tmp_path / "scenario-right.csv"
+    right_csv.write_text("first_name,last_name,dob\nLena,Ortiz,1990-01-01\n", encoding="utf-8")
+
+    def fake_score_pairs(
+        records: Iterable[Record],
+        fields: tuple[str, ...],
+        *,
+        prior: float = 0.01,
+        floor: float = 0.001,
+    ) -> list[tuple[str, str, float]]:
+        ids = {(record.source, record.raw["last_name"]): record.unique_id for record in records}
+        first_left = ids[("left", "Ortiz")]
+        second_left = ids[("left", "Ortis")]
+        first_right = ids[("right", "Ortiz")]
+        return [
+            (first_left, second_left, 0.98),
+            (first_left, first_right, 0.99),
+            (second_left, first_right, 0.85),
+        ]
+
+    monkeypatch.setattr("constituent_reconciler.matching.score_pairs", fake_score_pairs)
+    outcome = compare.run_compare(
+        compare.load_side(left_csv, label="left"),
+        compare.load_side(right_csv, label="right"),
+    )
+
+    assert len(outcome.identities) == 1
+    identity = outcome.identities[0]
+    assert identity.status == compare.MATCHED
+    assert identity.ambiguous is True
+    assert [pair.probability for pair in outcome.review_pairs] == [0.85]
+
+    review_path = compare.write_cutover_review(outcome, tmp_path)
+    rows = list(csv.DictReader(review_path.read_text(encoding="utf-8").splitlines()))
+    assert len(rows) == 1
+    assert rows[0]["probability"] == "0.8500"
+    assert {rows[0]["left_side"], rows[0]["right_side"]} == {"left", "right"}
+
+    payload = json.loads(
+        compare.write_migration_summary(outcome, tmp_path).read_text(encoding="utf-8")
+    )
+    assert payload["ambiguous_identities"] == 1
+    assert payload["review_pairs"] == 1
+    assert payload["matched_identities"] == 1
 
 
 def test_value_conflicts_are_flagged_on_matched_identities(result: CompareResult) -> None:
@@ -205,6 +266,83 @@ def test_compare_module_never_names_the_connector_registry() -> None:
     assert "connectors" not in source
 
 
+def test_a_dv_pack_pdf_compare_side_fuses_the_cloud_seam_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Compare reuses the run pipeline's ingest, so a PDF side is subject to
+    # the same seam gating as reconcile run: under the dv pack the cloud seam
+    # is fused off before any page flows, even when the side's recipe asks
+    # for the bedrock backend. The Bedrock seam class is replaced with a
+    # refusal, so this test fails loudly if the compare path ever constructs
+    # it, and any network call is refused outright.
+    pytest.importorskip("pdfplumber", reason="pdfplumber not installed")
+    from constituent_reconciler.extract import seam as seam_module
+    from constituent_reconciler.testing import make_pdf
+
+    (tmp_path / "intake.pdf").write_bytes(
+        make_pdf(["Intake Form", "First Name: Alice", "Last Name: Walker", "DOB: 1970-05-12"])
+    )
+    recipe_path = tmp_path / "recipe-left-dv.toml"
+    recipe_path.write_text(
+        "\n".join(
+            [
+                "[policy]",
+                'pack = "dv"',
+                "",
+                "[input]",
+                'incoming = "intake.pdf"',
+                "",
+                "[mapping]",
+                'first_name = "first_name"',
+                'last_name = "last_name"',
+                'dob = "dob"',
+                "",
+                "[extract]",
+                'backend = "bedrock"',
+                "sandbox = false",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    right_csv = tmp_path / "target.csv"
+    right_csv.write_text("first_name,last_name,dob\nAlice,Walker,1970-05-12\n", encoding="utf-8")
+
+    class RefusingBedrockSeam:
+        def __init__(self) -> None:
+            raise AssertionError("a dv-pack compare side must never construct the Bedrock seam")
+
+    def refuse(*args: object, **kwargs: object) -> object:
+        raise AssertionError("a dv-pack compare side must not open a network connection")
+
+    monkeypatch.setattr(seam_module, "BedrockSeam", RefusingBedrockSeam)
+    monkeypatch.setattr("urllib.request.urlopen", refuse)
+
+    left = compare.load_side(recipe_path, label="left")
+    right = compare.load_side(right_csv, label="right")
+    # The gate the ingest path calls, with this side's actual pack and backend.
+    assert isinstance(
+        seam_module.make_seam(left.recipe.policy_pack, left.recipe.extract.backend),
+        seam_module.NoOpSeam,
+    )
+    outcome = compare.run_compare(left, right)
+
+    assert outcome.left_count == 1
+    assert outcome.left_ingest.pages_extracted == 1
+    assert outcome.left_ingest.pages_dropped == 0
+    text = compare.render_compare_summary(outcome)
+    assert "left pdf pages:" in text
+    assert "1 extracted, 0 dropped (no name found)" in text
+    payload = json.loads(
+        compare.write_migration_summary(outcome, tmp_path).read_text(encoding="utf-8")
+    )
+    assert payload["ingest"]["left"] == {
+        "files_read": 1,
+        "files_skipped": 0,
+        "pages_extracted": 1,
+        "pages_dropped": 0,
+    }
+
+
 def test_cutover_report_lists_every_identity_with_values_and_flags(
     result: CompareResult, tmp_path: Path
 ) -> None:
@@ -272,6 +410,31 @@ def test_a_bare_csv_side_with_canonical_headers_compares(tmp_path: Path) -> None
     assert matched == 1
     assert right_only == 0
     assert outcome.right_count == 1
+
+
+def test_a_bare_csv_with_padded_header_names_reads_real_values(tmp_path: Path) -> None:
+    # Regression: a header of "first_name, last_name, dob" passed the load
+    # check on stripped names, but the mapping then looked rows up by the
+    # canonical name while DictReader keyed them by the padded token, so every
+    # padded column read as empty for every record and the comparison ran to a
+    # confidently wrong report with no error. The mapping must bind each
+    # canonical name to the exact header token so real values are read.
+    target = tmp_path / "target.csv"
+    target.write_text("first_name, last_name, dob\nMaria, Lopez, 1985-03-02\n", encoding="utf-8")
+    left = compare.load_side(FIXTURES / "recipe-left.toml", label="left")
+    right = compare.load_side(target, label="right")
+    assert right.recipe.mapping == {
+        "first_name": "first_name",
+        "last_name": " last_name",
+        "dob": " dob",
+    }
+    outcome = compare.run_compare(left, right)
+    record = next(r for r in outcome.records.values() if r.source == "right")
+    assert record.raw["last_name"] == "Lopez"
+    assert record.raw["dob"] == "1985-03-02"
+    matched, _, right_only = compare._status_counts(outcome)
+    assert matched == 1
+    assert right_only == 0
 
 
 def test_a_bare_csv_without_name_columns_is_refused(tmp_path: Path) -> None:
@@ -379,9 +542,10 @@ def test_row_accounting_rejects_a_dropped_doubled_or_stray_record() -> None:
         compare._check_accounting(records, [both, stray])
 
 
-def test_render_compare_summary_reports_skips_and_failures() -> None:
-    # A hand-built result: the renderer must answer for skipped files and for
-    # values that normalized to nothing, without printing any field value.
+def test_render_compare_summary_reports_skips_pages_and_failures() -> None:
+    # A hand-built result: the renderer must answer for skipped files, for PDF
+    # pages extracted and dropped, and for values that normalized to nothing,
+    # without printing any field value.
     outcome = CompareResult(
         records={},
         pairs=(),
@@ -396,12 +560,29 @@ def test_render_compare_summary_reports_skips_and_failures() -> None:
             files_read=("left.csv",),
             files_skipped=(SkippedFile(path="notes.docx", reason="unsupported extension: .docx"),),
         ),
-        right_ingest=IngestReport(files_read=("right.csv",)),
+        right_ingest=IngestReport(files_read=("right.pdf",), pages_extracted=3, pages_dropped=1),
         normalization_failures={"dob": {"left": 2}},
     )
     text = compare.render_compare_summary(outcome)
     assert "notes.docx (unsupported extension: .docx)" in text
+    assert "right pdf pages:" in text
+    assert "3 extracted, 1 dropped (no name found)" in text
     assert "dob: left: 2" in text
+
+
+def test_migration_summary_carries_count_only_ingest_accounting(
+    result: CompareResult, tmp_path: Path
+) -> None:
+    # IngestReport promises no row, page, or file is silent; the count-only
+    # summary carries that accounting as numbers, with no file path in it.
+    payload = json.loads(
+        compare.write_migration_summary(result, tmp_path).read_text(encoding="utf-8")
+    )
+    assert payload["ingest"] == {
+        "left": {"files_read": 1, "files_skipped": 0, "pages_extracted": 0, "pages_dropped": 0},
+        "right": {"files_read": 1, "files_skipped": 0, "pages_extracted": 0, "pages_dropped": 0},
+    }
+    assert "left.csv" not in json.dumps(payload)
 
 
 def test_cli_compare_reports_a_bad_side_and_exits_2(

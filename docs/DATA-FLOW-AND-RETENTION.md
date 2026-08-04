@@ -50,6 +50,12 @@ writes only into `--out`: the cutover report and review-pair artifacts below
 plus a count-only summary and a digest manifest. The command constructs no
 connector on any path, so a recipe's `[output]` section cannot cause a write
 to either live system; `tests/test_compare.py` enforces that invariant.
+Ingest on a compare side is the run pipeline's ingest, so the cloud-seam
+rules above apply unchanged: a PDF side whose recipe enables the Bedrock
+backend may route low-confidence pages through the policy-gated seam, and the
+`dv` and `hipaa` packs fuse it off before any data flows. The compare tests
+pin the fused-off seam under the `dv` pack alongside the no-connector
+invariant.
 
 ```mermaid
 flowchart TD
