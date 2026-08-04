@@ -7,6 +7,17 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **Multiyear roadmap, 2026 H2 through 2029.** `docs/ROADMAP-MULTIYEAR.md`
+  arranges the Now/Next/Later plan and the closeout's external 1.0 gates into
+  four horizons, each organized by workstream, under the one-maintainer
+  60/30/10 capacity model. External gates stay visibly external and are never
+  booked as engineering; where the future depends on adopters or partners the
+  document states the gate instead of a date. It carries the closeout's
+  product principles and the plan's exclusions forward as permanent non-goals
+  and sets a per-release and per-half review cadence in which adopter
+  evidence outranks synthetic personas. `docs/ROADMAP.md` gains a pointer
+  marking it a historical record, and `docs/NOVEL-USE-CASES-PLAN.md` one
+  marking it the near-term detail under the new umbrella document.
 - **Repair-capability decision record (UC-03 study).**
   `docs/adr/0012-connector-repair-capabilities.md` decides the protocol for
   post-write split repair ahead of implementation: `inspect_repair` and
