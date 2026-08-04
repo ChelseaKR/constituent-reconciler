@@ -1,0 +1,15 @@
+# Repo-scoped gitleaks configuration, extending the bundled default rules.
+# The one allowlist entry below suppresses a false positive: the generic
+# airtable-api-key rule matches the type annotation
+# ``airtable_transport: AirtableTransport | None = None`` in function
+# signatures ("airtable" followed by a long alphanumeric run). It is a type
+# name, not a credential; real Airtable tokens never appear in source, they
+# are read from the environment at runtime (see connectors/airtable.py).
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "AirtableTransport type annotations are not API keys"
+regexTarget = "line"
+regexes = ['''airtable_transport: AirtableTransport''']
