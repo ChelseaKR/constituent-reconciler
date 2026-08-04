@@ -220,7 +220,11 @@ def _extract_pdf_rows(path: Path, recipe: Recipe) -> stage_cache.ExtractedRows:
     Unless the recipe sets ``[extract] sandbox = false``, the parse runs in a
     resource-limited child process (``extract/sandbox.py``): a hostile or
     malformed PDF fails closed to a zero-confidence page that is dropped and
-    accounted for here, instead of crashing the run.
+    accounted for here, instead of crashing the run. A parse the sandbox
+    ended early (``extraction.note`` is set) is marked not cacheable, because
+    a resource-limit kill reflects the machine's load rather than the file
+    bytes; the stage cache must not freeze it as this document's permanent
+    result.
     """
     from constituent_reconciler.extract.base import Extractor
     from constituent_reconciler.extract.pdf import PdfplumberExtractor
@@ -264,7 +268,12 @@ def _extract_pdf_rows(path: Path, recipe: Recipe) -> stage_cache.ExtractedRows:
         pages_extracted += 1
         rows.append((raw, spans))
 
-    return rows, pages_extracted, pages_dropped
+    return stage_cache.ExtractedRows(
+        rows=rows,
+        pages_extracted=pages_extracted,
+        pages_dropped=pages_dropped,
+        cacheable=extraction.note is None,
+    )
 
 
 def _extract_text_rows(path: Path, recipe: Recipe) -> stage_cache.ExtractedRows:
@@ -293,7 +302,12 @@ def _extract_text_rows(path: Path, recipe: Recipe) -> stage_cache.ExtractedRows:
         pages_extracted += 1
         rows.append((raw, spans))
 
-    return rows, pages_extracted, pages_dropped
+    return stage_cache.ExtractedRows(
+        rows=rows,
+        pages_extracted=pages_extracted,
+        pages_dropped=pages_dropped,
+        cacheable=extraction.note is None,
+    )
 
 
 def _mint_document_records(
@@ -343,7 +357,7 @@ def read_pdf_records(
     bypass the cache (``stage_cache.extraction_cacheable``).
     """
 
-    rows, pages_extracted, pages_dropped = stage_cache.extraction_via_cache(
+    extracted = stage_cache.extraction_via_cache(
         active_cache,
         path,
         recipe,
@@ -351,10 +365,10 @@ def read_pdf_records(
         extract_fresh=lambda: _extract_pdf_rows(path, recipe),
     )
     if accounting is not None:
-        accounting.pages_extracted += pages_extracted
-        accounting.pages_dropped += pages_dropped
+        accounting.pages_extracted += extracted.pages_extracted
+        accounting.pages_dropped += extracted.pages_dropped
     seen = _seen if _seen is not None else {}
-    return _mint_document_records(rows, source, id_prefix=id_prefix, seen=seen)
+    return _mint_document_records(extracted.rows, source, id_prefix=id_prefix, seen=seen)
 
 
 def read_text_records(
@@ -375,7 +389,7 @@ def read_text_records(
     content-addressed by the file's digest.
     """
 
-    rows, pages_extracted, pages_dropped = stage_cache.extraction_via_cache(
+    extracted = stage_cache.extraction_via_cache(
         active_cache,
         path,
         recipe,
@@ -383,10 +397,10 @@ def read_text_records(
         extract_fresh=lambda: _extract_text_rows(path, recipe),
     )
     if accounting is not None:
-        accounting.pages_extracted += pages_extracted
-        accounting.pages_dropped += pages_dropped
+        accounting.pages_extracted += extracted.pages_extracted
+        accounting.pages_dropped += extracted.pages_dropped
     seen = _seen if _seen is not None else {}
-    return _mint_document_records(rows, source, id_prefix=id_prefix, seen=seen)
+    return _mint_document_records(extracted.rows, source, id_prefix=id_prefix, seen=seen)
 
 
 def _ingest_source(  # noqa: C901 - routes all supported source types and skips.

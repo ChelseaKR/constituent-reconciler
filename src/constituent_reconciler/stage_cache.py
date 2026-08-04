@@ -11,21 +11,29 @@ and normalize, and nothing downstream of them.
 Keys are content-addressed. Every key digests the input (a file digest for
 extraction, a digest of the record's mapped raw values for normalization)
 together with the declared recipe schema version, the active field mapping,
-the package version (extractor and normalizer ship in lockstep with the
-package, so it stands in for both versions), and the stage's own
-configuration: the extract backend settings for extraction, the address
-backend for normalization. Any component change produces a different key, so
-a stale entry is never matched, only orphaned.
+the package version, the installed version of the library that does the
+stage's work (pdfplumber for PDF extraction, the ``postal`` package under
+the libpostal address backend; the stdlib text reader and the vendored
+address ruleset ship inside the package itself, which the package version
+already pins), and the stage's own configuration. Any component change,
+including a dependency upgrade the package pin does not capture, produces a
+different key, so a stale entry is never matched, only orphaned. When a
+backing library's installed version cannot be determined, the stage is not
+cached at all; an unknown version is never guessed into a key.
 
 The cache fails closed in both directions. An entry whose stored envelope
 version, key, or payload shape does not match expectations is ignored and
 recomputed, never coerced. Stage and key names are validated before they
 become path segments, so no lookup can escape the cache root. Extraction is
 cached only for readers whose output is a pure function of the file bytes and
-the package version: the stdlib text reader always qualifies, the plain
-pdfplumber backend qualifies, and the OCR and model-seam backends never do
-(Tesseract's version is outside the package's pin, and a seam-refined page is
-not a function of the file alone).
+the recorded versions: the stdlib text reader always qualifies, the plain
+pdfplumber backend qualifies while pdfplumber's installed version is known,
+and the OCR and model-seam backends never do (Tesseract's version is outside
+the package's pin, and a seam-refined page is not a function of the file
+alone). An extraction the sandbox killed against a resource limit is
+returned fail-closed but never stored, because that result depends on the
+machine's load rather than the file bytes; the document is re-parsed on the
+next run.
 
 ``normalize_record`` stays pure; ``normalize_via_cache`` wraps it from the
 outside and replays its failure accounting on a hit, so cached and uncached
@@ -46,6 +54,7 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from importlib import metadata
 from pathlib import Path
 from typing import Protocol, TypeGuard
 
@@ -53,7 +62,7 @@ from constituent_reconciler import __version__
 from constituent_reconciler.config import Recipe
 from constituent_reconciler.manifest import file_digest
 from constituent_reconciler.models import CacheStats, Record, SourceSpan, TextSpan
-from constituent_reconciler.normalize import normalize_record
+from constituent_reconciler.normalize import normalize_record, normalized_keys
 from constituent_reconciler.schema import CONFIG_SCHEMA_VERSION
 
 # The cache directory's name under the output root, and the name destruction
@@ -78,10 +87,26 @@ _STAGES = frozenset({EXTRACT_STAGE, NORMALIZE_STAGE})
 # counter spans every file of a source, which a per-file cache entry cannot see.
 Row = tuple[dict[str, str], dict[str, SourceSpan | TextSpan]]
 
-# Extraction result for one file: the kept rows plus the page accounting
-# (pages extracted, pages dropped), so a cache hit replays the ingest report
-# exactly as a fresh parse would have filled it.
-ExtractedRows = tuple[list[Row], int, int]
+
+@dataclass(frozen=True)
+class ExtractedRows:
+    """One document's extraction result, plus whether it may be stored.
+
+    ``rows`` are the kept rows and ``pages_extracted``/``pages_dropped`` the
+    page accounting, so a cache hit replays the ingest report exactly as a
+    fresh parse would have filled it. ``cacheable`` is False when the parse
+    did not run to completion, which today means the sandbox killed it
+    against a wall-clock, CPU, or address-space limit. Such a result is
+    correct to return fail-closed, but it reflects the machine's load rather
+    than the file bytes, so storing it would freeze a transient failure
+    under the file's content digest. A clean parse that keeps zero rows
+    stays cacheable: it would compute the same emptiness again.
+    """
+
+    rows: list[Row]
+    pages_extracted: int
+    pages_dropped: int
+    cacheable: bool = True
 
 
 class StageCache(Protocol):
@@ -103,7 +128,7 @@ class FilesystemStageCache:
     payload in an envelope that repeats the entry version and the key. A read
     that finds a missing file, unparseable JSON, a foreign envelope version, a
     key that does not match the filename's, or a non-object payload returns
-    ``None``: the caller recomputes, and the stale entry is simply never used.
+    ``None``: the caller recomputes, and the stale entry is never used.
     """
 
     def __init__(self, root: Path) -> None:
@@ -198,14 +223,76 @@ def _raw_digest(raw: dict[str, str]) -> str:
     return hashlib.blake2b(canonical, digest_size=16).hexdigest()
 
 
+def _distribution_version(name: str) -> str | None:
+    """The installed version of distribution ``name``, or ``None`` if unknown."""
+
+    try:
+        return metadata.version(name)
+    except metadata.PackageNotFoundError:
+        return None
+
+
+def _extractor_version(reader: str) -> str | None:
+    """The version component the extraction key records for ``reader``.
+
+    Text and .eml parsing is stdlib-only, so the package version already in
+    every key pins it. PDF parsing is pdfplumber's, which pyproject declares
+    as a floating dependency (``pdfplumber>=0.11``); an upgrade without a
+    package release changes the parser, so the installed pdfplumber version
+    must enter the key itself. ``None`` means the version cannot be
+    determined and extraction for this reader is not cacheable.
+    """
+
+    if reader == "text":
+        return "stdlib"
+    return _distribution_version("pdfplumber")
+
+
+def _address_backend_version(backend: str) -> str | None:
+    """The version component the normalize key records for ``backend``.
+
+    The deterministic backend is the ruleset vendored in address.py, which
+    the package version already in every key pins. The libpostal backend
+    reaches an external C library through the ``postal`` package, whose
+    install floats outside the package pin, so the installed ``postal``
+    version must enter the key itself. ``None`` means the version cannot be
+    determined and normalization under this backend is not cacheable.
+    """
+
+    if backend == "deterministic":
+        return "vendored"
+    if backend == "libpostal":
+        return _distribution_version("postal")
+    return None
+
+
+def normalization_cacheable(recipe: Recipe) -> bool:
+    """Whether normalization output under this recipe is safe to cache.
+
+    False when the active address backend's installed version cannot be
+    determined: without the version in the key, a backend upgrade would
+    silently serve stale entries, so the cache is bypassed fail-closed.
+    """
+
+    return _address_backend_version(recipe.normalize.address_backend) is not None
+
+
 def normalize_cache_key(raw: dict[str, str], recipe: Recipe) -> str:
     """Key for one record's normalization result.
 
     Digests the record's mapped raw values with everything normalization
-    depends on, so editing one source row re-keys that row alone and every
-    other row keeps its entry.
+    depends on, the address backend's installed version included, so editing
+    one source row re-keys that row alone and every other row keeps its
+    entry. Raises ``ValueError`` when the backend's version is unknown;
+    callers must check ``normalization_cacheable`` first.
     """
 
+    backend_version = _address_backend_version(recipe.normalize.address_backend)
+    if backend_version is None:
+        raise ValueError(
+            f"cannot key normalization under address backend "
+            f"{recipe.normalize.address_backend!r}: its installed version is unknown"
+        )
     return cache_key(
         {
             "stage": NORMALIZE_STAGE,
@@ -214,14 +301,25 @@ def normalize_cache_key(raw: dict[str, str], recipe: Recipe) -> str:
             "mapping": recipe.mapping,
             "fields": list(recipe.fields),
             "address_backend": recipe.normalize.address_backend,
+            "address_backend_version": backend_version,
             "input_digest": _raw_digest(raw),
         }
     )
 
 
 def extraction_cache_key(input_digest: str, reader: str, recipe: Recipe) -> str:
-    """Key for one document's extraction result, given its file digest."""
+    """Key for one document's extraction result, given its file digest.
 
+    The key carries the installed version of the parser that does the work
+    (see ``_extractor_version``). Raises ``ValueError`` when that version is
+    unknown; callers must check ``extraction_cacheable`` first.
+    """
+
+    extractor_version = _extractor_version(reader)
+    if extractor_version is None:
+        raise ValueError(
+            f"cannot key extraction for reader {reader!r}: the installed parser version is unknown"
+        )
     return cache_key(
         {
             "stage": EXTRACT_STAGE,
@@ -229,6 +327,7 @@ def extraction_cache_key(input_digest: str, reader: str, recipe: Recipe) -> str:
             "package_version": __version__,
             "mapping": recipe.mapping,
             "reader": reader,
+            "extractor_version": extractor_version,
             "extract": {
                 "backend": recipe.extract.backend,
                 "confidence_threshold": recipe.extract.confidence_threshold,
@@ -246,7 +345,8 @@ def extraction_cacheable(recipe: Recipe, *, reader: str) -> bool:
 
     Text and .eml parsing is stdlib-only and always a pure function of the
     file bytes. PDF parsing qualifies only under the plain ``pdfplumber``
-    backend: the OCR backend depends on the installed Tesseract, whose
+    backend, and only while pdfplumber's installed version can be determined
+    for the key: the OCR backend depends on the installed Tesseract, whose
     version the package does not pin, and the ``bedrock`` and ``local``
     backends may route pages through a model seam whose output is not a
     function of the file. Those all bypass the cache entirely, fail-closed.
@@ -254,7 +354,9 @@ def extraction_cacheable(recipe: Recipe, *, reader: str) -> bool:
 
     if reader == "text":
         return True
-    return recipe.extract.backend == "pdfplumber"
+    if recipe.extract.backend != "pdfplumber":
+        return False
+    return _extractor_version(reader) is not None
 
 
 def _span_to_json(span: SourceSpan | TextSpan) -> dict[str, object]:
@@ -336,7 +438,7 @@ def _rows_from_payload(payload: dict[str, object]) -> ExtractedRows | None:
                 return None
             spans[name] = span
         rows.append((dict(raw), spans))
-    return rows, pages_extracted, pages_dropped
+    return ExtractedRows(rows=rows, pages_extracted=pages_extracted, pages_dropped=pages_dropped)
 
 
 def extraction_via_cache(
@@ -351,9 +453,13 @@ def extraction_via_cache(
 
     ``extract_fresh`` performs the real parse; it is called on a miss and
     whenever this document's reader is not cacheable (see
-    ``extraction_cacheable``). The cached payload holds mapped raw values,
-    spans, and page accounting only; record ids are minted by the caller so
-    the source-wide duplicate-row counter stays correct.
+    ``extraction_cacheable``). A fresh result marked not cacheable (a parse
+    the sandbox killed against a resource limit) is returned but never
+    stored, so the document is re-attempted on the next run instead of
+    replaying an environment-dependent failure as a hit. The cached payload
+    holds mapped raw values, spans, and page accounting only; record ids are
+    minted by the caller so the source-wide duplicate-row counter stays
+    correct.
     """
 
     if active is None or not extraction_cacheable(recipe, reader=reader):
@@ -366,34 +472,43 @@ def extraction_via_cache(
             active.stats.hit(EXTRACT_STAGE)
             return cached
     active.stats.miss(EXTRACT_STAGE)
-    rows, pages_extracted, pages_dropped = extract_fresh()
+    fresh = extract_fresh()
+    if not fresh.cacheable:
+        return fresh
     active.cache.put(
         EXTRACT_STAGE,
         key,
         {
-            "pages_extracted": pages_extracted,
-            "pages_dropped": pages_dropped,
+            "pages_extracted": fresh.pages_extracted,
+            "pages_dropped": fresh.pages_dropped,
             "rows": [
                 {
                     "raw": raw,
                     "spans": {name: _span_to_json(span) for name, span in spans.items()},
                 }
-                for raw, spans in rows
+                for raw, spans in fresh.rows
             ],
         },
     )
-    return rows, pages_extracted, pages_dropped
+    return fresh
 
 
 def _normalized_from_payload(
     payload: dict[str, object], fields: tuple[str, ...]
 ) -> dict[str, str] | None:
-    """Validate a cached normalization payload; ``None`` on any mismatch."""
+    """Validate a cached normalization payload; ``None`` on any mismatch.
+
+    The stored key set must equal exactly what ``normalize_record`` emits for
+    these fields, the derived matcher keys included (``normalized_keys`` in
+    normalize.py). A payload missing a derived key would feed matching with
+    absent columns and silently alter scores, and one carrying extras is not
+    a shape this cache ever wrote, so both are ignored, never coerced.
+    """
 
     normalized = payload.get("normalized")
     if not _is_string_map(normalized):
         return None
-    if not set(fields) <= set(normalized):
+    if set(normalized) != normalized_keys(fields):
         return None
     return dict(normalized)
 
@@ -426,10 +541,13 @@ def normalize_via_cache(
 
     ``normalize_record`` itself stays a pure function; this wrapper sits
     outside it. On a hit the failure accounting is replayed from the cached
-    values, so the ingest report is identical either way.
+    values, so the ingest report is identical either way. A recipe whose
+    address backend version cannot be determined bypasses the cache entirely
+    (see ``normalization_cacheable``), the same fail-closed direction as the
+    uncacheable extraction backends.
     """
 
-    if active is None:
+    if active is None or not normalization_cacheable(recipe):
         return normalize_record(
             record,
             recipe.fields,

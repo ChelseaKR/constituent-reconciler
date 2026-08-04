@@ -145,6 +145,20 @@ same. It contains record ids, and a hash over a low-entropy payload can in
 principle be confirmed by guessing, so the log is evidence for the
 organization's own audits, not a shareable artifact.
 
+One consequence of per-entry cache destruction deserves naming here. A cache
+entry's destruction certificate records the entry's content-addressed name
+and the SHA-256 of the single-record entry file, and both are deterministic
+functions of one person's raw field values plus recipe and version
+components an insider could know. A holder of the retained provenance log
+who also has the recipe can therefore confirm a guessed individual's
+presence in a past run, including a person whose record was withheld from
+export. This is finer-grained than the whole-file certificates that preceded
+the cache, but it is the same exposure class as the content-derived record
+ids the log already carries, and it is accepted as a documented tradeoff on
+the same terms: the log stays local, per the paragraph above. A salted
+certificate scheme is the recorded alternative if a future pack needs to
+close this channel.
+
 **Trigger.** What "no longer needed" means differs across VAWA, FVPSA, and
 VOCA funding and across states. The pack defines the destroy/retain sort and
 the order of operations; the window is counsel-gated, consistent with the

@@ -6,7 +6,10 @@ one source row re-keys that row's entry alone; cached and uncached runs
 produce byte-identical decision inputs and golden records; a mismatched or
 tampered entry is ignored, never coerced; the destruction command removes
 planted field values from the cache; and the run summary and manifest record
-cache policy and counts without paths or field values.
+cache policy and counts without paths or field values. Keys carry the
+installed version of the library doing each stage's work, a stage whose
+backing version is unknown is not cached, and a sandbox-killed parse is
+never stored.
 """
 
 from __future__ import annotations
@@ -19,7 +22,16 @@ import pytest
 
 from constituent_reconciler import pipeline, stage_cache
 from constituent_reconciler.cli import main
-from constituent_reconciler.config import ExtractConfig, NormalizeConfig, RecipeError, load_recipe
+from constituent_reconciler.config import (
+    ExtractConfig,
+    NormalizeConfig,
+    Recipe,
+    RecipeError,
+    load_recipe,
+)
+from constituent_reconciler.extract import sandbox
+from constituent_reconciler.extract.base import ExtractedField, ExtractionResult, PageResult
+from constituent_reconciler.models import Record
 from constituent_reconciler.provenance import verify_log
 from constituent_reconciler.testing import make_pdf
 
@@ -116,10 +128,16 @@ def test_stage_and_key_are_validated_before_touching_paths(tmp_path: Path) -> No
     assert not (tmp_path / "cache").exists()
 
 
-def test_every_key_component_changes_the_key(tmp_path: Path) -> None:
+def test_every_key_component_changes_the_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _write_corpus(tmp_path)
     recipe = load_recipe(_write_recipe(tmp_path))
     raw = {"first_name": "Maria", "last_name": "Garcia"}
+    # Pin the installed-version lookup so the libpostal variant keys without
+    # the postal package present; the version components themselves have
+    # dedicated tests in the key-purity section below.
+    monkeypatch.setattr(stage_cache, "_distribution_version", lambda name: "9.9.9")
     keys = [
         stage_cache.normalize_cache_key(raw, recipe),
         stage_cache.normalize_cache_key({**raw, "first_name": "Mariah"}, recipe),
@@ -426,6 +444,327 @@ enabled = true
     assert "extract" not in result.cache.misses
     assert result.cache.misses.get("normalize", 0) >= 1
     assert not (cache.root / "extract").exists()
+
+
+# ---------------------------------------------------------------------------
+# Key purity: installed backend versions enter the keys, or nothing is cached.
+# ---------------------------------------------------------------------------
+
+
+def _pdf_recipe(tmp_path: Path) -> Recipe:
+    _write_corpus(tmp_path)
+    base = load_recipe(_write_recipe(tmp_path))
+    return replace(base, extract=ExtractConfig(backend="pdfplumber"))
+
+
+def _one_row() -> stage_cache.ExtractedRows:
+    return stage_cache.ExtractedRows(
+        rows=[({"first_name": "Alice", "last_name": "Walker"}, {})],
+        pages_extracted=1,
+        pages_dropped=0,
+    )
+
+
+def test_extraction_key_carries_the_installed_pdfplumber_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe = _pdf_recipe(tmp_path)
+    monkeypatch.setattr(stage_cache, "_distribution_version", lambda name: "0.11.0")
+    old = stage_cache.extraction_cache_key("0" * 64, "pdf", recipe)
+    monkeypatch.setattr(stage_cache, "_distribution_version", lambda name: "0.11.1")
+    new = stage_cache.extraction_cache_key("0" * 64, "pdf", recipe)
+    assert old != new
+
+
+def test_pdfplumber_upgrade_misses_the_extraction_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe = _pdf_recipe(tmp_path)
+    doc = tmp_path / "form.pdf"
+    doc.write_bytes(b"%PDF-1.4 stand-in bytes")
+    active = stage_cache.ActiveCache(cache=stage_cache.FilesystemStageCache(tmp_path / "cache"))
+    parses = []
+
+    def extract_fresh() -> stage_cache.ExtractedRows:
+        parses.append(1)
+        return _one_row()
+
+    monkeypatch.setattr(stage_cache, "_distribution_version", lambda name: "0.11.0")
+    for _ in range(2):
+        stage_cache.extraction_via_cache(
+            active,
+            doc,
+            recipe,
+            reader="pdf",
+            extract_fresh=extract_fresh,
+        )
+    assert len(parses) == 1  # same installed version: the second run hit
+
+    # The operator upgrades pdfplumber without a package release. The old
+    # entry's key no longer matches, so the document is parsed fresh.
+    monkeypatch.setattr(stage_cache, "_distribution_version", lambda name: "0.12.0")
+    stage_cache.extraction_via_cache(
+        active,
+        doc,
+        recipe,
+        reader="pdf",
+        extract_fresh=extract_fresh,
+    )
+    assert len(parses) == 2
+    stats = active.stats.freeze(enabled=True)
+    assert stats.hits == {"extract": 1}
+    assert stats.misses == {"extract": 2}
+
+
+def test_unknown_parser_version_makes_extraction_uncacheable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe = _pdf_recipe(tmp_path)
+    monkeypatch.setattr(stage_cache, "_distribution_version", lambda name: None)
+    assert stage_cache.extraction_cacheable(recipe, reader="pdf") is False
+    assert stage_cache.extraction_cacheable(recipe, reader="text") is True
+    with pytest.raises(ValueError, match="version"):
+        stage_cache.extraction_cache_key("0" * 64, "pdf", recipe)
+
+    # Through the wrapper: the parse runs fresh and nothing is stored.
+    doc = tmp_path / "form.pdf"
+    doc.write_bytes(b"%PDF-1.4 stand-in bytes")
+    root = tmp_path / "cache"
+    active = stage_cache.ActiveCache(cache=stage_cache.FilesystemStageCache(root))
+    served = stage_cache.extraction_via_cache(
+        active,
+        doc,
+        recipe,
+        reader="pdf",
+        extract_fresh=_one_row,
+    )
+    assert served.rows == _one_row().rows
+    assert not root.exists()
+    stats = active.stats.freeze(enabled=True)
+    assert stats.hits == {} and stats.misses == {}
+
+
+def test_normalize_key_carries_the_installed_libpostal_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_corpus(tmp_path)
+    base = load_recipe(_write_recipe(tmp_path))
+    recipe = replace(base, normalize=NormalizeConfig(address_backend="libpostal"))
+    raw = {"first_name": "Maria", "last_name": "Garcia"}
+    monkeypatch.setattr(stage_cache, "_distribution_version", lambda name: "1.1.9")
+    old = stage_cache.normalize_cache_key(raw, recipe)
+    monkeypatch.setattr(stage_cache, "_distribution_version", lambda name: "1.1.10")
+    new = stage_cache.normalize_cache_key(raw, recipe)
+    assert old != new
+
+
+def test_libpostal_upgrade_misses_the_normalize_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_corpus(tmp_path)
+    base = load_recipe(_write_recipe(tmp_path))
+    recipe = replace(base, normalize=NormalizeConfig(address_backend="libpostal"))
+    record = Record(
+        unique_id="incoming:A1",
+        source="incoming",
+        raw={"first_name": "Maria", "last_name": "Garcia"},
+    )
+    active = stage_cache.ActiveCache(cache=stage_cache.FilesystemStageCache(tmp_path / "cache"))
+
+    monkeypatch.setattr(stage_cache, "_distribution_version", lambda name: "1.1.9")
+    first = stage_cache.normalize_via_cache(active, record, recipe)
+    second = stage_cache.normalize_via_cache(active, record, recipe)
+    assert second.normalized == first.normalized
+    assert active.stats.freeze(enabled=True).hits == {"normalize": 1}
+
+    monkeypatch.setattr(stage_cache, "_distribution_version", lambda name: "1.1.10")
+    third = stage_cache.normalize_via_cache(active, record, recipe)
+    assert third.normalized == first.normalized
+    stats = active.stats.freeze(enabled=True)
+    assert stats.hits == {"normalize": 1}
+    assert stats.misses == {"normalize": 2}
+
+
+def test_unknown_address_backend_version_bypasses_the_normalize_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_corpus(tmp_path)
+    base = load_recipe(_write_recipe(tmp_path))
+    libpostal = replace(base, normalize=NormalizeConfig(address_backend="libpostal"))
+    monkeypatch.setattr(stage_cache, "_distribution_version", lambda name: None)
+    assert stage_cache.normalization_cacheable(libpostal) is False
+    # The vendored deterministic backend ships with the package and stays
+    # cacheable; only the version-indeterminable backend fails closed.
+    assert stage_cache.normalization_cacheable(base) is True
+    with pytest.raises(ValueError, match="version"):
+        stage_cache.normalize_cache_key({"first_name": "Maria"}, libpostal)
+
+    root = tmp_path / "cache"
+    active = stage_cache.ActiveCache(cache=stage_cache.FilesystemStageCache(root))
+    record = Record(
+        unique_id="incoming:A1",
+        source="incoming",
+        raw={"first_name": "Maria", "last_name": "Garcia"},
+    )
+    result = stage_cache.normalize_via_cache(active, record, libpostal)
+    assert result.normalized["first_name"]
+    assert not root.exists()
+    stats = active.stats.freeze(enabled=True)
+    assert stats.hits == {} and stats.misses == {}
+
+
+# ---------------------------------------------------------------------------
+# Transient sandbox failures are returned fail-closed but never stored.
+# ---------------------------------------------------------------------------
+
+
+def _killed(self: sandbox.SandboxedExtractor, path: Path) -> ExtractionResult:
+    return ExtractionResult(
+        source_file=path.name,
+        pages=[PageResult(page_num=1, confidence=0.0)],
+        note="extraction exceeded the 60.0s wall-clock limit; child killed",
+    )
+
+
+def _healthy(self: sandbox.SandboxedExtractor, path: Path) -> ExtractionResult:
+    return ExtractionResult(
+        source_file=path.name,
+        pages=[
+            PageResult(
+                page_num=1,
+                fields=[
+                    ExtractedField(field_name="first_name", value="Alice", confidence=1.0),
+                    ExtractedField(field_name="last_name", value="Walker", confidence=1.0),
+                ],
+                confidence=1.0,
+            )
+        ],
+    )
+
+
+def _empty_but_clean(self: sandbox.SandboxedExtractor, path: Path) -> ExtractionResult:
+    return ExtractionResult(
+        source_file=path.name,
+        pages=[PageResult(page_num=1, fields=[], confidence=1.0)],
+    )
+
+
+def test_sandbox_kill_marks_the_extraction_not_cacheable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe = _pdf_recipe(tmp_path)
+    doc = tmp_path / "form.pdf"
+    doc.write_bytes(b"%PDF-1.4 stand-in bytes")
+    monkeypatch.setattr(sandbox.SandboxedExtractor, "extract", _killed)
+    outcome = pipeline._extract_pdf_rows(doc, recipe)
+    assert outcome.cacheable is False
+    assert outcome.rows == []
+    assert outcome.pages_dropped == 1
+
+
+def test_sandbox_failure_is_not_stored_and_the_document_is_reparsed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe = _pdf_recipe(tmp_path)
+    doc = tmp_path / "form.pdf"
+    doc.write_bytes(b"%PDF-1.4 stand-in bytes")
+    root = tmp_path / "cache"
+    active = stage_cache.ActiveCache(cache=stage_cache.FilesystemStageCache(root))
+
+    # Under load the sandbox kills the parse; the run fails closed to zero
+    # rows, and that environment-dependent result must not enter the cache.
+    monkeypatch.setattr(sandbox.SandboxedExtractor, "extract", _killed)
+    records = pipeline.read_pdf_records(
+        doc,
+        "incoming",
+        recipe=recipe,
+        id_prefix="N",
+        active_cache=active,
+    )
+    assert records == []
+    assert not (root / "extract").exists()
+
+    # The machine recovers. The next run parses the document again instead
+    # of replaying the frozen failure, and the clean result is cached.
+    monkeypatch.setattr(sandbox.SandboxedExtractor, "extract", _healthy)
+    records = pipeline.read_pdf_records(
+        doc,
+        "incoming",
+        recipe=recipe,
+        id_prefix="N",
+        active_cache=active,
+    )
+    assert len(records) == 1
+    assert records[0].raw["first_name"] == "Alice"
+    stats = active.stats.freeze(enabled=True)
+    assert stats.misses == {"extract": 2}
+    assert stats.hits == {}
+    assert len(list((root / "extract").glob("*.json"))) == 1
+
+
+def test_a_clean_empty_parse_is_still_cached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A parse that ran to completion and found nothing useful is a pure
+    # function of the file bytes, unlike a sandbox kill: it is cached.
+    recipe = _pdf_recipe(tmp_path)
+    doc = tmp_path / "blank.pdf"
+    doc.write_bytes(b"%PDF-1.4 stand-in bytes")
+    root = tmp_path / "cache"
+    active = stage_cache.ActiveCache(cache=stage_cache.FilesystemStageCache(root))
+    monkeypatch.setattr(sandbox.SandboxedExtractor, "extract", _empty_but_clean)
+    for _ in range(2):
+        records = pipeline.read_pdf_records(
+            doc,
+            "incoming",
+            recipe=recipe,
+            id_prefix="N",
+            active_cache=active,
+        )
+        assert records == []
+    stats = active.stats.freeze(enabled=True)
+    assert stats.misses == {"extract": 1}
+    assert stats.hits == {"extract": 1}
+
+
+# ---------------------------------------------------------------------------
+# Payload validation: the exact emitted key set, derived matcher keys included.
+# ---------------------------------------------------------------------------
+
+
+def test_entry_without_the_exact_derived_key_set_is_ignored(tmp_path: Path) -> None:
+    _write_corpus(tmp_path)
+    recipe = load_recipe(_write_recipe(tmp_path))
+    root = tmp_path / "cache"
+    active = stage_cache.ActiveCache(cache=stage_cache.FilesystemStageCache(root))
+    record = Record(
+        unique_id="incoming:A1",
+        source="incoming",
+        raw={"first_name": "Maria", "last_name": "Garcia"},
+    )
+    fresh = stage_cache.normalize_via_cache(active, record, recipe)
+    assert "last_name_soundex" in fresh.normalized
+    entry = next((root / "normalize").glob("*.json"))
+    stored = json.loads(entry.read_text(encoding="utf-8"))
+
+    # A valid-JSON entry missing a derived matcher key must not feed matching
+    # with absent columns: it is recomputed, never served.
+    tampered = json.loads(json.dumps(stored))
+    del tampered["payload"]["normalized"]["last_name_soundex"]
+    entry.write_text(json.dumps(tampered), encoding="utf-8")
+    served = stage_cache.normalize_via_cache(active, record, recipe)
+    assert served.normalized == fresh.normalized
+
+    # A superset payload is not a shape this cache ever wrote; same refusal.
+    tampered = json.loads(json.dumps(stored))
+    tampered["payload"]["normalized"]["stray_key"] = "x"
+    entry.write_text(json.dumps(tampered), encoding="utf-8")
+    served = stage_cache.normalize_via_cache(active, record, recipe)
+    assert served.normalized == fresh.normalized
+
+    stats = active.stats.freeze(enabled=True)
+    assert stats.hits == {}
+    assert stats.misses == {"normalize": 3}
 
 
 # ---------------------------------------------------------------------------

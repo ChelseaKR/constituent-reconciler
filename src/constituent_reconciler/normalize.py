@@ -197,6 +197,23 @@ _FIELD_NORMALIZERS = {
 }
 
 
+def normalized_keys(fields: tuple[str, ...]) -> frozenset[str]:
+    """The exact key set ``normalize_record`` emits for ``fields``.
+
+    Canonical fields plus the derived matcher columns: the nickname-group
+    key for ``first_name``, and the phonetic key and surname tokens for
+    ``last_name``. stage_cache.py validates cached payloads against this
+    set, so keep it in step with what ``normalize_record`` writes.
+    """
+
+    keys = set(fields)
+    if "first_name" in fields:
+        keys.add("first_name_nickname_key")
+    if "last_name" in fields:
+        keys.update(("last_name_soundex", "last_name_surname1", "last_name_surname2"))
+    return frozenset(keys)
+
+
 def normalize_record(
     record: Record,
     fields: tuple[str, ...],

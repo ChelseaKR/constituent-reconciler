@@ -577,14 +577,20 @@ def _cmd_destroy(args: argparse.Namespace) -> int:
         return 2
     cache_dir = Path(args.cache_dir) if args.cache_dir else None
     log = ProvenanceLog(out_dir / "provenance.jsonl")
-    summary = destroy(
-        out_dir,
-        older_than,
-        policy=args.older_than,
-        log=log,
-        dry_run=args.dry_run,
-        cache_dir=cache_dir,
-    )
+    try:
+        summary = destroy(
+            out_dir,
+            older_than,
+            policy=args.older_than,
+            log=log,
+            dry_run=args.dry_run,
+            cache_dir=cache_dir,
+        )
+    except ValueError as error:
+        # A refusal (a --cache-dir without the stage-cache shape, or the
+        # provenance log on the candidate list) happens before any deletion.
+        print(f"destroy error: {error}", file=sys.stderr)
+        return 2
     if args.dry_run:
         for name in summary.candidates:
             print(f"would destroy: {name}")

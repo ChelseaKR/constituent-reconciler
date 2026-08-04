@@ -31,7 +31,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from constituent_reconciler.provenance import ProvenanceLog
-from constituent_reconciler.stage_cache import CACHE_DIR_NAME
+from constituent_reconciler.stage_cache import CACHE_DIR_NAME, EXTRACT_STAGE, NORMALIZE_STAGE
 
 # The known PII-bearing artifacts the pipeline writes into the out directory.
 # An explicit list, not a glob: destruction must never reach past what the
@@ -40,7 +40,8 @@ from constituent_reconciler.stage_cache import CACHE_DIR_NAME
 # run_manifest.json carries file digests and configuration only, and the
 # provenance log is the evidence of destruction itself). The stage cache is
 # the one directory-shaped PII artifact; its files are inventoried by
-# ``_cache_entries`` below, bounded to the cache root the pipeline wrote.
+# ``_cache_entries`` below, bounded to the cache root the pipeline wrote and
+# to the exact entry shape the cache writes.
 PII_ARTIFACTS: tuple[str, ...] = (
     "resolved.csv",
     "review_queue.csv",
@@ -52,6 +53,13 @@ PII_ARTIFACTS: tuple[str, ...] = (
 PROVENANCE_FILENAME = "provenance.jsonl"
 
 _WINDOW_PATTERN = re.compile(r"^(\d+)([dh])$")
+
+# The exact on-disk shape of a stage-cache entry: a 32-hex content key with a
+# .json suffix, directly inside one of the two stage directories. The walk in
+# ``_cache_entries`` and the refusal in ``_require_cache_shape`` both hold to
+# this shape, so destruction can never name a file the cache did not write.
+_CACHE_STAGES = frozenset({EXTRACT_STAGE, NORMALIZE_STAGE})
+_CACHE_ENTRY_PATTERN = re.compile(r"^[0-9a-f]{32}\.json$")
 
 
 def parse_retention(text: str) -> timedelta:
@@ -107,19 +115,61 @@ def _cache_roots(out_dir: Path, cache_dir: Path | None) -> list[Path]:
     return roots
 
 
+def _is_cache_entry(root: Path, path: Path) -> bool:
+    """Whether ``path`` sits exactly at ``root/<stage>/<32-hex>.json``."""
+
+    return (
+        path.parent.parent == root
+        and path.parent.name in _CACHE_STAGES
+        and _CACHE_ENTRY_PATTERN.fullmatch(path.name) is not None
+    )
+
+
+def _require_cache_shape(root: Path) -> None:
+    """Refuse an operator-supplied cache directory that is not a stage cache.
+
+    A stage cache contains at most two stage directories, ``extract`` and
+    ``normalize``, and inside them nothing but ``<32-hex>.json`` entry
+    files. Anything else under ``root`` means the operator pointed
+    ``--cache-dir`` somewhere it must not reach (the out directory, for
+    example), so the whole pass is refused before anything is deleted. A
+    directory that does not exist is fine: there is nothing to destroy in
+    it.
+    """
+
+    if not root.is_dir():
+        return
+    for path in sorted(root.rglob("*")):
+        if path.is_dir():
+            if path.parent == root and path.name in _CACHE_STAGES:
+                continue
+        elif _is_cache_entry(root, path):
+            continue
+        raise ValueError(
+            f"refusing --cache-dir {root}: {path.relative_to(root)} is not a "
+            f"stage-cache entry (a stage cache holds only {EXTRACT_STAGE}/ and "
+            f"{NORMALIZE_STAGE}/ directories of 32-hex .json files); check the "
+            "path, nothing was deleted"
+        )
+
+
 def _cache_entries(root: Path, cutoff: float) -> list[Path]:
     """Every cache entry file under ``root`` at or older than the cutoff.
 
     The stage cache holds extracted and normalized field values, so its
     files are PII artifacts the same as ``resolved.csv``; unlike the flat
-    artifact list they live in a directory tree the pipeline owns outright,
-    which bounds this walk.
+    artifact list they live in a directory tree the pipeline owns outright.
+    Only files with the exact entry shape (``_is_cache_entry``) are listed,
+    so the walk can never put a foreign file on the destruction list even
+    when one has been placed inside a cache root.
     """
 
     if not root.is_dir():
         return []
     return sorted(
-        path for path in root.rglob("*") if path.is_file() and path.stat().st_mtime <= cutoff
+        path
+        for path in root.rglob("*")
+        if path.is_file() and _is_cache_entry(root, path) and path.stat().st_mtime <= cutoff
     )
 
 
@@ -157,18 +207,30 @@ def inventory(out_dir: Path, older_than: timedelta, *, cache_dir: Path | None = 
     Only filenames on the explicit ``PII_ARTIFACTS`` list are candidates,
     plus every stage-cache entry file under the covered cache roots (see
     ``_cache_roots``); a file qualifies when it exists and its mtime is at or
-    before the cutoff. The provenance log is structurally excluded because it
-    is not on the list and never lives under a cache root.
+    before the cutoff. An explicitly passed ``cache_dir`` must have the
+    stage-cache shape or the whole call is refused (``ValueError``), since a
+    mistyped boundary must not put foreign files on a destruction list. Each
+    path is listed at most once, and the provenance log is structurally
+    excluded because it is not on the list and never matches the cache entry
+    shape.
     """
 
+    if cache_dir is not None:
+        _require_cache_shape(cache_dir)
     cutoff = time.time() - older_than.total_seconds()
     candidates: list[Path] = []
+    seen: set[Path] = set()
     for name in PII_ARTIFACTS:
         path = out_dir / name
         if path.is_file() and path.stat().st_mtime <= cutoff:
             candidates.append(path)
+            seen.add(path.resolve())
     for root in _cache_roots(out_dir, cache_dir):
-        candidates += _cache_entries(root, cutoff)
+        for path in _cache_entries(root, cutoff):
+            resolved = path.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                candidates.append(path)
     return candidates
 
 
@@ -189,24 +251,27 @@ def destroy(
     and the policy text; the hash is also stored readably as the entry's
     ``external_id``. A dry run returns the candidate list and neither deletes
     nor logs. The provenance log itself is refused, fail-closed, even if a
-    future edit to ``PII_ARTIFACTS`` were to name it.
+    future edit to ``PII_ARTIFACTS`` were to name it; that refusal, like the
+    cache-shape refusal in ``inventory``, is a pre-flight check, so it can
+    never interrupt a pass after partial destruction.
 
     ``cache_dir`` extends the pass to an explicitly configured stage-cache
-    boundary outside the out root; the default cache location under the out
-    root is covered on every pass. Cache directories left empty by the
-    deletions are pruned.
+    boundary outside the out root, refused whole unless the directory has
+    the stage-cache shape; the default cache location under the out root is
+    covered on every pass. Cache directories left empty by the deletions are
+    pruned.
     """
 
     candidates = inventory(out_dir, older_than, cache_dir=cache_dir)
+    if any(path.name == PROVENANCE_FILENAME for path in candidates):
+        raise ValueError(
+            "refusing to destroy the provenance log: it is the evidence of destruction"
+        )
     names = tuple(_artifact_name(path, out_dir, cache_dir) for path in candidates)
     if dry_run:
         return DestructionSummary(policy=policy, dry_run=True, candidates=names, destroyed=())
     destroyed: list[DestroyedArtifact] = []
     for path in candidates:
-        if path.name == PROVENANCE_FILENAME:
-            raise ValueError(
-                "refusing to destroy the provenance log: it is the evidence of destruction"
-            )
         name = _artifact_name(path, out_dir, cache_dir)
         data = path.read_bytes()
         digest = hashlib.sha256(data).hexdigest()
