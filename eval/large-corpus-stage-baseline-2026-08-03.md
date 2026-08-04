@@ -4,6 +4,8 @@ Measured: 2026-08-03. Dataset: `large-corpus` (seeded synthetic corpus, seed 202
 
 This is the before side of the UC-01 stage-cache comparison (docs/NOVEL-USE-CASES-PLAN.md): no stage cache was active in this run. The numbers describe one pre-cache run on the single machine class recorded below. They are not a performance promise; wall clock and memory vary with hardware, and a comparison is only meaningful against a run on the same machine class with the same corpus parameters.
 
+`large-corpus-report.md` in this directory is regenerated on release rather than on every matcher change, so its run counts can describe older code than this file's run date. When the two disagree over the same seed, the counts here are the ones the code produced on the date above; `make eval-large` realigns the other report. As of 2026-08-03 they do disagree: that report records 2204992 candidate pairs, 11728 auto, and 838 review, because it predates matcher changes merged after its last regeneration, while the counts below come from the current code over the same seed-20260707 corpus.
+
 ## Environment
 
 | Python | System | Machine | CPU count |

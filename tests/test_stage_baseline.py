@@ -4,8 +4,10 @@ The full-size baseline (`make perf-baseline`) is a local command, not a CI
 job, matching how `make eval-large` is run. These tests prove the harness on
 a tiny corpus: the six stages are timed and recorded with the pinned corpus
 parameters and environment, the composed stages produce the same artifacts
-`pipeline.run` plus `pipeline.export` produce, and the outputs stay free of
-field values and machine-specific paths.
+`pipeline.run` plus `pipeline.export` produce, the outputs stay free of
+field values and machine-specific paths, and every fail-closed refusal
+(mismatched parameters, corpus bytes changed after generation, unaccounted
+input) aborts without writing a report.
 """
 
 from __future__ import annotations
@@ -164,3 +166,83 @@ def test_existing_corpus_with_other_params_is_refused(tmp_path: Path) -> None:
     )
     assert rc == 1
     assert not (tmp_path / "mismatch.md").exists()
+
+
+def test_hand_modified_corpus_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Fail closed: reused corpus CSVs must be the pinned generator's bytes.
+
+    The recipe header alone is not proof. An untouched corpus passes the
+    digest comparison against a fresh regeneration; the same corpus with one
+    edited cell in existing.csv, beside an untouched recipe.toml, is refused
+    before any measurement runs.
+    """
+
+    corpus_dir = tmp_path / "corpus"
+    corpus = generate(total_records=120, seed=7)
+    write_corpus(corpus, corpus_dir, seed=7, total_records=120)
+    assert stage_baseline._ensure_corpus(corpus_dir, records=120, seed=7, regenerate=False)
+
+    existing = corpus_dir / "existing.csv"
+    existing.write_bytes(existing.read_bytes().replace(b"granted", b"revoked", 1))
+    report = tmp_path / "tampered.md"
+    json_out = tmp_path / "tampered.json"
+    rc = stage_baseline.main(
+        [
+            "--out-dir",
+            str(corpus_dir),
+            "--records",
+            "120",
+            "--seed",
+            "7",
+            "--report-out",
+            str(report),
+            "--json-out",
+            str(json_out),
+            "--date",
+            _DATE,
+        ]
+    )
+    assert rc == 1
+    assert "not what the generator produces" in capsys.readouterr().err
+    assert not report.exists()
+    assert not json_out.exists()
+
+
+def test_unaccounted_input_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Fail closed: a source-row accounting mismatch aborts before any output.
+
+    After measuring, the harness cross-checks its own CSV row counts against
+    what the pipeline ingested. Overcounting the source rows by one simulates
+    a row the pipeline never accounted for; the run must refuse and write
+    neither the report nor the JSON companion.
+    """
+
+    real_count = stage_baseline._csv_data_rows
+    monkeypatch.setattr(stage_baseline, "_csv_data_rows", lambda path: real_count(path) + 1)
+    report = tmp_path / "unaccounted.md"
+    json_out = tmp_path / "unaccounted.json"
+    rc = stage_baseline.main(
+        [
+            "--out-dir",
+            str(tmp_path / "corpus"),
+            "--records",
+            "120",
+            "--seed",
+            "7",
+            "--report-out",
+            str(report),
+            "--json-out",
+            str(json_out),
+            "--regenerate",
+            "--date",
+            _DATE,
+        ]
+    )
+    assert rc == 1
+    assert "unaccounted input" in capsys.readouterr().err
+    assert not report.exists()
+    assert not json_out.exists()

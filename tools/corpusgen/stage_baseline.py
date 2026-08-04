@@ -17,7 +17,11 @@ pipeline fails CI instead of skewing a committed baseline.
 
 Determinism: the corpus is regenerated from a pinned seed and size, and both
 are recorded in the output together with a digest of the generated input
-files. Timing values vary by machine, so the environment (Python version,
+files. A pre-existing corpus is reused only when its CSV bytes digest to
+exactly what the pinned generator produces for the parameters in its recipe
+header; a corpus that was modified after generation is refused before any
+measurement, so the recorded parameters always describe the measured bytes.
+Timing values vary by machine, so the environment (Python version,
 platform, CPU count) is recorded alongside them, content-free. The output
 carries counts, durations, parameters, and digests only: no field values,
 and no filesystem path beyond the corpus directory's base name.
@@ -36,6 +40,7 @@ import platform
 import re
 import shutil
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import date
@@ -364,6 +369,11 @@ def render_report(
         "only meaningful against a run on the same machine class with the same corpus "
         "parameters.",
         "",
+        "`large-corpus-report.md` in this directory is regenerated on release rather than on "
+        "every matcher change, so its run counts can describe older code than this file's "
+        "run date. When the two disagree over the same seed, the counts here are the ones "
+        "the code produced on the date above; `make eval-large` realigns the other report.",
+        "",
         "## Environment",
         "",
         "| Python | System | Machine | CPU count |",
@@ -438,12 +448,30 @@ def _generation_params(recipe_path: Path) -> tuple[int, int] | None:
     return int(match.group(1)), int(match.group(2))
 
 
+def _expected_input_digest(*, records: int, seed: int) -> str:
+    """The digest the pinned generator's output has for these parameters.
+
+    Computed by regenerating the corpus into a scratch directory through the
+    same writer the real corpus went through, so the comparison in
+    ``_ensure_corpus`` is over exact CSV bytes rather than a parsed view.
+    """
+
+    corpus = generate(total_records=records, seed=seed)
+    with tempfile.TemporaryDirectory() as scratch:
+        scratch_dir = Path(scratch)
+        write_corpus(corpus, scratch_dir, seed=seed, total_records=records)
+        return _input_digest(scratch_dir)
+
+
 def _ensure_corpus(out_dir: Path, *, records: int, seed: int, regenerate: bool) -> bool:
     """Generate the corpus, or verify an existing one matches the parameters.
 
     Returns False (fail closed) when an existing corpus cannot be shown to
     match the requested seed and size, rather than stamping the baseline with
-    parameters that may not describe the data it measured.
+    parameters that may not describe the data it measured. The recipe header
+    alone is not trusted: the generator is deterministic, so a reused corpus
+    must also digest to exactly the CSV bytes the pinned parameters produce,
+    and a hand-modified existing.csv or incoming.csv is refused.
     """
 
     recipe_path = out_dir / "recipe.toml"
@@ -456,6 +484,21 @@ def _ensure_corpus(out_dir: Path, *, records: int, seed: int, regenerate: bool) 
         print(
             f"error: existing corpus in {out_dir} does not match --records {records} "
             f"--seed {seed} (found {found}); rerun with --regenerate",
+            file=sys.stderr,
+        )
+        return False
+    for name in ("existing.csv", "incoming.csv"):
+        if not (out_dir / name).is_file():
+            print(
+                f"error: existing corpus in {out_dir} is missing {name}; rerun with --regenerate",
+                file=sys.stderr,
+            )
+            return False
+    if _input_digest(out_dir) != _expected_input_digest(records=records, seed=seed):
+        print(
+            f"error: the corpus CSVs in {out_dir} are not what the generator produces "
+            f"for --records {records} --seed {seed}; the files were changed after "
+            "generation; rerun with --regenerate",
             file=sys.stderr,
         )
         return False
