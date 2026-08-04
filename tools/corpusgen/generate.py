@@ -451,14 +451,48 @@ def _pdf_page_lines(row: dict[str, str]) -> list[str]:
     return lines
 
 
+# The files this generator writes in every layout, and the first line of the
+# recipe it writes. Together they are the shape that says a directory holds a
+# corpus this tool produced. `--out-dir` is user-supplied and the cleanup
+# below deletes a directory tree, so a non-empty directory without this shape
+# is refused rather than cleared: never reach past what this tool is known to
+# have written, the way destruction.py lists its artifacts explicitly instead
+# of globbing.
+_CORPUS_MARKER_FILES = ("recipe.toml", "ground_truth.json", "labels.json")
+_RECIPE_MARKER = "# Generated synthetic corpus."
+
+
+def _is_generated_corpus(out_dir: Path) -> bool:
+    """Whether ``out_dir`` carries the marker files this generator writes."""
+
+    if not all((out_dir / name).is_file() for name in _CORPUS_MARKER_FILES):
+        return False
+    header = (out_dir / "recipe.toml").read_text(encoding="utf-8", errors="replace")
+    return header.startswith(_RECIPE_MARKER)
+
+
 def _remove_stale_layout(out_dir: Path) -> None:
     """Drop the other layout's files so a regenerated corpus has no strays.
 
     A directory that held a CSV-only corpus and is regenerated with a PDF
     share (or the reverse) must not leave the previous layout's inputs where
     the pipeline would ingest them alongside the new ones.
+
+    Clearing the mixed layout means removing an ``incoming/`` directory whole.
+    A directory that holds files but not this generator's markers belongs to
+    somebody else, so it is refused with nothing deleted and the caller is
+    told to point ``--out-dir`` somewhere else.
     """
 
+    if any(out_dir.iterdir()) and not _is_generated_corpus(out_dir):
+        raise ValueError(
+            f"refusing to write a corpus into {out_dir}: the directory is not empty "
+            "and does not hold a corpus this generator produced (no "
+            f"{', '.join(_CORPUS_MARKER_FILES)} written by tools/corpusgen/generate.py). "
+            "Writing one clears the previous layout's incoming side, including an "
+            "incoming/ directory, so point --out-dir at a new or previously generated "
+            "directory."
+        )
     (out_dir / "incoming.csv").unlink(missing_ok=True)
     (out_dir / "pdf_manifest.json").unlink(missing_ok=True)
     incoming_dir = out_dir / "incoming"
@@ -517,6 +551,10 @@ def write_corpus(
     rows is carried as text-layer PDF intake documents in an ``incoming/``
     directory beside the remaining ``incoming.csv``, and the recipe gains the
     pdfplumber extraction backend.
+
+    Writing clears the other layout's inputs first, so ``out_dir`` must be
+    empty or already hold a corpus this generator produced; anything else
+    raises ``ValueError`` before a file is touched.
     """
 
     if not 0.0 <= pdf_share <= 1.0:

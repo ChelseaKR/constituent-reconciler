@@ -24,10 +24,11 @@ spent in the PDF reader instead of an honest zero.
 Determinism: the corpus is regenerated from a pinned seed, size, and PDF
 share, all recorded in the output together with a digest of the generated
 input files. A pre-existing corpus is reused only when its input bytes (CSVs,
-and for the mixed variant the PDF documents and their manifest) digest to
-exactly what the pinned generator produces for the parameters in its recipe
-header; a corpus that was modified after generation is refused before any
-measurement, so the recorded parameters always describe the measured bytes.
+and for the mixed variant everything in the incoming directory plus the PDF
+manifest) digest to exactly what the pinned generator produces for the
+parameters in its recipe header; a corpus modified or added to after
+generation is refused before any measurement, so the recorded parameters
+always describe the measured bytes.
 Timing values vary by machine, so the environment (Python version,
 platform, CPU count) is recorded alongside them, content-free. The output
 carries counts, durations, parameters, and digests only: no field values,
@@ -68,24 +69,39 @@ STAGE_NAMES = ("ingest", "extract", "normalize", "score", "review_artifact", "wr
 _DEFAULT_SEED = 20260707
 _DEFAULT_RECORDS = 50000
 
-# A PDF-carried row reaches matching with fewer fields than the same row as a
-# CSV cell, because the extractor only recovers what a labeled line gives it.
-# Stated in both artifacts so nobody reads the mixed variant's different run
-# counts as a matcher regression.
-PDF_EXTRACTION_NOTE = (
-    "Records read from PDF pages carry only what the extractor recovers from a "
-    "labeled line: name, a numeric date of birth, and email or phone when the "
-    "form has one. Address and consent have no extraction pattern, and a date "
-    'written in prose ("26 November 1942") does not match the numeric date '
-    "pattern, so a PDF-carried person reaches matching with fewer comparison "
-    "fields than the same person as a CSV row. Weaker evidence per pair sends "
-    "far more pairs to the review band instead of auto-merging them, which is "
-    "the fail-closed gate working; the run counts here are not comparable to a "
-    "CSV-only run of the same seed. Under a policy pack that requires consent, "
-    "the missing consent value would also withhold these records at the export "
-    "gate; the generated recipe uses the default pack, where that gate is a "
-    "no-op."
-)
+
+def pdf_extraction_note(*, candidate_pairs: int, auto_pairs: int, review_pairs: int) -> str:
+    """The mixed variant's extraction note, in the run's own banding counts.
+
+    A PDF-carried row reaches matching with fewer fields than the same row as
+    a CSV cell, because the extractor recovers only what a labeled line gives
+    it. Both artifacts carry that, so nobody reads the mixed variant's
+    different run counts as a matcher regression.
+
+    The note reports what this run banded and stops there. The harness
+    measures one corpus per run and never splits its counts between the
+    PDF-carried rows and the CSV rows, so nothing here shows how either
+    population banded on its own or how the same people would band as CSV
+    cells. A cause stated for the difference would be an interpretation the
+    numbers printed beside it cannot carry.
+    """
+
+    return (
+        "Records read from PDF pages carry only what the extractor recovers from a "
+        "labeled line: name, a numeric date of birth, and email or phone when the "
+        "form has one. Address and consent have no extraction pattern, and a date "
+        'written in prose ("26 November 1942") does not match the numeric date '
+        "pattern, so a PDF-carried person reaches matching with fewer comparison "
+        f"fields than the same person as a CSV row. This run scored {candidate_pairs} "
+        f"candidate pairs, of which {auto_pairs} fell above the auto threshold and "
+        f"{review_pairs} in the review band, the rest below the review threshold. "
+        "Those counts cover the mixed corpus as one population: the run does not "
+        "measure the PDF-carried rows apart from the CSV rows, so it attributes no "
+        "part of them to either side, and they are not comparable to a CSV-only run "
+        "of the same seed. Under a policy pack that requires consent, the missing "
+        "consent value would also withhold these records at the export gate; the "
+        "generated recipe uses the default pack, where that gate is a no-op."
+    )
 
 
 @dataclass(frozen=True)
@@ -343,16 +359,23 @@ def _csv_data_rows(path: Path) -> int:
 def _input_files(out_dir: Path, *, pdf_variant: bool) -> list[Path]:
     """The generated input files the digest (and the measurement) covers.
 
-    For the mixed variant this is the existing CSV, the incoming CSV inside
-    ``incoming/``, every generated PDF document, and the PDF manifest the
-    accounting cross-check reads, so none of them can drift unnoticed.
+    For the mixed variant this is the existing CSV, everything the
+    ``incoming/`` directory holds, and the PDF manifest the accounting
+    cross-check reads, so none of them can drift unnoticed.
+
+    The incoming side is listed by walking that directory rather than by
+    globbing the names the generator writes. The recipe points the pipeline at
+    the directory, so the pipeline ingests whatever is in it, and a file
+    dropped there after generation would otherwise be outside the digest
+    entirely. A dropped file that yields no records clears the source-row
+    accounting check too, which would leave nothing to catch it.
     """
 
     if not pdf_variant:
         return [out_dir / "existing.csv", out_dir / "incoming.csv"]
     incoming_dir = out_dir / "incoming"
-    files = [out_dir / "existing.csv", incoming_dir / "incoming.csv"]
-    files += sorted(incoming_dir.glob("intake-*.pdf"))
+    files = [out_dir / "existing.csv"]
+    files += sorted(path for path in incoming_dir.rglob("*") if path.is_file())
     files.append(out_dir / "pdf_manifest.json")
     return files
 
@@ -502,7 +525,17 @@ def build_payload(
                 "pipeline.export, so the stage sum can slightly exceed an "
                 "end-to-end run."
             ),
-            *([PDF_EXTRACTION_NOTE] if corpus.pdf_share > 0.0 else []),
+            *(
+                [
+                    pdf_extraction_note(
+                        candidate_pairs=len(result.pairs),
+                        auto_pairs=len(result.auto_pairs),
+                        review_pairs=len(result.review_pairs),
+                    )
+                ]
+                if corpus.pdf_share > 0.0
+                else []
+            ),
         ],
     }
 
@@ -573,9 +606,15 @@ def render_report(
             f"Of those {corpus.incoming_rows} incoming rows, {corpus.pdf_rows} ride as text-layer "
             f"PDF intake documents ({corpus.pdf_documents} files, {PDF_PAGES_PER_DOC} pages each "
             f"at most, a {corpus.pdf_share:.0%} share) and the rest stay CSV rows. The digest "
-            "covers the PDF documents and their manifest as well as both CSVs.",
+            "covers the existing CSV, the manifest, and everything the incoming directory "
+            "holds, so a file edited or added there after generation is refused before "
+            "any measurement runs.",
             "",
-            PDF_EXTRACTION_NOTE,
+            pdf_extraction_note(
+                candidate_pairs=len(result.pairs),
+                auto_pairs=len(result.auto_pairs),
+                review_pairs=len(result.review_pairs),
+            ),
             "",
         ]
     lines += [
@@ -679,7 +718,9 @@ def _ensure_corpus(
     baseline with parameters that may not describe the data it measured. The
     recipe header alone is not trusted: the generator is deterministic, so a
     reused corpus must also digest to exactly the input bytes the pinned
-    parameters produce, and a hand-modified CSV, PDF, or manifest is refused.
+    parameters produce. A hand-modified CSV, PDF, or manifest is refused, and
+    so is a file added to the incoming directory after generation, which the
+    pipeline would ingest and the digest covers by walking that directory.
     """
 
     recipe_path = out_dir / "recipe.toml"
@@ -706,8 +747,8 @@ def _ensure_corpus(
     if _input_digest(out_dir, pdf_variant=pdf_share > 0.0) != expected:
         print(
             f"error: the corpus inputs in {out_dir} are not what the generator produces "
-            f"for --records {records} --seed {seed} --pdf-share {pdf_share}; the files "
-            "were changed after generation; rerun with --regenerate",
+            f"for --records {records} --seed {seed} --pdf-share {pdf_share}; a file was "
+            "changed, added, or removed after generation; rerun with --regenerate",
             file=sys.stderr,
         )
         return False

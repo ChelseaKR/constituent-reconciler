@@ -12,8 +12,10 @@ input) aborts without writing a report.
 The mixed CSV+PDF variant (`make perf-baseline-pdf`, issue #78) gets the same
 treatment at the end of the file: the extract row must report the real time
 the ingest walk spent in the PDF reader over the real page count, the corpus
-block must record the PDF parameters, and a PDF document edited after
-generation must be refused the way an edited CSV is.
+block must record the PDF parameters, the composed stages must match
+`pipeline.run` over that layout too, and a PDF document edited after
+generation (or a file added to the incoming directory) must be refused the
+way an edited CSV is.
 """
 
 from __future__ import annotations
@@ -120,21 +122,22 @@ def test_outputs_are_content_free(baseline: dict[str, Path]) -> None:
             assert row["Email"] not in outputs
 
 
-def test_composed_stages_match_the_pipeline(baseline: dict[str, Path]) -> None:
-    """The harness's stage composition must not drift from pipeline.run/export.
+def _assert_composed_stages_match_the_pipeline(fixture: dict[str, Path]) -> None:
+    """Assert one harness run's artifacts match pipeline.run plus export.
 
     A fresh pipeline.run + export over the same corpus must reproduce the
     harness's decision artifacts byte for byte: the review queue, the resolved
-    CSV, and the count-only run summary. Byte equality here is what makes the
-    committed baseline a truthful "before" for the UC-01 cache comparison.
+    CSV, and the count-only run summary. Byte equality here is what makes a
+    committed baseline a truthful "before" for the UC-01 cache comparison, so
+    both corpus layouts are held to it.
     """
 
-    recipe = load_recipe(baseline["corpus"] / "recipe.toml")
+    recipe = load_recipe(fixture["corpus"] / "recipe.toml")
     result = pipeline.run(recipe)
-    expected_out = baseline["base"] / "expected-out"
+    expected_out = fixture["base"] / "expected-out"
     pipeline.export(result, recipe, out_dir=expected_out, dry_run=False)
 
-    work = baseline["corpus"] / "stage-baseline-work"
+    work = fixture["corpus"] / "stage-baseline-work"
     for name in ("review_queue.csv", "resolved.csv"):
         assert (work / "out" / name).read_bytes() == (expected_out / name).read_bytes()
     # run_summary.json is compared structurally: wall-clock stage durations
@@ -152,13 +155,19 @@ def test_composed_stages_match_the_pipeline(baseline: dict[str, Path]) -> None:
         expected_out / "review_queue.csv"
     ).read_bytes()
 
-    payload = json.loads(baseline["json"].read_text(encoding="utf-8"))
+    payload = json.loads(fixture["json"].read_text(encoding="utf-8"))
     counts = payload["results"]
     assert counts["records"] == len(result.records)
     assert counts["candidate_pairs"] == len(result.pairs)
     assert counts["auto_pairs"] == len(result.auto_pairs)
     assert counts["review_pairs"] == len(result.review_pairs)
     assert counts["golden_records"] == len(result.golden)
+
+
+def test_composed_stages_match_the_pipeline(baseline: dict[str, Path]) -> None:
+    """The harness's stage composition must not drift from pipeline.run/export."""
+
+    _assert_composed_stages_match_the_pipeline(baseline)
 
 
 def test_existing_corpus_with_other_params_is_refused(tmp_path: Path) -> None:
@@ -371,8 +380,29 @@ def test_pdf_report_states_the_extraction_asymmetry(pdf_baseline: dict[str, Path
     assert "make perf-baseline-pdf" in report
     assert "not comparable to a CSV-only run" in report
     assert "not a performance promise" in report
+    assert "Address and consent have no extraction pattern" in report
+
+
+def test_the_pdf_note_quotes_this_runs_own_banding_counts(pdf_baseline: dict[str, Path]) -> None:
+    """The note may say only what this run measured, in this run's numbers.
+
+    An earlier version read the count difference as the fail-closed gate
+    working, which neither artifact's numbers show: nothing here separates the
+    PDF-carried rows from the CSV rows. The note now quotes the banding counts
+    printed beside it, so the artifact substantiates every number it states.
+    """
+
     payload = json.loads(pdf_baseline["json"].read_text(encoding="utf-8"))
-    assert stage_baseline.PDF_EXTRACTION_NOTE in payload["notes"]
+    counts = payload["results"]
+    expected = stage_baseline.pdf_extraction_note(
+        candidate_pairs=counts["candidate_pairs"],
+        auto_pairs=counts["auto_pairs"],
+        review_pairs=counts["review_pairs"],
+    )
+    assert expected in payload["notes"]
+    assert expected in pdf_baseline["report"].read_text(encoding="utf-8")
+    assert str(counts["review_pairs"]) in expected
+    assert "fail-closed gate" not in expected
 
 
 def test_pdf_outputs_are_content_free(pdf_baseline: dict[str, Path]) -> None:
@@ -446,6 +476,68 @@ def test_edited_pdf_document_is_refused(tmp_path: Path, capsys: pytest.CaptureFi
     )
     assert rc == 1
     assert "not what the generator produces" in capsys.readouterr().err
+    assert not report.exists()
+    assert not json_out.exists()
+
+
+def test_composed_stages_match_the_pipeline_over_the_mixed_corpus(
+    pdf_baseline: dict[str, Path],
+) -> None:
+    """The same anti-drift check, over the layout the mixed variant measures.
+
+    The mixed run does not compose the CSV-only sequence: it swaps the
+    pipeline's PDF reader for a timed wrapper across the ingest walk. Drift
+    there would skew the extract row the mixed baseline exists to report, so
+    the composed artifacts must still match a plain pipeline.run plus export
+    over the same corpus.
+    """
+
+    _assert_composed_stages_match_the_pipeline(pdf_baseline)
+
+
+def test_a_file_added_to_the_incoming_directory_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Fail closed: the digest covers the incoming directory, not a name glob.
+
+    The recipe points the pipeline at `incoming/`, so the pipeline reads
+    whatever lands there. A header-only CSV dropped in after generation adds
+    no records, which means the source-row accounting check would pass it as
+    well. The digest is what catches it, and only because it walks the
+    directory instead of globbing the generated document names.
+    """
+
+    corpus_dir = tmp_path / "corpus"
+    corpus = generate(total_records=200, seed=_SEED)
+    write_corpus(corpus, corpus_dir, seed=_SEED, total_records=200, pdf_share=_PDF_SHARE)
+    assert stage_baseline._ensure_corpus(
+        corpus_dir, records=200, seed=_SEED, pdf_share=_PDF_SHARE, regenerate=False
+    )
+
+    added = corpus_dir / "incoming" / "extra-intake.csv"
+    added.write_text("id,First Name,Last Name,DOB,Email,Phone,Address,Consent\n", encoding="utf-8")
+    report = tmp_path / "added.md"
+    json_out = tmp_path / "added.json"
+    rc = stage_baseline.main(
+        [
+            "--out-dir",
+            str(corpus_dir),
+            "--records",
+            "200",
+            "--seed",
+            str(_SEED),
+            "--pdf-share",
+            str(_PDF_SHARE),
+            "--report-out",
+            str(report),
+            "--json-out",
+            str(json_out),
+            "--date",
+            _DATE,
+        ]
+    )
+    assert rc == 1
+    assert "changed, added, or removed after generation" in capsys.readouterr().err
     assert not report.exists()
     assert not json_out.exists()
 

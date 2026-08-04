@@ -19,16 +19,19 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   walk. The measured artifacts are committed at
   `eval/large-corpus-stage-baseline-pdf-2026-08-04.{md,json}`: 36.9s of
   extraction over 3,756 pages in 151 documents, on the same machine class as
-  the CSV-only baseline that reports 0.0s. The PDF writer (`tools/corpusgen/pdfwrite.py`) is stdlib-only dev
-  tooling: no new package dependency, no runtime import, deterministic byte
-  for byte, and able to encode the non-ASCII names the transliteration
-  channel plants, which the existing one-page `testing.make_pdf` helper
-  cannot. The harness refuses a corpus whose PDFs, CSVs, or manifest changed
-  after generation, and both artifacts state that a PDF-carried record
-  reaches matching with fewer fields than the same person as a CSV row
-  (address and consent have no extraction pattern, and prose dates do not
-  match the numeric date pattern), so the run-count difference is documented
-  rather than read as a regression.
+  the CSV-only baseline that reports 0.0s. The PDF writer
+  (`tools/corpusgen/pdfwrite.py`) is stdlib-only dev tooling: no new package
+  dependency, no runtime import, deterministic byte for byte, and able to
+  encode the non-ASCII names the transliteration channel plants, which the
+  existing one-page `testing.make_pdf` helper cannot. The harness refuses a
+  corpus whose PDFs, CSVs, or manifest changed after generation, or that
+  gained a file in its incoming directory afterwards, and the generator
+  refuses to clear an `--out-dir` it cannot recognize as a corpus it wrote.
+  Both artifacts state which fields a PDF-carried record loses (address and
+  consent have no extraction pattern, and prose dates do not match the
+  numeric date pattern) and quote the run's own banding counts, so the
+  run-count difference is documented without claiming a cause the run did
+  not measure.
 - **Large-corpus stage-timing baseline (UC-01 "before" side).**
   `tools/corpusgen/stage_baseline.py`, run with `make perf-baseline`, times
   the six pipeline stages (ingest, extract, normalize, score, review

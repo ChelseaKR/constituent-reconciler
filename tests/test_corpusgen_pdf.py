@@ -219,6 +219,49 @@ def test_switching_layouts_leaves_no_stale_inputs(tmp_path: Path) -> None:
     assert not (out_dir / "pdf_manifest.json").exists()
 
 
+def test_writing_into_a_directory_the_generator_did_not_produce_is_refused(
+    tmp_path: Path,
+) -> None:
+    """Fail closed: `--out-dir` is user-supplied and the cleanup deletes a tree.
+
+    Clearing the previous layout removes an `incoming/` directory whole, so a
+    non-empty directory without this generator's markers is refused with
+    nothing deleted, whatever it holds.
+    """
+
+    out_dir = tmp_path / "somebody-elses-directory"
+    (out_dir / "incoming").mkdir(parents=True)
+    keep = out_dir / "incoming" / "intake-scans.pdf"
+    keep.write_bytes(b"%PDF-1.4 not ours\n")
+    notes = out_dir / "notes.txt"
+    notes.write_text("real work in progress\n", encoding="utf-8")
+
+    corpus = generate(total_records=120, seed=7)
+    with pytest.raises(ValueError, match="not empty"):
+        write_corpus(corpus, out_dir, seed=7, total_records=120, pdf_share=_SHARE)
+
+    assert keep.read_bytes() == b"%PDF-1.4 not ours\n"
+    assert notes.is_file()
+    assert not (out_dir / "existing.csv").exists()
+
+
+def test_a_generated_corpus_directory_is_still_rewritten(tmp_path: Path) -> None:
+    """The guard refuses strangers, not the generator's own output.
+
+    Regeneration over a corpus this tool wrote is the ordinary path (that is
+    what `--regenerate` does), so it must keep working, including the switch
+    from one layout to the other.
+    """
+
+    out_dir = tmp_path / "generated"
+    corpus = generate(total_records=120, seed=7)
+    write_corpus(corpus, out_dir, seed=7, total_records=120)
+    write_corpus(corpus, out_dir, seed=7, total_records=120, pdf_share=_SHARE)
+
+    assert (out_dir / "incoming" / "incoming.csv").is_file()
+    assert not (out_dir / "incoming.csv").exists()
+
+
 def test_write_corpus_rejects_a_share_outside_the_unit_interval(tmp_path: Path) -> None:
     corpus = generate(total_records=120, seed=7)
     with pytest.raises(ValueError, match="pdf_share"):
