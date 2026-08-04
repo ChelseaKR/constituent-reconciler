@@ -1,6 +1,7 @@
 # Capability claims audit
 
-**Audited:** 2026-07-22 (roadmap closeout re-verification).
+**Audited:** 2026-07-22 (roadmap closeout re-verification); stage-cache row
+added 2026-08-03.
 **Scope:** every capability claim in `README.md` and `CLAUDE.md`, read against
 the code in `src/constituent_reconciler/`.
 **Method:** each claim below was checked by opening the named module, not by
@@ -34,6 +35,7 @@ Status values: **implemented** (the code does what the sentence says),
 | RFC 3161 trusted timestamps on provenance entries | README.md "What it does" step 7 | `provenance.py` `Rfc3161Authority`; selected by recipe `tsa_url`; response/imprint/nonce tests | implemented and opt-in; local clock remains the default |
 | Consent-gated export: non-consented records withheld, fail-closed | README.md:74, 92-95 | `consent.py` `partition_by_consent`; `pipeline.py` writes `withheld.csv` with ids and reason only | implemented (enforced when the active pack requires consent: dv and hipaa; the default pack does not) |
 | CASS-style address standardization, not USPS-certified | README.md:64-66 (step 3) | `address.py` | implemented |
+| Content-addressed stage cache for extraction and normalization; scoring stays fresh; cache covered by destruction (UC-01) | docs/NOVEL-USE-CASES-PLAN.md "UC-01"; CHANGELOG.md Unreleased; docs/DATA-FLOW-AND-RETENTION.md inventory | `stage_cache.py`; `pipeline.run(cache=...)`; `config.py` `[cache]`; `destruction.py` cache roots; `tests/test_stage_cache.py`, `tests/test_no_egress.py` (byte-identical cached/uncached runs, per-row invalidation, local write boundary, planted-value destruction) | implemented (progress events from the same plan item are not built; the plan and this row keep them separate) |
 | CLAUDE.md architecture map matches the code | CLAUDE.md:72-108 formerly listed `ingest.py`, `gate.py`, `resolve.py`, `extract/deterministic.py`, a `policy/` package, and `test_consent_blocks_export.py`, none of which exist | as built: `pipeline.py` (ingest lives here), `decisions.py` (banding and the fail-closed gate), `matching.py` (Splink wrapper), `extract/pdf.py`, `policy.py`, `tests/test_consent.py` | corrected 2026-07-02 |
 
 ## Re-running this audit

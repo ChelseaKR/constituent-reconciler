@@ -7,6 +7,27 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **Content-addressed stage cache for extraction and normalization (UC-01).**
+  A recipe's new `[cache]` section (validated fail-closed; absent means off)
+  stores extraction and normalization results as content-addressed files
+  under `stage_cache/` inside the output root, or under an explicitly
+  configured local `dir` boundary; URL-shaped values are refused at load
+  time. Keys digest the input, the declared recipe schema version, the
+  active field mapping, the package version standing in for the extractor
+  and normalizer versions, and the stage's backend configuration, so editing
+  one source row re-keys that row alone and any mismatched entry is ignored
+  rather than coerced. Scoring, banding, and clustering never touch the
+  cache: term frequencies and cross-batch candidates change pair
+  probabilities whenever the population changes, and a merge-blocking test
+  proves cached and uncached runs byte-identical. OCR and model-seam
+  extraction backends bypass the cache because their output is not a pure
+  function of the file bytes. The run manifest and `run_summary.json` record
+  cache policy, hit/miss counts, and stage durations, all content-free
+  (report schema version 4). The cache directory is a PII artifact:
+  `reconcile destroy` covers it, `--cache-dir` reaches an explicit boundary,
+  and each deleted entry gets its own destruction certificate. The
+  progress-event work planned beside this in docs/NOVEL-USE-CASES-PLAN.md is
+  deliberately not part of this change.
 - **Airtable native-upsert connector (roadmap E3).** The new `airtable`
   destination batches at Airtable's ten-record limit, uses
   `performUpsert` on the configured external-id field, reads a personal access

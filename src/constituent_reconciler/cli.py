@@ -18,7 +18,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from constituent_reconciler import __version__, pipeline
+from constituent_reconciler import __version__, pipeline, stage_cache
 from constituent_reconciler.config import Recipe, RecipeError, load_recipe
 from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.consent import partition_by_consent
@@ -171,7 +171,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
     except PolicyViolation as error:
         print(f"policy error: {error}", file=sys.stderr)
         return 2
-    result = pipeline.run(recipe)
+    out_dir = Path(args.out)
+    # A dry run must not touch disk, so it also runs without the stage cache:
+    # neither reading a stale entry nor writing a fresh one.
+    cache = None if args.dry_run else stage_cache.for_recipe(recipe, out_dir)
+    result = pipeline.run(recipe, cache=cache)
     _, withheld = partition_by_consent(
         result.golden,
         require_consent=recipe.require_consent,
@@ -179,7 +183,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
     )
     print(render_run_summary(result, withheld=len(withheld)))
     try:
-        out_dir = Path(args.out)
         summary = pipeline.export(result, recipe, out_dir=out_dir, dry_run=args.dry_run)
     except PolicyViolation as error:
         print(f"\npolicy error: {error}", file=sys.stderr)
@@ -372,6 +375,7 @@ def _cmd_apply(args: argparse.Namespace) -> int:
         force_auto=force_auto,
         force_drop=force_drop,
         corrections=corrections,
+        cache=stage_cache.for_recipe(recipe, Path(args.out)),
     )
     _, withheld = partition_by_consent(
         result.golden,
@@ -541,6 +545,15 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     print(f"  extract backend: {recipe.extract.backend}")
     print(f"  address backend: {recipe.normalize.address_backend}")
     print(f"  output connector: {recipe.output.connector}")
+    if recipe.cache.enabled:
+        boundary = (
+            str(recipe.cache.dir)
+            if recipe.cache.dir is not None
+            else "stage_cache under the output root"
+        )
+        print(f"  cache: enabled=True ({boundary})")
+    else:
+        print("  cache: enabled=False")
 
     if problems:
         print("\nproblems:", file=sys.stderr)
@@ -562,21 +575,26 @@ def _cmd_destroy(args: argparse.Namespace) -> int:
     except ValueError as error:
         print(f"destroy error: {error}", file=sys.stderr)
         return 2
+    cache_dir = Path(args.cache_dir) if args.cache_dir else None
     log = ProvenanceLog(out_dir / "provenance.jsonl")
-    summary = destroy(out_dir, older_than, policy=args.older_than, log=log, dry_run=args.dry_run)
+    summary = destroy(
+        out_dir,
+        older_than,
+        policy=args.older_than,
+        log=log,
+        dry_run=args.dry_run,
+        cache_dir=cache_dir,
+    )
     if args.dry_run:
         for name in summary.candidates:
-            print(f"would destroy: {out_dir / name}")
+            print(f"would destroy: {name}")
         print(
             f"\ndry run: {len(summary.candidates)} artifact(s) eligible under "
             f"--older-than {summary.policy}; nothing deleted, nothing logged"
         )
         return 0
     for artifact in summary.destroyed:
-        print(
-            f"destroyed: {out_dir / artifact.name} (sha256 {artifact.sha256}, "
-            f"{artifact.size} bytes)"
-        )
+        print(f"destroyed: {artifact.name} (sha256 {artifact.sha256}, {artifact.size} bytes)")
     print(f"\ndestroyed {len(summary.destroyed)} artifact(s) under --older-than {summary.policy}")
     if summary.destroyed:
         print(f"  certificates: {log.path}")
@@ -770,6 +788,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "retention window, e.g. 30d or 12h (0d means regardless of age); "
             "required because no default window ships"
+        ),
+    )
+    destroy_parser.add_argument(
+        "--cache-dir",
+        default=None,
+        help=(
+            "also destroy stage-cache entries under this explicitly configured "
+            "[cache] dir boundary; the stage_cache directory under --out is "
+            "always covered"
         ),
     )
     destroy_parser.add_argument(
