@@ -43,6 +43,14 @@ DECISIONS_SCHEMA_VERSION = 2
 # run-report schema to parse it.
 MIGRATION_SUMMARY_SCHEMA_VERSION = 1
 
+# The reviewed correction file ``reconcile compare-apply`` writes for the
+# target side (target_corrections.csv) and the ``export`` section it adds to
+# compare_manifest.json. Version 1: one row per identity the target must add
+# or correct, columns from the chosen import field map plus the external-id
+# column, and a manifest section carrying digests and counts only. A future
+# column or manifest-key change bumps this and ships a migration note.
+CUTOVER_CORRECTIONS_SCHEMA_VERSION = 1
+
 
 def versions() -> dict[str, int]:
     """Return the declared schema versions as a mapping."""
@@ -53,4 +61,5 @@ def versions() -> dict[str, int]:
         "report_schema": REPORT_SCHEMA_VERSION,
         "decisions_schema": DECISIONS_SCHEMA_VERSION,
         "migration_summary": MIGRATION_SUMMARY_SCHEMA_VERSION,
+        "cutover_corrections": CUTOVER_CORRECTIONS_SCHEMA_VERSION,
     }

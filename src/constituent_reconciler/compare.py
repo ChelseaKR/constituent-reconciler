@@ -28,8 +28,8 @@ Everything this command writes stays local to ``--out``:
 No write path exists here. The module never names the write-target registry
 and builds no destination client, and ``tests/test_compare.py`` enforces both
 as merge-blocking invariants in the spirit of ``tests/test_no_egress.py``.
-The post-review correction-file export is deliberately absent; it arrives as
-its own change with its own review gate.
+The reviewed correction-file export lives in :mod:`compare_apply`, behind its
+own review gate; this module stays read-only.
 """
 
 from __future__ import annotations
@@ -48,12 +48,20 @@ from constituent_reconciler.models import (
     CANONICAL_FIELDS,
     Band,
     Cluster,
+    Correction,
     IngestReport,
     Pair,
     Record,
+    RunResult,
 )
 from constituent_reconciler.normalize import normalize_record
-from constituent_reconciler.pipeline import IngestAccumulator, _check_distinct_ids, _ingest_source
+from constituent_reconciler.pipeline import (
+    IngestAccumulator,
+    _apply_corrections,
+    _check_distinct_ids,
+    _group_corrections,
+    _ingest_source,
+)
 from constituent_reconciler.schema import MIGRATION_SUMMARY_SCHEMA_VERSION, versions
 
 LEFT = "left"
@@ -256,6 +264,23 @@ class CompareResult:
         return sum(1 for record in self.records.values() if record.source == RIGHT)
 
 
+def as_run_result(result: CompareResult) -> RunResult:
+    """The comparison in the shape the review session consumes.
+
+    ``ReviewSession`` reads records and scored pairs; it recomputes clusters
+    and golden previews itself from the verdicts on screen. Golden records are
+    deliberately absent because a comparison resolves nothing until its review
+    is applied, and the session never reads them.
+    """
+
+    return RunResult(
+        records=dict(result.records),
+        pairs=result.pairs,
+        clusters=result.clusters,
+        golden=(),
+    )
+
+
 def _display(values: Iterable[str]) -> str:
     """Join the distinct non-empty values for one side of a report cell."""
 
@@ -327,12 +352,21 @@ def _check_accounting(records: Mapping[str, Record], identities: Sequence[Identi
         )
 
 
-def run_compare(left: Side, right: Side) -> CompareResult:
+def run_compare(
+    left: Side, right: Side, *, corrections: Iterable[Correction] = ()
+) -> CompareResult:
     """Ingest both sides, score cross-export pairs, and classify identities.
 
     Reads only; nothing durable is produced here. Confident merges become
     matched identities, undecided pairs mark their identities ambiguous, and
     the accounting guard confirms every record landed exactly once.
+
+    ``corrections`` carries reviewer field fixes back in, the way
+    ``pipeline.run`` accepts them from ``reconcile apply``: each replaces one
+    raw value after ingest (record ids stay stable) and before normalization,
+    so the corrected value flows through matching and into the identity
+    outcomes. A correction naming an uncompared field or an unknown record is
+    refused, fail-closed.
     """
 
     fields = _compared_fields(left, right)
@@ -352,6 +386,12 @@ def run_compare(left: Side, right: Side) -> CompareResult:
         accounting=right_accounting,
     )
     _check_distinct_ids(raw_records)
+    try:
+        raw_records = _apply_corrections(
+            raw_records, _group_corrections(corrections, fields=fields)
+        )
+    except ValueError as error:
+        raise CompareError(str(error)) from error
 
     failures: dict[str, dict[str, int]] = {}
     records = {

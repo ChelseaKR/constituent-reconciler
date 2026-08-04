@@ -4,11 +4,13 @@ The subcommands: ``run`` produces resolved records and a review queue, ``eval``
 scores a run against ground-truth clusters, ``eval-extraction`` scores the PDF
 extractor against labeled fixtures, ``apply`` carries human review decisions
 back into a fresh run, ``compare`` reports how two read-only exports line up
-for a migration cutover, ``review`` serves the local web queue, ``validate``
-checks a recipe without running anything, ``destroy`` deletes retained
-artifacts, ``verify`` checks a provenance log's hash chain, and ``schema``
-prints the declared schema versions. The CLI uses argparse only, so the
-package has no runtime dependency beyond the matcher.
+for a migration cutover, ``compare-review`` serves the same local web queue
+over a comparison's undecided pairs, ``compare-apply`` exports the local
+correction file once that review is complete, ``review`` serves the local web
+queue for a run, ``validate`` checks a recipe without running anything,
+``destroy`` deletes retained artifacts, ``verify`` checks a provenance log's
+hash chain, and ``schema`` prints the declared schema versions. The CLI uses
+argparse only, so the package has no runtime dependency beyond the matcher.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from constituent_reconciler import __version__, compare, pipeline
+from constituent_reconciler import __version__, compare, compare_apply, pipeline
 from constituent_reconciler.config import Recipe, RecipeError, load_recipe
 from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.consent import partition_by_consent
@@ -434,6 +436,151 @@ def _cmd_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compare_review(args: argparse.Namespace) -> int:
+    """Serve the local review queue over a comparison's undecided pairs.
+
+    The session, queue, and server are the same surfaces ``reconcile review``
+    uses; only the pairs come from the comparison. Verdicts save to the
+    compare decisions file so ``reconcile compare-apply`` can enforce that
+    every uncertain pair was decided before the correction file exists.
+    """
+
+    from constituent_reconciler.review.server import serve
+    from constituent_reconciler.review.session import ReviewSession
+
+    try:
+        left = compare.load_side(args.left, label="left")
+        right = compare.load_side(args.right, label="right")
+        result = compare.run_compare(left, right)
+    except (compare.CompareError, RecipeError, OSError) as error:
+        print(f"compare error: {error}", file=sys.stderr)
+        return 2
+    except PolicyViolation as error:
+        print(f"policy error: {error}", file=sys.stderr)
+        return 2
+    print(compare.render_compare_summary(result))
+    if not result.review_pairs:
+        print(
+            "\nno undecided pairs: this comparison has nothing to review, and "
+            "reconcile compare-apply may export without a review step"
+        )
+        return 0
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    decisions_path = (
+        Path(args.decisions)
+        if args.decisions
+        else out_dir / compare_apply.COMPARE_DECISIONS_FILENAME
+    )
+    # Either side's pack can require two-person review or a local-only server;
+    # the stricter side governs, fail-closed, and the flag can only add.
+    require_second = (
+        bool(args.require_second_reviewer)
+        or left.recipe.require_second_reviewer
+        or right.recipe.require_second_reviewer
+    )
+    privacy = left.recipe.require_local_targets or right.recipe.require_local_targets
+    try:
+        session = ReviewSession(
+            compare.as_run_result(result),
+            result.fields,
+            decisions_path,
+            reviewer=args.reviewer,
+            privacy_mode=privacy,
+            require_second_reviewer=require_second,
+        )
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    try:
+        serve(
+            session,
+            host=args.host,
+            port=args.port,
+            open_browser=not args.no_browser,
+        )
+    except PolicyViolation as error:
+        print(f"\npolicy error: {error}", file=sys.stderr)
+        return 2
+    counts = session.counts()
+    line = (
+        f"\nreview saved to {decisions_path}: "
+        f"{counts.approved} approved, {counts.rejected} rejected, {counts.pending} pending"
+    )
+    if counts.awaiting_second:
+        line += f", {counts.awaiting_second} awaiting a second reviewer"
+    print(line)
+    return 0
+
+
+def _cmd_compare_apply(args: argparse.Namespace) -> int:
+    """Export the reviewed, consent-gated correction file for the target side.
+
+    Refuses while any review pair is undecided, when the comparison manifest
+    is missing or no longer matches the inputs, or when the decisions file
+    belongs to a different comparison. Writes only local files; no connector
+    is constructed on any path of this command.
+    """
+
+    out_dir = Path(args.out)
+    decisions_path = (
+        Path(args.decisions)
+        if args.decisions
+        else out_dir / compare_apply.COMPARE_DECISIONS_FILENAME
+    )
+    corrections_path = (
+        Path(args.corrections) if args.corrections else decisions_path.parent / "corrections.json"
+    )
+    try:
+        corrections = _load_corrections(corrections_path) if corrections_path.exists() else []
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(
+            f"compare error: invalid corrections file {corrections_path}: {error}", file=sys.stderr
+        )
+        return 2
+    try:
+        left = compare.load_side(args.left, label="left")
+        right = compare.load_side(args.right, label="right")
+        result = compare.run_compare(left, right, corrections=corrections)
+        stored_manifest = compare_apply.verify_compare_manifest(out_dir, left, right, result)
+        approved, rejected = compare_apply.read_decisions(decisions_path, result)
+        orphan = next(
+            (correction.pair for correction in corrections if correction.pair not in approved),
+            None,
+        )
+        if orphan is not None:
+            raise compare.CompareError(
+                f"correction for {sorted(orphan)!r} is not attached to a fully approved pair"
+            )
+        applied = compare_apply.apply_review(result, approved, rejected)
+        export = compare_apply.export_corrections(
+            left,
+            right,
+            applied,
+            out_dir,
+            fmt=args.format,
+            stored_manifest=stored_manifest,
+            decisions_path=decisions_path,
+            corrections_path=corrections_path if corrections_path.exists() else None,
+        )
+    except (compare.CompareError, RecipeError, OSError) as error:
+        print(f"compare error: {error}", file=sys.stderr)
+        return 2
+    except PolicyViolation as error:
+        print(f"policy error: {error}", file=sys.stderr)
+        return 2
+    print(compare_apply.render_export_summary(export))
+    print(f"\n  correction file: {export.path} (format: {export.format})")
+    if export.withheld_path:
+        print(f"  withheld:        {export.withheld_path}")
+    print(f"  manifest:        {export.manifest_path}")
+    print(
+        "\nThis file is local. Nothing was sent to either live system; load it "
+        "with the target CRM's own import tool."
+    )
+    return 0
+
+
 def _cmd_export_comparable(args: argparse.Namespace) -> int:
     """One command: resolve, then emit only the suppressed comparable report.
 
@@ -754,6 +901,91 @@ def build_parser() -> argparse.ArgumentParser:
     )
     compare_parser.add_argument("--out", default="out", help="output directory")
     compare_parser.set_defaults(func=_cmd_compare)
+
+    creview_parser = sub.add_parser(
+        "compare-review",
+        help="review a comparison's undecided pairs in the local web queue",
+    )
+    creview_parser.add_argument(
+        "--left",
+        required=True,
+        help="legacy side: a recipe .toml, or a .csv whose header uses canonical field names",
+    )
+    creview_parser.add_argument(
+        "--right",
+        required=True,
+        help="target side: a recipe .toml, or a .csv whose header uses canonical field names",
+    )
+    creview_parser.add_argument(
+        "--reviewer",
+        required=True,
+        help="name recorded with every verdict; the decisions file attributes each decision",
+    )
+    creview_parser.add_argument(
+        "--require-second-reviewer",
+        action="store_true",
+        help=(
+            "hold each approval until a second, different reviewer also approves "
+            "(a side whose policy pack requires it turns this on regardless)"
+        ),
+    )
+    creview_parser.add_argument("--out", default="out", help="output directory")
+    creview_parser.add_argument(
+        "--decisions",
+        default=None,
+        help="decisions file to write (default <out>/compare_decisions.json)",
+    )
+    creview_parser.add_argument(
+        "--host", default="127.0.0.1", help="bind host (loopback only under the dv pack)"
+    )
+    creview_parser.add_argument(
+        "--port", type=int, default=8765, help="bind port (0 picks a free one)"
+    )
+    creview_parser.add_argument(
+        "--no-browser", action="store_true", help="do not open a browser window"
+    )
+    creview_parser.set_defaults(func=_cmd_compare_review)
+
+    capply_parser = sub.add_parser(
+        "compare-apply",
+        help=(
+            "export the local, import-ready correction file for the target side; "
+            "refuses while any comparison review pair is undecided"
+        ),
+    )
+    capply_parser.add_argument(
+        "--left",
+        required=True,
+        help="legacy side: a recipe .toml, or a .csv whose header uses canonical field names",
+    )
+    capply_parser.add_argument(
+        "--right",
+        required=True,
+        help="target side: a recipe .toml, or a .csv whose header uses canonical field names",
+    )
+    capply_parser.add_argument(
+        "--out", default="out", help="output directory holding the comparison manifest"
+    )
+    capply_parser.add_argument(
+        "--decisions",
+        default=None,
+        help="decisions JSON from compare-review (default <out>/compare_decisions.json)",
+    )
+    capply_parser.add_argument(
+        "--corrections",
+        default=None,
+        help="corrections JSON (default: corrections.json beside --decisions)",
+    )
+    capply_parser.add_argument(
+        "--format",
+        choices=sorted(compare_apply.CORRECTION_FORMATS),
+        default="csv",
+        help=(
+            "correction-file column shape: canonical csv, or a CRM import map "
+            "(salesforce_csv, civicrm_csv); the file is local in every case"
+        ),
+    )
+    capply_parser.set_defaults(func=_cmd_compare_apply)
 
     comparable_parser = sub.add_parser(
         "export-comparable",
