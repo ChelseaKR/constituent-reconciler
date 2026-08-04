@@ -35,8 +35,13 @@ and matched identities whose reviewed golden values differ from what the
 target currently holds. Its columns follow the same import field maps the
 run pipeline's ``salesforce_csv`` and ``civicrm_csv`` exports use, plus the
 external-id column keyed on the identity id, so a CRM-side upsert on that
-column stays idempotent. It is a PII artifact: local only, listed in the
-destruction inventory, covered in docs/DATA-FLOW-AND-RETENTION.md.
+column stays idempotent across repeated imports of this file. The identity id
+is minted by the reconciler, not by the target system: for a matched identity,
+an upsert keyed on it would add a record rather than update the one the target
+already holds, so match those rows to their existing target records with the
+import tool's own matching before writing. It is a PII artifact: local only,
+listed in the destruction inventory, covered in
+docs/DATA-FLOW-AND-RETENTION.md.
 """
 
 from __future__ import annotations
