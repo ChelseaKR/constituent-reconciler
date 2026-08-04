@@ -113,15 +113,28 @@ class ConsoleProgressRenderer:
         self._last_redraw = float("-inf")
         self._line_width = 0
         self._line_open = False
+        self._broken = False
 
     def emit(self, event: ProgressEvent) -> None:
-        """Render one event in the mode chosen by the stream's isatty()."""
+        """Render one event in the mode chosen by the stream's isatty().
 
-        if self._is_tty:
-            self._render_tty(event)
-        elif event.status != "advanced":
-            self._stream.write(render_line(event) + "\n")
-            self._stream.flush()
+        A stream that fails mid-run (a broken pipe, a closed file) latches
+        the renderer off instead of raising: progress is advisory output,
+        and a rendering failure must never take down the pipeline between a
+        connector write and its provenance entry.
+        """
+
+        if self._broken:
+            return
+        try:
+            if self._is_tty:
+                self._render_tty(event)
+            elif event.status != "advanced":
+                self._stream.write(render_line(event) + "\n")
+                self._stream.flush()
+        except (OSError, ValueError):
+            self._broken = True
+            self._line_open = False
 
     def close(self) -> None:
         """Terminate an in-place line a failed or interrupted stage left open.
@@ -131,10 +144,14 @@ class ConsoleProgressRenderer:
         once; a no-op when no line is open.
         """
 
-        if self._line_open:
+        if self._broken or not self._line_open:
+            return
+        try:
             self._stream.write("\n")
             self._stream.flush()
-            self._line_open = False
+        except (OSError, ValueError):
+            self._broken = True
+        self._line_open = False
 
     def _render_tty(self, event: ProgressEvent) -> None:
         if event.status == "advanced":

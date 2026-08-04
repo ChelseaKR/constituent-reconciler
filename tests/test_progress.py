@@ -353,3 +353,53 @@ def test_cli_run_renders_progress_records_on_stderr(
     assert "progress: review artifact" in err
     # The demo recipe ingests CSVs only, so no extract stage is reported.
     assert "progress: extract" not in err
+
+
+class _FailingStream(io.StringIO):
+    """A text stream whose writes start failing after a set number of calls."""
+
+    def __init__(self, fail_after: int = 0, tty: bool = False) -> None:
+        super().__init__()
+        self._fail_after = fail_after
+        self._tty = tty
+        self.writes = 0
+
+    def isatty(self) -> bool:
+        return self._tty
+
+    def write(self, text: str) -> int:
+        self.writes += 1
+        if self.writes > self._fail_after:
+            raise BrokenPipeError("stream went away")
+        return super().write(text)
+
+
+def test_a_broken_stream_latches_the_renderer_off_instead_of_raising() -> None:
+    # The contract in the renderer docstring: rendering never raises into
+    # the pipeline, because an emit sits between a connector write and its
+    # provenance entry. A stream that fails on the first write, mid-run,
+    # or at close must be absorbed and the renderer must go quiet.
+    for fail_after in (0, 1, 2):
+        renderer = ConsoleProgressRenderer(_FailingStream(fail_after=fail_after))
+        for status in ("started", "advanced", "finished"):
+            renderer.emit(ProgressEvent(stage="write", status=status, completed=1, total=2))
+        renderer.close()
+        renderer.close()
+
+    tty = ConsoleProgressRenderer(_FailingStream(fail_after=1, tty=True))
+    tty.emit(ProgressEvent(stage="ingest", status="started", completed=0, total=2))
+    tty.emit(ProgressEvent(stage="ingest", status="finished", completed=2, total=2))
+    tty.close()
+
+
+def test_apply_wires_the_renderer_exactly_like_run() -> None:
+    # Pins the CLI wiring for ``reconcile apply`` (the end-to-end stderr
+    # test above covers ``run``): both commands construct the stderr
+    # renderer inside try/finally and pass it to the pipeline.
+    from constituent_reconciler import cli
+
+    for command in (cli._cmd_run, cli._cmd_apply):
+        source = inspect.getsource(command)
+        assert "ConsoleProgressRenderer" in source
+        assert "progress=" in source
+        assert "finally:" in source and ".close()" in source
