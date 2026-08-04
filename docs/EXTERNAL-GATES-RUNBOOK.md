@@ -100,10 +100,12 @@ without seeing the screen."
 3. While the tester works, take notes but do not steer. The document asks for
    surprises, not only failures: "a label that is technically present but
    confusing is worth recording."
-4. Fill the Results table exactly as the document specifies: date, tester
-   (name or consented pseudonym), OS, browser, screen reader and version, and
-   one line per numbered step (pass, pass with a note, or fail with what
-   happened).
+4. Fill the Results table with the fields the document lists: date, tester,
+   OS, browser, screen reader and version, and one line per numbered step
+   (pass, pass with a note, or fail with what happened). The document asks
+   only for "tester"; this runbook's own recommendation is to record a name
+   or a consented pseudonym, so the tester decides how they are identified
+   in a public repository.
 5. File a GitHub issue for every fail and every note. The document requires
    this before its status line changes: "Any fail or note should become a
    linked issue before this file's Status line at the top is changed to
@@ -367,28 +369,42 @@ which a fixture can stand in for.
 3. Copy `examples/intake-demo/recipe-civicrm.toml` and set `endpoint` to your
    instance's API v4 URL. Use only the bundled demo CSVs. Never put real
    constituent data in a recording.
-4. Set up the screen recording: an OS-native recorder or OBS Studio, capturing
-   the terminal and the browser. Two hygiene rules before pressing record:
-   the API key must never appear on screen (export `CIVICRM_API_KEY` from an
-   off-camera shell step or a sourced file, and do not scroll shell history
-   on camera), and the CiviCRM instance must contain no data you would not
-   publish.
-5. Record the run end to end, narrating or captioning each step:
-   - `reconcile validate --config recipe-civicrm.toml`
-   - `reconcile run --config recipe-civicrm.toml --out out --dry-run`, showing
-     the summary of what would be written without contacting the server
+4. Provision the credential and set up the recording, both before pressing
+   record. Export `CIVICRM_API_KEY` in the recording shell off camera (or
+   source it from a file): the live-writing command in the script below reads
+   the key from the environment and fails without it, so the environment must
+   be ready before any step that writes. Then set up the screen capture, an
+   OS-native recorder or OBS Studio, showing the terminal and the browser.
+   Two hygiene rules: the key must never appear on screen (do not echo it,
+   and do not scroll shell history on camera), and the CiviCRM instance must
+   contain no data you would not publish.
+5. Record the run end to end, narrating or captioning each step. The labels
+   below state what each command does in the code: `validate`, the dry run,
+   `review`, and `verify` never contact the server, while `reconcile apply`
+   exports through the recipe's `civicrm` connector with dry run off and is
+   the live write. A plain `reconcile run` without `--dry-run` would also
+   write live, but it ignores the decisions file, so it has no place in this
+   script; the point of the recording is that the reviewed decisions reach
+   the CRM.
+   - `reconcile validate --config recipe-civicrm.toml` (local: shape-checks
+     the recipe without running the pipeline or building a connector)
+   - `reconcile run --config recipe-civicrm.toml --out out --dry-run` (local
+     dry run: shows the summary of what would be written without contacting
+     the server)
    - `reconcile review --config recipe-civicrm.toml --reviewer "<name>" --out
-     out`, deciding the lookalike pairs on camera
+     out` (local: decide the lookalike pairs on camera; the decisions are
+     saved to `out/decisions.json` and nothing reaches CiviCRM yet)
    - `reconcile apply --config recipe-civicrm.toml --decisions
-     out/decisions.json --out out`
-   - `CIVICRM_API_KEY=... reconcile run --config recipe-civicrm.toml --out
-     out` (the key set off camera), the live write
+     out/decisions.json --out out` (live write: re-resolves with the
+     on-camera decisions applied and writes the result into CiviCRM, using
+     the key exported in step 4)
    - the CiviCRM UI showing the created contacts with `external_identifier`
      populated
-   - a second live run, then the CiviCRM UI again, showing the same contacts
-     updated rather than duplicated (the idempotence the recipe header
-     promises)
-   - `reconcile verify --provenance out/provenance.jsonl`
+   - a second `reconcile apply` with the same decisions file (live write),
+     then the CiviCRM UI again, showing the same contacts updated rather
+     than duplicated (the idempotence the recipe header promises)
+   - `reconcile verify --provenance out/provenance.jsonl` (local: checks the
+     hash chain over the provenance entries the live writes appended)
 6. Publish the recording somewhere durable that the maintainer controls. A
    GitHub Release asset is a reasonable home once gate 2 exists; a video file
    does not belong in the git tree.
