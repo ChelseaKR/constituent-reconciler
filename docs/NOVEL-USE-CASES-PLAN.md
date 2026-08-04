@@ -1,5 +1,7 @@
 # Novel use cases: implementation plan
 
+> This plan is the near-term detail under the multiyear roadmap in [ROADMAP-MULTIYEAR.md](ROADMAP-MULTIYEAR.md).
+
 **Drafted:** 2026-07-22  
 **Planning frame:** Now / Next / Later  
 **Scope:** new applications of the shipped extract-normalize-resolve-review-
@@ -141,6 +143,8 @@ safe way to understand the repair.
 
 **Dependencies.**
 
+- The capability protocol is decided in
+  [adr/0012-connector-repair-capabilities.md](adr/0012-connector-repair-capabilities.md).
 - Pilot with one destination first, preferably CiviCRM because it is
   self-hostable and its entity model is already explicit.
 - Add delete/deactivate/merge semantics only from current vendor documentation
