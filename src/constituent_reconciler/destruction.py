@@ -33,14 +33,19 @@ from constituent_reconciler.provenance import ProvenanceLog
 # An explicit list, not a glob: destruction must never reach past what the
 # pipeline is known to have written (decisions.json carries ids and verdicts
 # only, aggregate_summary.json is non-identifying by construction,
-# run_manifest.json carries file digests and configuration only, and the
-# provenance log is the evidence of destruction itself).
+# run_manifest.json and compare_manifest.json carry file digests and
+# configuration only, migration_summary.json carries counts only, and the
+# provenance log is the evidence of destruction itself). The two cutover
+# artifacts come from ``reconcile compare`` (compare.py) and hold field
+# values from both exports, so they sort with the record-bearing files.
 PII_ARTIFACTS: tuple[str, ...] = (
     "resolved.csv",
     "review_queue.csv",
     "withheld.csv",
     "salesforce_import.csv",
     "civicrm_import.csv",
+    "cutover_report.csv",
+    "cutover_review.csv",
 )
 
 PROVENANCE_FILENAME = "provenance.jsonl"

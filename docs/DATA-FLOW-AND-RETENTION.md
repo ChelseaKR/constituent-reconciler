@@ -45,6 +45,18 @@ display, and under the `dv` pack a non-loopback bind is refused. Its only
 side effect on disk is `decisions.json`, which carries record ids and verdicts
 and no field values (`review/session.py`).
 
+`reconcile compare` (`compare.py`) reads two exports as read-only sources and
+writes only into `--out`: the cutover report and review-pair artifacts below
+plus a count-only summary and a digest manifest. The command constructs no
+connector on any path, so a recipe's `[output]` section cannot cause a write
+to either live system; `tests/test_compare.py` enforces that invariant.
+Ingest on a compare side is the run pipeline's ingest, so the cloud-seam
+rules above apply unchanged: a PDF side whose recipe enables the Bedrock
+backend may route low-confidence pages through the policy-gated seam, and the
+`dv` and `hipaa` packs fuse it off before any data flows. The compare tests
+pin the fused-off seam under the `dv` pack alongside the no-connector
+invariant.
+
 ```mermaid
 flowchart TD
     SRC[Operator's source files<br/>existing/incoming CSVs, intake PDFs<br/>read in place, never copied] --> ING[ingest + offline extract<br/>pipeline.py, extract/pdf.py]
@@ -76,6 +88,10 @@ this table is aspirational.
 | `decisions.json` | `review/session.py` | the `--out` directory | Ids only | Pair ids and verdicts. No field values, by design. |
 | `provenance.jsonl` | `provenance.py` | the `--out` directory | No field values | Each entry: BLAKE2b hash of the written payload, record and member ids, consent flag, timestamp, chain hashes. Payloads are referenced by hash, never stored. |
 | `aggregate_summary.json` | `pipeline._write_aggregate_summary` over `suppression.py` | the `--out` directory | No | Total and suppressed category counts. Written only under a pack with `aggregate_export` (the `dv` pack), and not on `--dry-run`. |
+| `cutover_report.csv` | `compare.write_cutover_report` | the `--out` directory | Yes: per-identity field values from both compared exports, with conflict flags | Written by `reconcile compare` only. In the destruction inventory (`destruction.PII_ARTIFACTS`). |
+| `cutover_review.csv` | `compare.write_cutover_review` | the `--out` directory | Yes: field values of the undecided cross-export pairs | Written by `reconcile compare` only. In the destruction inventory. |
+| `migration_summary.json` | `compare.write_migration_summary` | the `--out` directory | No | Identity and conflict counts under the versioned `migration_summary` schema; no field values, asserted by `tests/test_compare.py`. |
+| `compare_manifest.json` | `compare.write_compare_manifest` | the `--out` directory | No field values | Digests of both recipes and every input file, both column mappings, thresholds. |
 | `eval/report.md` | `report.py` via `reconcile eval` | the path given to `--out` | No | Match-quality rates on seeded synthetic fixtures; the fixtures contain no real personal data. |
 | Terminal output | `report.render_run_summary`, `suppression.render_summary` | the operator's terminal | No | Per-stage counts and the suppressed aggregate. |
 | Cloud seam egress | `extract/seam.py` | Amazon Bedrock | Yes, when enabled | Low-confidence PDF pages only. A no-op under `dv` and `hipaa`, asserted by `tests/test_no_egress.py`. |
