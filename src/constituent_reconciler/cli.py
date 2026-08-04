@@ -35,6 +35,7 @@ from constituent_reconciler.models import Correction, RunResult
 from constituent_reconciler.narrative import LANGUAGES, render_narrative
 from constituent_reconciler.pipeline import ExportSummary
 from constituent_reconciler.policy import PolicyViolation
+from constituent_reconciler.progress import ConsoleProgressRenderer
 from constituent_reconciler.provenance import ProvenanceLog, verify_log
 from constituent_reconciler.report import (
     render_eval_markdown,
@@ -175,21 +176,30 @@ def _cmd_run(args: argparse.Namespace) -> int:
     # A dry run must not touch disk, so it also runs without the stage cache:
     # neither reading a stale entry nor writing a fresh one.
     cache = None if args.dry_run else stage_cache.for_recipe(recipe, out_dir)
-    result = pipeline.run(recipe, cache=cache)
-    _, withheld = partition_by_consent(
-        result.golden,
-        require_consent=recipe.require_consent,
-        destination=recipe.output.connector,
-    )
-    print(render_run_summary(result, withheld=len(withheld)))
+    # Progress renders on stderr, keeping stdout as the summary channel; the
+    # renderer detects a TTY itself and close() terminates a line an error
+    # left open so the message that follows starts on its own line.
+    progress = ConsoleProgressRenderer(sys.stderr)
     try:
-        summary = pipeline.export(result, recipe, out_dir=out_dir, dry_run=args.dry_run)
-    except PolicyViolation as error:
-        print(f"\npolicy error: {error}", file=sys.stderr)
-        return 2
-    except ConnectorError as error:
-        print(f"\nconnector error: {error}", file=sys.stderr)
-        return 2
+        result = pipeline.run(recipe, cache=cache, progress=progress)
+        _, withheld = partition_by_consent(
+            result.golden,
+            require_consent=recipe.require_consent,
+            destination=recipe.output.connector,
+        )
+        print(render_run_summary(result, withheld=len(withheld)))
+        try:
+            summary = pipeline.export(
+                result, recipe, out_dir=out_dir, dry_run=args.dry_run, progress=progress
+            )
+        except PolicyViolation as error:
+            print(f"\npolicy error: {error}", file=sys.stderr)
+            return 2
+        except ConnectorError as error:
+            print(f"\nconnector error: {error}", file=sys.stderr)
+            return 2
+    finally:
+        progress.close()
     _print_export(recipe, summary, dry_run=args.dry_run)
     if not args.dry_run:
         print(f"  run report:   {_write_run_report(result, out_dir)}")
@@ -370,33 +380,41 @@ def _cmd_apply(args: argparse.Namespace) -> int:
     # run's household_suggestions.csv by a reviewer; a suggestion never applies
     # to the CRM export column until it appears here (household.py).
     confirmed_households = _load_household_ids(decisions_data, "households_confirmed")
-    result = pipeline.run(
-        recipe,
-        force_auto=force_auto,
-        force_drop=force_drop,
-        corrections=corrections,
-        cache=stage_cache.for_recipe(recipe, Path(args.out)),
-    )
-    _, withheld = partition_by_consent(
-        result.golden,
-        require_consent=recipe.require_consent,
-        destination=recipe.output.connector,
-    )
-    print(render_run_summary(result, withheld=len(withheld)))
+    # Same progress surface as `run`: apply executes the same stages, so it
+    # emits the same events, rendered on stderr.
+    progress = ConsoleProgressRenderer(sys.stderr)
     try:
-        summary = pipeline.export(
-            result,
+        result = pipeline.run(
             recipe,
-            out_dir=Path(args.out),
-            dry_run=False,
-            confirmed_households=confirmed_households,
+            force_auto=force_auto,
+            force_drop=force_drop,
+            corrections=corrections,
+            cache=stage_cache.for_recipe(recipe, Path(args.out)),
+            progress=progress,
         )
-    except PolicyViolation as error:
-        print(f"\npolicy error: {error}", file=sys.stderr)
-        return 2
-    except ConnectorError as error:
-        print(f"\nconnector error: {error}", file=sys.stderr)
-        return 2
+        _, withheld = partition_by_consent(
+            result.golden,
+            require_consent=recipe.require_consent,
+            destination=recipe.output.connector,
+        )
+        print(render_run_summary(result, withheld=len(withheld)))
+        try:
+            summary = pipeline.export(
+                result,
+                recipe,
+                out_dir=Path(args.out),
+                dry_run=False,
+                confirmed_households=confirmed_households,
+                progress=progress,
+            )
+        except PolicyViolation as error:
+            print(f"\npolicy error: {error}", file=sys.stderr)
+            return 2
+        except ConnectorError as error:
+            print(f"\nconnector error: {error}", file=sys.stderr)
+            return 2
+    finally:
+        progress.close()
     _print_export(recipe, summary, dry_run=False)
     return 0
 

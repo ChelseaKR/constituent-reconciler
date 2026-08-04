@@ -7,6 +7,25 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **Progress events for `run` and `apply` (UC-01 remainder, #77).**
+  `pipeline.run` and `pipeline.export` accept a `ProgressSink` (new
+  `progress.py`); the default sink discards every event, so library callers
+  see no change unless they pass one. The pipeline emits started, advanced,
+  and finished events for ingest, extract, normalize, score, write, and
+  review artifact, with completed/total counts where a denominator exists:
+  file and document totals come from a pre-read ingest plan, record totals
+  from the batch itself, and export totals from the exportable set and the
+  review queue. Stage durations on finish events come from the same
+  `_StageTimer` marks the run summary records. Events are content-free by
+  construction (stage name, status, counts, seconds), and a test scans a
+  fixture run's payloads for planted values, paths, and record ids. The CLI
+  renders events on stderr: one line updated in place on a TTY, stable
+  newline records on anything else, and never a control character to a
+  non-TTY stream. A command that skips a stage emits nothing for it, so a
+  run with no PDF or text sources reports no extract stage, while `--dry-run`
+  emits the same write and review-artifact events as a real run because both
+  stages still execute there. The UC-01 large-corpus before/after numbers
+  remain outstanding (#78).
 - **Content-addressed stage cache for extraction and normalization (UC-01).**
   A recipe's new `[cache]` section (validated fail-closed; absent means off)
   stores extraction and normalization results as content-addressed files
@@ -33,12 +52,13 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   `reconcile destroy` covers it, `--cache-dir` reaches an explicit boundary
   but refuses any directory that does not have the stage-cache shape, the
   cache walk deletes nothing outside `extract/` and `normalize/` entry
-  files, and each deleted entry gets its own destruction certificate. Two
-  UC-01 items are deliberately not part of this change: the progress-event
-  work planned beside it in docs/NOVEL-USE-CASES-PLAN.md, and the
-  large-corpus wall-clock and peak-memory before/after numbers from the same
-  plan item's acceptance criteria. No benchmark has been run, so none is
-  claimed; docs/CLAIMS-AUDIT.md records both gaps.
+  files, and each deleted entry gets its own destruction certificate. One
+  UC-01 item is deliberately not part of this change: the large-corpus
+  wall-clock and peak-memory before/after numbers from the plan item's
+  acceptance criteria. No benchmark has been run, so none is claimed;
+  docs/CLAIMS-AUDIT.md records the gap (#78). The progress-event work the
+  cache change deferred lands in this same release; see the progress-events
+  entry above.
 - **Airtable native-upsert connector (roadmap E3).** The new `airtable`
   destination batches at Airtable's ten-record limit, uses
   `performUpsert` on the configured external-id field, reads a personal access
