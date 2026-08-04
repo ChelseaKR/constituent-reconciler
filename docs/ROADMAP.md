@@ -1,5 +1,7 @@
 # Roadmap
 
+> **Historical record:** this file preserves the phase plan as built; active multiyear planning lives in [ROADMAP-MULTIYEAR.md](ROADMAP-MULTIYEAR.md).
+
 Planned direction for constituent-reconciler. Dates are intentions, not
 promises; items move earlier when users ask for them. Feedback and feature
 requests are welcome as GitHub issues.
