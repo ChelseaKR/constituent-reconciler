@@ -7,8 +7,9 @@ PDF-creation library. It lives in the package rather than here so that
 ``eval/fixtures/extraction/make_fixtures.py`` can regenerate the committed
 labeled extraction fixtures from the same generator.
 
-``FakeCivicrmTransport``, ``FakeSalesforceTransport``, and
-``FakeWebhookTransport`` are queued-response transports for the network
+``FakeAirtableTransport``, ``FakeCivicrmTransport``,
+``FakeSalesforceTransport``, and ``FakeWebhookTransport`` are queued-response
+transports for the network
 connectors. The connector unit tests and the conformance suite share them so
 every test observes requests the same way.
 """
@@ -21,6 +22,18 @@ from pathlib import Path
 import pytest
 
 from constituent_reconciler.testing import make_pdf
+
+
+class FakeAirtableTransport:
+    """Returns queued responses and records every Airtable PATCH."""
+
+    def __init__(self, responses: list[tuple[int, bytes]]) -> None:
+        self._responses = responses
+        self.calls: list[tuple[str, dict[str, str], bytes]] = []
+
+    def patch(self, url: str, *, headers: dict[str, str], body: bytes) -> tuple[int, bytes]:
+        self.calls.append((url, headers, body))
+        return self._responses.pop(0)
 
 
 class FakeCivicrmTransport:

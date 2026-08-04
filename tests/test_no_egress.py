@@ -67,6 +67,25 @@ def test_dv_pack_refuses_the_webhook_target_too(tmp_path: Path) -> None:
     assert not (tmp_path / "resolved.csv").exists()
 
 
+def test_dv_pack_refuses_the_airtable_target_too(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    from constituent_reconciler.config import OutputConfig
+
+    base = load_recipe(EXAMPLES / "recipe.toml", policy_pack="dv")
+    recipe = replace(
+        base,
+        output=OutputConfig(
+            connector="airtable",
+            endpoint="https://api.airtable.com/v0/app123/Constituents",
+        ),
+    )
+    result = pipeline.run(recipe)
+    with pytest.raises(PolicyViolation, match="non-local write target"):
+        pipeline.export(result, recipe, out_dir=tmp_path)
+    assert not (tmp_path / "resolved.csv").exists()
+
+
 def test_dv_pack_allows_the_local_csv_target(tmp_path: Path) -> None:
     recipe = load_recipe(EXAMPLES / "recipe-dv.toml")
     result = pipeline.run(recipe)

@@ -4,6 +4,13 @@ Planned direction for constituent-reconciler. Dates are intentions, not
 promises; items move earlier when users ask for them. Feedback and feature
 requests are welcome as GitHub issues.
 
+> **Roadmap closeout (2026-07-22):** repository-owned items in this historical
+> roadmap and its research companion have been implemented or given an explicit
+> terminal product decision. See [ROADMAP-CLOSEOUT.md](ROADMAP-CLOSEOUT.md) for
+> the status ledger and [NOVEL-USE-CASES-PLAN.md](NOVEL-USE-CASES-PLAN.md) for
+> the active Now/Next/Later plan. Human and live-system evidence gates remain
+> open and are not represented as code work.
+
 The sequencing rule for this project: ship the differentiator first with the
 least-risky subsystems, then grow the chain outward. The differentiator is a
 non-technical review queue over probabilistic matching, plus a privacy mode a
@@ -175,12 +182,14 @@ the 1.0 milestone named.
 
 Gated on the pipeline proving out against more than one real organization and on
 no breaking change to the named surfaces for two consecutive releases. The
-engineering deliverables landed in v0.6 and the web review UI in v0.7; what
-remains for the 1.0 tag is the adoption evidence and the demonstrated-stability
-window, plus a full accessibility audit and supply-chain hardening (SBOM, signed
-releases, SHA-pinned actions). The tag is deliberately withheld until those are
-real, rather than claimed early: 1.0 means a stability promise, and a promise that
-depends on adoption cannot be made by a release script.
+engineering deliverables landed in v0.6 and the web review UI in v0.7. The
+supply-chain implementation has also landed: SBOM generation, keyless build
+provenance, SHA-pinned Actions, and security scans. What remains for the 1.0 tag
+is adoption evidence, the demonstrated-stability window, human
+accessibility/i18n evidence, and exercising the release workflow and committed
+ruleset in live repository settings. The tag is deliberately withheld until
+those are real: 1.0 means a stability promise, and a promise that depends on
+adoption cannot be made by a release script.
 
 ## Eval and quality plan
 

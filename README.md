@@ -87,9 +87,10 @@ The pipeline runs as a sequence of logged, deterministic-by-default steps:
    correction fixes one field value while approving the pair. The confidence gate is
    fail-closed: when in doubt, a human looks.
 6. **Write** only approved and consented records, through a connector for the
-   target system (CSV, CiviCRM, Salesforce, and a generic webhook today;
-   Apricot, Airtable, and Sheets designed but not yet built -- see
-   `docs/connectors/`).
+   target system (CSV, CiviCRM, Salesforce, Airtable, and a generic webhook
+   today). Apricot remains blocked on a verifiable vendor contract, and Google
+   Sheets remains a design-only target because its API has no atomic
+   upsert-by-key operation; see `docs/connectors/`.
 7. **Log** every write to an append-only provenance record with content
    hashing (BLAKE2b) and an RFC 3161 timestamp, so an org can show what was
    written, when, and under which consent.
@@ -425,11 +426,27 @@ this run unaltered. The full payload shape, a worked example, and signature
 verification code are in `docs/connectors/webhook.md`. Like CiviCRM and
 Salesforce, this is a network target the `dv` policy pack refuses.
 
-Apricot, Airtable, and Google Sheets are researched but not implemented: each
-is a proprietary vendor API this project has not built or tested against, so
-each has a design brief (auth model, rate limits, pagination, `is_local`
-classification) in `docs/connectors/` rather than code, pending a priority
-decision and API credentials.
+**Airtable (opt-in, network).** Airtable uses its native
+`performUpsert` operation, batched at ten records per request and keyed on the
+resolved cluster id:
+
+```sh
+AIRTABLE_TOKEN=your-personal-access-token reconcile run \
+  --config examples/intake-demo/recipe-airtable.toml --out out
+```
+
+Provision canonical field names plus `external_identifier` in the target
+table. The adapter fails closed on malformed responses and reports Airtable's
+documented 30-second cooldown on HTTP 429; it does not sleep and retry inside a
+run. See `docs/connectors/airtable-design.md`. Airtable is a network target, so
+the `dv` policy pack refuses it.
+
+Apricot remains design-only because no public, testable write contract is
+available without a vendor relationship. Google Sheets remains design-only
+because its API offers get, update, and append operations but no atomic
+upsert-by-external-id; a client-side read-then-write adapter would not meet this
+project's idempotency and concurrency bar. Those are explicit product
+decisions, not implied implementation promises.
 
 Every write is recorded in an append-only, tamper-evident provenance log
 (`out/provenance.jsonl`): each entry carries a BLAKE2b hash of the written fields

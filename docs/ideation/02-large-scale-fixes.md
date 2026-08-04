@@ -1,5 +1,10 @@
 # Large-scale fixes
 
+> **Closeout (2026-07-22):** FIX-01 through FIX-12 are implemented and covered
+> by the repository's tests, reports, or dated claims audit. This file is the
+> historical rationale and acceptance-criteria record. See
+> `docs/ROADMAP-CLOSEOUT.md` for the consolidated ledger.
+
 Drafted 2026-07-01. Twelve structural fixes grounded in the v0.7 source.
 None of these restates an item in `docs/ROADMAP.md` or
 `docs/RESEARCH-ROADMAP.md`; where a fix enables or extends an existing item

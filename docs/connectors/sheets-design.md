@@ -1,9 +1,12 @@
 # Google Sheets connector — design brief, not implementation
 
-Status: **research only, not built.** Part of roadmap item E3 ("More
-connectors: Apricot, Airtable, Sheets, generic webhook"). The generic webhook
-connector shipped (see `docs/connectors/webhook.md`); this vendor connector
-did not.
+Status: **closed as a direct-write target on 2026-07-22.** The official API
+offers get, update, batch update, and append operations, but no atomic
+upsert-by-external-id. The client-side read-scan-then-write design below has a
+race with concurrent edits and therefore does not satisfy this project's
+idempotent connector contract. CSV remains the supported local interchange
+path for Sheets. Reopen only if the connector protocol gains an explicitly
+weaker, non-atomic capability class that the operator must opt into.
 
 ## Why this is a brief, not code
 

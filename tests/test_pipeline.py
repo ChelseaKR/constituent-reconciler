@@ -14,6 +14,7 @@ from constituent_reconciler.consent import partition_by_consent
 from constituent_reconciler.evaluate import evaluate
 from constituent_reconciler.models import Consent, Correction, GoldenRecord, Record
 from constituent_reconciler.provenance import verify_log
+from tests.conftest import FakeAirtableTransport
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "intake-demo"
 
@@ -464,6 +465,51 @@ def test_export_via_webhook_creates_and_logs_provenance(tmp_path: Path) -> None:
     # created/updated from).
     assert summary.counts().get("written") == 21
     assert len(transport.calls) == 21
+    assert summary.provenance_path is not None
+    ok, _ = verify_log(summary.provenance_path)
+    assert ok
+
+
+def test_export_via_airtable_batches_and_logs_provenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AIRTABLE_TOKEN", "pat-test")
+    recipe = replace(
+        load_recipe(EXAMPLES / "recipe.toml"),
+        output=OutputConfig(
+            connector="airtable",
+            endpoint="https://api.airtable.com/v0/app123/Constituents",
+            auth_env="AIRTABLE_TOKEN",
+        ),
+    )
+    result = pipeline.run(recipe)
+    responses: list[tuple[int, bytes]] = []
+    for start in range(0, len(result.golden), 10):
+        count = min(10, len(result.golden) - start)
+        ids = [f"rec{start + offset:03d}" for offset in range(count)]
+        responses.append(
+            (
+                200,
+                json.dumps(
+                    {
+                        "records": [{"id": value, "fields": {}} for value in ids],
+                        "createdRecords": ids,
+                    }
+                ).encode(),
+            )
+        )
+    transport = FakeAirtableTransport(responses)
+
+    summary = pipeline.export(
+        result,
+        recipe,
+        out_dir=tmp_path,
+        airtable_transport=transport,
+    )
+
+    assert summary.counts().get("created") == 21
+    assert len(transport.calls) == 3
+    assert summary.logged == 21
     assert summary.provenance_path is not None
     ok, _ = verify_log(summary.provenance_path)
     assert ok

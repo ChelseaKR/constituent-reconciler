@@ -7,6 +7,15 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **Airtable native-upsert connector (roadmap E3).** The new `airtable`
+  destination batches at Airtable's ten-record limit, uses
+  `performUpsert` on the configured external-id field, reads a personal access
+  token from the environment, and fails closed on response-count drift.
+  Injected-transport and registry-conformance tests cover dry-run purity,
+  create/update classification, rate-limit reporting, and the DV pack's
+  non-local-target refusal. Apricot remains externally blocked and Sheets is
+  explicitly closed as a direct target because a client-side read/write
+  pseudo-upsert would not meet the connector contract.
 - **OpenSSF Scorecard in CI (roadmap D8).** `.github/workflows/scorecard.yml`
   runs the Scorecard analysis weekly and on every push to `main`, publishes
   results to the OpenSSF API, and uploads SARIF to Code Scanning. The first

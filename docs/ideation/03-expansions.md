@@ -6,6 +6,12 @@ holds the transformative bets. Nothing here restates E1 to E10 from
 `docs/RESEARCH-ROADMAP.md`; overlaps are cited and extended. Effort tiers as
 in `02-large-scale-fixes.md`.
 
+> **Closeout (2026-07-22):** EXP-01 through EXP-13 are implemented. EXP-14's
+> study is complete and remains gated against implementation. EXP-15 remains
+> conditional on a second shipping consumer. EXP-16's generator, scoring
+> harness, intervals, and committed report are implemented; third-party
+> reproduction is external evidence. See `docs/ROADMAP-CLOSEOUT.md`.
+
 ## Horizon 1 — deepen the core
 
 ### EXP-01 — The "correct" verdict: field-level correction in review

@@ -17,6 +17,12 @@ panel assembled 2026-06-30.
 > "values today" in the panel and the remediation targets here map only to landed
 > v0.7 surfaces and to gaps the docs already record as open.
 
+> **Closed 2026-07-22:** this is now a historical research and traceability
+> record. [ROADMAP-CLOSEOUT.md](ROADMAP-CLOSEOUT.md) resolves every item as
+> done, externally gated, closed by product decision, or conditional.
+> [NOVEL-USE-CASES-PLAN.md](NOVEL-USE-CASES-PLAN.md) is the active
+> implementation plan.
+
 Personas referenced by ID from the
 [roster](./USER-RESEARCH.md#persona-roster): A1 Rosa (intake), A2 Denise
 (reviewer), A3 Marcus (case manager), A4 Walter (volunteer), B1 Priya (ops/DBA),
@@ -128,16 +134,16 @@ Priority: **P0** now, **P1** next, **P2** soon, **P3** opportunistic. Effort:
 
 | ID | Expansion | Personas | Pri | Effort | Evidence / tag |
 | --- | --- | --- | --- | --- | --- |
-| E1 | **HMIS comparable-database and Open Referral HSDS output mappings** so funder reports come out of the same pipeline | E1, B1, C3, F1 | P1 | L | `docs/ROADMAP.md` open question 4; [HSDS](https://docs.openreferral.org/en/latest/hsds/overview.html); HUD Comparable Database Manual. **[corroborates open question 4]** |
+| E1 | **HMIS/HSDS mappings.** Closed 2026-07-22 as product-category mismatches: HSDS describes services, organizations, and locations rather than constituents; a conforming HMIS CSV is a full multi-table reporting product, not a field map. The bounded suppressed comparable report remains E2 | E1, B1, C3, F1 | — | — | Decision and current-standard rationale in `ROADMAP-CLOSEOUT.md`. |
 | E2 | **One-command comparable-database export profile** for VSPs (a CoC-shaped aggregate report) built on the DV pack's `aggregate_summary.json`. ✅ Implemented 2026-07-02 (`reconcile export-comparable` emits `comparable_report.json`) | D1, E1, C2, C3 | P1 | M | DV pack aggregate; HUD Comparable Database Manual. **[corroborates DV pack + NET-NEW report shape]** |
-| E3 | **More connectors**: Apricot, Airtable, Google Sheets, generic webhook, on the existing `Connector` interface. Webhook implemented (`connectors/webhook.py`, `docs/connectors/webhook.md`); Apricot/Airtable/Sheets researched and design-briefed only (`docs/connectors/{apricot,airtable,sheets}-design.md`) -- each needs a priority decision and API credentials this environment does not have before implementation | B1, B2, C3 | P2 | L | README "Salesforce, Airtable, Sheets, CSV and webhook to follow"; ROADMAP architecture diagram. **[corroborates ROADMAP]** |
+| E3 | **More connectors.** Webhook and Airtable implemented. Sheets closed as a direct target because its client-side pseudo-upsert is not atomic/idempotent; CSV is the supported interchange. Apricot is externally blocked on a verifiable contract and test account | B1, B2, C3 | — | — | `connectors/{webhook,airtable}.py`, conformance tests, and connector decision briefs. |
 | E4 | **Reviewer audit trail and optional two-person review for the DV pack**: record who decided each pair, allow a second-reviewer requirement on sensitive merges. ✅ Implemented: `--reviewer` attribution in `decisions.json`'s audit section, `--require-second-reviewer` / recipe `[review]` switch, on by default under the dv pack | C2, C1, D1, B1 | P2 | M | Review audit tests. **[NET-NEW]** |
 | E5 | **Documented CRM dedupe-rule cooperation**: a CiviCRM unsupervised-rule and an NPSP matching-rule configuration that work with the external-id upsert instead of fighting it. ✅ Implemented in `docs/CRM-DEDUPE-COOPERATION.md` | B2, B1 | P2 | M | `docs/ROADMAP.md` open question 2; [CiviCRM dedupe](https://civicrm.org/blog/spidersilk/understanding-civicrm-dedupe-rules); [NPSP duplicate management](https://help.salesforce.com/s/articleView?id=sfdo.configure_duplicate_detection_and_npsp_contact_merge.htm&language=en_US&type=5). **[corroborates open question 2 + NET-NEW deliverable]** |
-| E6 | **Harden and test the libpostal backend in CI, and add position-sensitive address matching** to retire the documented position-insensitive simplification | A1, D2, C2 | P2 | M | ADR 0004 / `docs/ROADMAP.md` v0.4; [libpostal](https://github.com/openvenues/libpostal). **[corroborates ROADMAP v0.4 + NET-NEW]** |
-| E7 | **Un-merge / reversibility path** so a wrong merge found after the write can be reversed, directly attacking the gated harm | A3, B1, D2, C3 | P2 | L | README/ROADMAP "a false merge is sometimes irreversible". **[NET-NEW]** |
+| E6 | **Harden and test the libpostal backend in CI, and add position-sensitive address matching.** ✅ Implemented | A1, D2, C2 | P2 | M | ADR 0004; real-libpostal CI job and position-aware tests. |
+| E7 | **Un-merge / reversibility.** Closed as a generic connector promise because destination repair is destructive and vendor-specific. Binding cannot-links and local regeneration are shipped; a capability-gated repair-plan use case is scoped separately | A3, B1, D2, C3 | — | — | `ROADMAP-CLOSEOUT.md`; `NOVEL-USE-CASES-PLAN.md` UC-03. |
 | E8 | **Pilot-readiness adoption kit**: a short "bring your own org" guide (map your spreadsheet, pick a pack, dry-run, read the eval) to drive the real-organization adoption the 1.0 tag is gated on. ✅ Implemented in `docs/ADOPTION-KIT.md`; actual multi-organization adoption remains external evidence | C3, B1, B2, F2 | P1 | M | `docs/ROADMAP.md` v1.0 adoption gate; `CLAUDE.md` audiences. **[NET-NEW]** |
-| E9 | **Incremental re-resolution and a progress indicator** so a re-run on a large existing set only re-resolves changed records | B1, A4 | P3 | L | README upsert idempotency (re-runs update, not duplicate). **[NET-NEW]** |
-| E10 | **Submit a formal DPGA registry nomination** (the conformance note is a self-assessment, not a submission) | F1, F2, C3 | P3 | S | `DPG-CONFORMANCE.md` "not a registry submission"; [DPGA registry](https://www.digitalpublicgoods.net/registry). **[corroborates DPG note + NET-NEW action]** |
+| E9 | **Incremental re-resolution.** Closed in the proposed score-reuse shape because term-frequency and new candidates make probabilities population-dependent. Safe deterministic-stage caching and progress are reframed as UC-01 | B1, A4 | — | — | `ROADMAP-CLOSEOUT.md`; `NOVEL-USE-CASES-PLAN.md` UC-01. |
+| E10 | **Submit a formal DPGA registry nomination.** External gate; the in-repository conformance work is complete | F1, F2, C3 | P3 | S | `DPG-CONFORMANCE.md`; submission requires maintainer identity and an external registry action. |
 
 ## Sequenced roadmap
 
@@ -159,17 +165,14 @@ and a defensible 1.0, plus the breadth items that come after.
 
 ### Product backlog after those gates
 
-- **E1:** HMIS and HSDS output mappings.
-- **E3:** Apricot, Airtable, and Google Sheets connectors, conditional on a
-  priority decision and integration credentials.
-- **E6:** libpostal CI hardening and the remaining address-depth work.
-- **E7:** un-merge/reversibility.
-- **E9:** incremental re-resolution and progress reporting.
-- **E10:** formal DPGA registry submission.
+This historical backlog is drained. E6 and Airtable are implemented; E1, E7,
+the Sheets shape, and unsafe score reuse are closed by product decision;
+Apricot and E10 are externally gated. New repository work is sequenced in
+`NOVEL-USE-CASES-PLAN.md`.
 
 Completed and evidenced in-repository: **R2, R4, R5, R6, R8, R9, R10, R11,
-E2, E4, and E5**. R3, R7, and E8 have shipped code/docs with the external
-evidence portions called out above.
+E2, E4, E5, E6, and the Airtable/webhook sub-scope of E3**. R3, R7, and E8
+have shipped code/docs with external evidence portions called out above.
 
 ## Recommended next validation cycle
 
