@@ -143,6 +143,8 @@ safe way to understand the repair.
 
 **Dependencies.**
 
+- The capability protocol is decided in
+  [adr/0012-connector-repair-capabilities.md](adr/0012-connector-repair-capabilities.md).
 - Pilot with one destination first, preferably CiviCRM because it is
   self-hostable and its entity model is already explicit.
 - Add delete/deactivate/merge semantics only from current vendor documentation
