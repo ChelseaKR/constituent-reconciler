@@ -7,6 +7,28 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **Mixed CSV and PDF corpus variant for the stage baseline (issue #78).**
+  `tools/corpusgen/generate.py --pdf-share` writes part of the incoming side
+  as seeded, digitally created text-layer PDF intake documents, one record
+  per page, with a manifest accounting for which rows each document carries.
+  `make perf-baseline-pdf` measures the six stages over that corpus, so the
+  extract row reports the time the pipeline's own pdfplumber reader spent
+  instead of the honest 0.0s a CSV-only corpus produces, and the UC-01 stage
+  cache has a real before number for the extraction half. Ingest reports its
+  wall clock with the reader's time removed, so the two rows partition the
+  walk. The measured artifacts are committed at
+  `eval/large-corpus-stage-baseline-pdf-2026-08-04.{md,json}`: 36.9s of
+  extraction over 3,756 pages in 151 documents, on the same machine class as
+  the CSV-only baseline that reports 0.0s. The PDF writer (`tools/corpusgen/pdfwrite.py`) is stdlib-only dev
+  tooling: no new package dependency, no runtime import, deterministic byte
+  for byte, and able to encode the non-ASCII names the transliteration
+  channel plants, which the existing one-page `testing.make_pdf` helper
+  cannot. The harness refuses a corpus whose PDFs, CSVs, or manifest changed
+  after generation, and both artifacts state that a PDF-carried record
+  reaches matching with fewer fields than the same person as a CSV row
+  (address and consent have no extraction pattern, and prose dates do not
+  match the numeric date pattern), so the run-count difference is documented
+  rather than read as a regression.
 - **Large-corpus stage-timing baseline (UC-01 "before" side).**
   `tools/corpusgen/stage_baseline.py`, run with `make perf-baseline`, times
   the six pipeline stages (ingest, extract, normalize, score, review

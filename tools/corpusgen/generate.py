@@ -12,10 +12,18 @@ Usage::
     python -m tools.corpusgen.generate --records 20000 --seed 20260707 \\
         --out-dir eval/large-corpus
 
-Determinism: the same ``--seed`` and ``--records`` always produce byte-
-identical output. Nothing here reads or writes real personal data; see the
-package docstring in ``tools/corpusgen/__init__.py`` for the fictional-data
-guarantee.
+With ``--pdf-share`` above zero, that share of the incoming rows is written
+as seeded text-layer PDF intake documents instead of CSV rows (the UC-01
+extract-half prerequisite, issue #78): the recipe then points ``incoming`` at
+a directory holding the remaining ``incoming.csv`` beside the PDFs and turns
+the pdfplumber extraction backend on, so the pipeline's own extractor does
+real work over a mixed corpus. ``pdf_manifest.json`` records which rows each
+document carries.
+
+Determinism: the same ``--seed``, ``--records``, and ``--pdf-share`` always
+produce byte-identical output. Nothing here reads or writes real personal
+data; see the package docstring in ``tools/corpusgen/__init__.py`` for the
+fictional-data guarantee.
 """
 
 from __future__ import annotations
@@ -24,11 +32,13 @@ import argparse
 import csv
 import json
 import random
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from tools.corpusgen import errors, pools
+from tools.corpusgen.pdfwrite import write_intake_pdf
 
 # Relative channel weights for a planted true-duplicate pair. "exact" is the
 # control (no error at all, still a genuine duplicate); the rest each stress
@@ -373,6 +383,13 @@ def generate(
 
 _FIELDNAMES = ["id", "First Name", "Last Name", "DOB", "Email", "Phone", "Address", "Consent"]
 
+# Records per generated PDF intake document, pinned rather than configurable:
+# the extractor makes one record per page, and a fixed page count keeps the
+# document set (and therefore its digest) a pure function of seed, size, and
+# share. Twenty-five pages models a scanned intake packet rather than one
+# file per person, which at 10^4 rows would mean thousands of tiny files.
+PDF_PAGES_PER_DOC = 25
+
 
 def _write_csv(path: Path, rows: list[dict[str, str]]) -> None:
     with path.open("w", newline="", encoding="utf-8") as handle:
@@ -385,21 +402,152 @@ def _namespaced_clusters(clusters: list[list[str]]) -> list[list[str]]:
     return [[f"existing:{left}", f"incoming:{right}"] for left, right in clusters]
 
 
-def write_corpus(corpus: Corpus, out_dir: Path, *, seed: int, total_records: int) -> None:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    _write_csv(out_dir / "existing.csv", corpus.existing_rows)
-    _write_csv(out_dir / "incoming.csv", corpus.incoming_rows)
+def _select_pdf_row_indices(n_rows: int, pdf_share: float) -> list[int]:
+    """Deterministic, evenly spaced choice of which incoming rows ride as PDFs.
 
-    ground_truth = {
+    Even spacing keeps the PDF-carried population representative of the whole
+    incoming side (duplicates, decoys, and singletons in their natural mix)
+    without consuming any randomness, so the generated rows themselves stay
+    byte-identical to a run of the same seed with ``pdf_share`` zero.
+    """
+
+    if pdf_share == 0.0 or n_rows == 0:
+        return []
+    count = min(max(1, round(n_rows * pdf_share)), n_rows)
+    step = n_rows / count
+    return [int(i * step) for i in range(count)]
+
+
+def _pdf_page_lines(row: dict[str, str]) -> list[str]:
+    """One intake-form page for one row, labeled the way the extractor reads.
+
+    The labels match ``extract/base.py``'s field patterns, so the pipeline's
+    own extractor recovers the row's values from the text layer. Empty email
+    and phone cells are omitted entirely, the way a blank form field yields no
+    labeled line.
+
+    Two kinds of value are printed here and do not survive extraction, both
+    because of what the extractor matches rather than anything this generator
+    does: address and consent have no field pattern at all, and a date of
+    birth the date-drift channel rendered in prose ("26 November 1942") does
+    not match the numeric date pattern. tests/test_corpusgen_pdf.py pins that
+    behaviour, and the stage-baseline report states it, so the mixed corpus's
+    run counts are not read as a matcher regression.
+    """
+
+    lines = [
+        "Constituent Intake Form",
+        f"Record: {row['id']}",
+        f"First Name: {row['First Name']}",
+        f"Last Name: {row['Last Name']}",
+        f"Date of Birth: {row['DOB']}",
+    ]
+    if row["Email"]:
+        lines.append(f"Email: {row['Email']}")
+    if row["Phone"]:
+        lines.append(f"Phone: {row['Phone']}")
+    lines.append(f"Address: {row['Address']}")
+    lines.append(f"Consent: {row['Consent']}")
+    return lines
+
+
+def _remove_stale_layout(out_dir: Path) -> None:
+    """Drop the other layout's files so a regenerated corpus has no strays.
+
+    A directory that held a CSV-only corpus and is regenerated with a PDF
+    share (or the reverse) must not leave the previous layout's inputs where
+    the pipeline would ingest them alongside the new ones.
+    """
+
+    (out_dir / "incoming.csv").unlink(missing_ok=True)
+    (out_dir / "pdf_manifest.json").unlink(missing_ok=True)
+    incoming_dir = out_dir / "incoming"
+    if incoming_dir.exists():
+        shutil.rmtree(incoming_dir)
+
+
+def _write_incoming_pdfs(corpus: Corpus, out_dir: Path, *, pdf_share: float) -> None:
+    """Write the mixed incoming side: a CSV beside seeded PDF intake documents."""
+
+    incoming_dir = out_dir / "incoming"
+    incoming_dir.mkdir(parents=True, exist_ok=True)
+    selected = _select_pdf_row_indices(len(corpus.incoming_rows), pdf_share)
+    selected_set = set(selected)
+    csv_rows = [row for i, row in enumerate(corpus.incoming_rows) if i not in selected_set]
+    pdf_rows = [corpus.incoming_rows[i] for i in selected]
+    _write_csv(incoming_dir / "incoming.csv", csv_rows)
+
+    documents = []
+    for doc_num, start in enumerate(range(0, len(pdf_rows), PDF_PAGES_PER_DOC), 1):
+        chunk = pdf_rows[start : start + PDF_PAGES_PER_DOC]
+        name = f"intake-{doc_num:04d}.pdf"
+        write_intake_pdf(incoming_dir / name, [_pdf_page_lines(row) for row in chunk])
+        documents.append({"file": name, "incoming_ids": [row["id"] for row in chunk]})
+
+    manifest = {
         "note": (
-            "Synthetic ground truth, generated by tools/corpusgen/generate.py "
-            f"(seed={seed}, requested total_records={total_records}). Zero real "
-            "personal data. Each cluster is a planted duplicate pair; decoy "
-            "pairs (same name, different date of birth) are recorded in "
-            "labels.json with kind='decoy' and are deliberately NOT here, "
-            "the way the demo fixture's look-alike Marias are not. Record ids "
-            "in this file are namespaced by source to match pipeline ingestion."
+            "Which incoming rows each generated PDF intake document carries, "
+            "one record per page. The pipeline mints content-derived ids for "
+            "records read from PDFs, so these incoming ids exist in the "
+            "corpus files and in ground_truth.json but not in pipeline "
+            "output; the PDF variant measures stage timing (UC-01), it does "
+            "not feed id-based eval scoring."
         ),
+        "pdf_share": pdf_share,
+        "pages_per_document": PDF_PAGES_PER_DOC,
+        "documents": documents,
+    }
+    (out_dir / "pdf_manifest.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def write_corpus(
+    corpus: Corpus,
+    out_dir: Path,
+    *,
+    seed: int,
+    total_records: int,
+    pdf_share: float = 0.0,
+) -> None:
+    """Write the corpus files. ``pdf_share`` above zero writes the mixed layout.
+
+    At the default share of zero the layout and bytes are identical to what
+    this function has always produced. Above zero, that share of the incoming
+    rows is carried as text-layer PDF intake documents in an ``incoming/``
+    directory beside the remaining ``incoming.csv``, and the recipe gains the
+    pdfplumber extraction backend.
+    """
+
+    if not 0.0 <= pdf_share <= 1.0:
+        raise ValueError(f"pdf_share must be in [0, 1], got {pdf_share}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    _remove_stale_layout(out_dir)
+    _write_csv(out_dir / "existing.csv", corpus.existing_rows)
+    if pdf_share == 0.0:
+        _write_csv(out_dir / "incoming.csv", corpus.incoming_rows)
+    else:
+        _write_incoming_pdfs(corpus, out_dir, pdf_share=pdf_share)
+
+    note = (
+        "Synthetic ground truth, generated by tools/corpusgen/generate.py "
+        f"(seed={seed}, requested total_records={total_records}). Zero real "
+        "personal data. Each cluster is a planted duplicate pair; decoy "
+        "pairs (same name, different date of birth) are recorded in "
+        "labels.json with kind='decoy' and are deliberately NOT here, "
+        "the way the demo fixture's look-alike Marias are not. Record ids "
+        "in this file are namespaced by source to match pipeline ingestion."
+    )
+    if pdf_share > 0.0:
+        note += (
+            " A share of the incoming rows is carried as PDF intake documents "
+            "(see pdf_manifest.json); the pipeline mints content-derived ids "
+            "for records read from PDFs, so clusters naming a PDF-carried "
+            "incoming id cannot be scored by id against pipeline output. The "
+            "PDF variant exists for stage timing (UC-01), not eval scoring."
+        )
+    ground_truth = {
+        "note": note,
         "clusters": _namespaced_clusters(corpus.clusters),
     }
     (out_dir / "ground_truth.json").write_text(
@@ -409,15 +557,18 @@ def write_corpus(corpus: Corpus, out_dir: Path, *, seed: int, total_records: int
         json.dumps({"labels": corpus.labels}, indent=2) + "\n", encoding="utf-8"
     )
 
+    pdf_flag = f" --pdf-share {pdf_share}" if pdf_share > 0.0 else ""
+    incoming_value = "incoming" if pdf_share > 0.0 else "incoming.csv"
+    extract_section = '\n[extract]\nbackend = "pdfplumber"\n' if pdf_share > 0.0 else ""
     recipe = f"""\
 # Generated synthetic corpus. Regenerate with:
-#   python -m tools.corpusgen.generate --records {total_records} --seed {seed} \\
+#   python -m tools.corpusgen.generate --records {total_records} --seed {seed}{pdf_flag} \\
 #       --out-dir {out_dir}
 # Do not hand-edit; edit the generator instead.
 
 [input]
 existing = "existing.csv"
-incoming = "incoming.csv"
+incoming = "{incoming_value}"
 id_column = "id"
 
 [mapping]
@@ -438,7 +589,7 @@ review = 0.80
 
 [policy]
 pack = "default"
-"""
+{extract_section}"""
     (out_dir / "recipe.toml").write_text(recipe, encoding="utf-8")
 
 
@@ -466,6 +617,15 @@ def main(argv: list[str] | None = None) -> int:
         default=_DEFAULT_DECOY_RATE,
         help=f"fraction planted as same-name decoys (default: {_DEFAULT_DECOY_RATE})",
     )
+    parser.add_argument(
+        "--pdf-share",
+        type=float,
+        default=0.0,
+        help=(
+            "fraction of incoming rows written as text-layer PDF intake "
+            "documents instead of CSV rows (default: 0.0, CSV-only)"
+        ),
+    )
     args = parser.parse_args(argv)
 
     corpus = generate(
@@ -474,13 +634,25 @@ def main(argv: list[str] | None = None) -> int:
         duplicate_rate=args.duplicate_rate,
         decoy_rate=args.decoy_rate,
     )
-    write_corpus(corpus, args.out_dir, seed=args.seed, total_records=args.records)
+    write_corpus(
+        corpus,
+        args.out_dir,
+        seed=args.seed,
+        total_records=args.records,
+        pdf_share=args.pdf_share,
+    )
     n_records = len(corpus.existing_rows) + len(corpus.incoming_rows)
+    n_pdf_rows = len(_select_pdf_row_indices(len(corpus.incoming_rows), args.pdf_share))
+    pdf_summary = ""
+    if n_pdf_rows:
+        n_docs = -(-n_pdf_rows // PDF_PAGES_PER_DOC)
+        pdf_summary = f", {n_pdf_rows} incoming rows carried by {n_docs} PDF documents"
     print(
         f"wrote {n_records} records ({len(corpus.existing_rows)} existing, "
         f"{len(corpus.incoming_rows)} incoming) to {args.out_dir}: "
         f"{len(corpus.clusters)} planted duplicate pairs, "
         f"{sum(1 for label in corpus.labels if label['kind'] == 'decoy')} decoy pairs"
+        f"{pdf_summary}"
     )
     return 0
 

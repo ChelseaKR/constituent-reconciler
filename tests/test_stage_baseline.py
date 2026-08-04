@@ -8,6 +8,12 @@ parameters and environment, the composed stages produce the same artifacts
 field values and machine-specific paths, and every fail-closed refusal
 (mismatched parameters, corpus bytes changed after generation, unaccounted
 input) aborts without writing a report.
+
+The mixed CSV+PDF variant (`make perf-baseline-pdf`, issue #78) gets the same
+treatment at the end of the file: the extract row must report the real time
+the ingest walk spent in the PDF reader over the real page count, the corpus
+block must record the PDF parameters, and a PDF document edited after
+generation must be refused the way an edited CSV is.
 """
 
 from __future__ import annotations
@@ -19,7 +25,7 @@ from pathlib import Path
 
 import pytest
 from tools.corpusgen import stage_baseline
-from tools.corpusgen.generate import generate, write_corpus
+from tools.corpusgen.generate import PDF_PAGES_PER_DOC, generate, write_corpus
 
 from constituent_reconciler import pipeline
 from constituent_reconciler.config import load_recipe
@@ -221,6 +227,22 @@ def test_hand_modified_corpus_is_refused(
     assert not json_out.exists()
 
 
+def test_csv_only_payload_has_no_pdf_block(baseline: dict[str, Path]) -> None:
+    """A CSV-only run carries the keys the committed 2026-08-03 baseline has.
+
+    The mixed variant adds its numbers under `corpus.pdf`; the CSV-only shape
+    stays exactly what it was, so the committed baseline stays comparable key
+    for key at the same schema version.
+    """
+
+    payload = json.loads(baseline["json"].read_text(encoding="utf-8"))
+    assert "pdf" not in payload["corpus"]
+    extract = next(s for s in payload["results"]["stages"] if s["name"] == "extract")
+    assert extract["wall_seconds"] == 0.0
+    assert extract["items"] == 0
+    assert "CSV-only" in extract["note"]
+
+
 def test_unaccounted_input_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -257,3 +279,202 @@ def test_unaccounted_input_is_refused(
     assert "unaccounted input" in capsys.readouterr().err
     assert not report.exists()
     assert not json_out.exists()
+
+
+# --- the mixed CSV+PDF variant (issue #78) --------------------------------
+
+_PDF_RECORDS = 400
+_PDF_SHARE = 0.2
+
+
+@pytest.fixture(scope="module")
+def pdf_baseline(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
+    """Run the harness CLI once on a tiny mixed corpus; share its outputs.
+
+    Sized so the run spans more than one generated PDF document, which is
+    what makes the per-document accumulation in the extract row meaningful.
+    """
+
+    base = tmp_path_factory.mktemp("stage-baseline-pdf")
+    corpus_dir = base / "corpus"
+    report = base / "stage-baseline.md"
+    json_out = base / "stage-baseline.json"
+    rc = stage_baseline.main(
+        [
+            "--out-dir",
+            str(corpus_dir),
+            "--records",
+            str(_PDF_RECORDS),
+            "--seed",
+            str(_SEED),
+            "--pdf-share",
+            str(_PDF_SHARE),
+            "--report-out",
+            str(report),
+            "--json-out",
+            str(json_out),
+            "--regenerate",
+            "--date",
+            _DATE,
+        ]
+    )
+    assert rc == 0
+    return {"base": base, "corpus": corpus_dir, "report": report, "json": json_out}
+
+
+def _manifest_counts(corpus_dir: Path) -> tuple[int, int]:
+    manifest = json.loads((corpus_dir / "pdf_manifest.json").read_text(encoding="utf-8"))
+    documents = manifest["documents"]
+    return len(documents), sum(len(doc["incoming_ids"]) for doc in documents)
+
+
+def test_extract_stage_reports_real_pdf_work(pdf_baseline: dict[str, Path]) -> None:
+    """The point of the variant: extract is no longer an honest zero.
+
+    The row must carry time the pipeline's own PDF reader actually spent, over
+    exactly the pages the manifest says were written, and the ingest row must
+    say it excludes that time so the two rows partition the walk rather than
+    double-counting it.
+    """
+
+    payload = json.loads(pdf_baseline["json"].read_text(encoding="utf-8"))
+    stages = {stage["name"]: stage for stage in payload["results"]["stages"]}
+    _, pdf_rows = _manifest_counts(pdf_baseline["corpus"])
+
+    assert stages["extract"]["wall_seconds"] > 0.0
+    assert stages["extract"]["items"] == pdf_rows
+    assert "PDF reader" in stages["extract"]["note"]
+    assert stages["ingest"]["wall_seconds"] >= 0.0
+    assert "excludes the time" in stages["ingest"]["note"]
+
+
+def test_pdf_corpus_block_records_the_variant(pdf_baseline: dict[str, Path]) -> None:
+    payload = json.loads(pdf_baseline["json"].read_text(encoding="utf-8"))
+    corpus = payload["corpus"]
+    documents, pdf_rows = _manifest_counts(pdf_baseline["corpus"])
+
+    assert corpus["pdf"]["share"] == _PDF_SHARE
+    assert corpus["pdf"]["documents"] == documents
+    assert corpus["pdf"]["rows"] == pdf_rows
+    assert corpus["pdf"]["pages_per_document"] == PDF_PAGES_PER_DOC
+    # The accounting gate in main() already refused any drift here; this
+    # states the invariant the gate enforces, in the artifact's own numbers.
+    assert corpus["existing_rows"] + corpus["incoming_rows"] == payload["results"]["records"]
+    assert corpus["incoming_rows"] > pdf_rows  # CSV rows remain on the incoming side
+
+
+def test_pdf_report_states_the_extraction_asymmetry(pdf_baseline: dict[str, Path]) -> None:
+    """The report must explain why the mixed run's counts differ, not hide it."""
+
+    report = pdf_baseline["report"].read_text(encoding="utf-8")
+    assert "mixed CSV and PDF corpus" in report
+    assert "make perf-baseline-pdf" in report
+    assert "not comparable to a CSV-only run" in report
+    assert "not a performance promise" in report
+    payload = json.loads(pdf_baseline["json"].read_text(encoding="utf-8"))
+    assert stage_baseline.PDF_EXTRACTION_NOTE in payload["notes"]
+
+
+def test_pdf_outputs_are_content_free(pdf_baseline: dict[str, Path]) -> None:
+    """Same content-free bar as the CSV-only baseline, over the mixed corpus."""
+
+    outputs = pdf_baseline["report"].read_text(encoding="utf-8") + pdf_baseline["json"].read_text(
+        encoding="utf-8"
+    )
+    assert str(pdf_baseline["base"]) not in outputs
+    assert "/Users/" not in outputs and "/home/" not in outputs
+    assert "intake-0001.pdf" not in outputs
+
+    with (pdf_baseline["corpus"] / "incoming" / "incoming.csv").open(
+        newline="", encoding="utf-8"
+    ) as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows
+    for row in rows[:20]:
+        for column in ("First Name", "Last Name"):
+            assert not re.search(rf"\b{re.escape(row[column])}\b", outputs)
+        assert row["Address"] not in outputs
+
+
+def test_the_timing_swap_is_put_back(pdf_baseline: dict[str, Path]) -> None:
+    """The harness times the PDF reader in place; it must not leave it wrapped.
+
+    A leaked wrapper would keep accumulating into a dead closure and would
+    make any later `pipeline.run` in this process measure the harness instead
+    of the pipeline.
+    """
+
+    assert pipeline.read_pdf_records.__module__ == "constituent_reconciler.pipeline"
+    assert pipeline.read_pdf_records.__name__ == "read_pdf_records"
+
+
+def test_edited_pdf_document_is_refused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Fail closed: the digest covers the PDFs, not only the CSVs.
+
+    A trailing PDF comment leaves the file parseable, so nothing downstream
+    would notice. The digest does, before any measurement runs.
+    """
+
+    corpus_dir = tmp_path / "corpus"
+    corpus = generate(total_records=200, seed=_SEED)
+    write_corpus(corpus, corpus_dir, seed=_SEED, total_records=200, pdf_share=_PDF_SHARE)
+    assert stage_baseline._ensure_corpus(
+        corpus_dir, records=200, seed=_SEED, pdf_share=_PDF_SHARE, regenerate=False
+    )
+
+    document = sorted((corpus_dir / "incoming").glob("intake-*.pdf"))[0]
+    document.write_bytes(document.read_bytes() + b"% edited after generation\n")
+    report = tmp_path / "tampered.md"
+    json_out = tmp_path / "tampered.json"
+    rc = stage_baseline.main(
+        [
+            "--out-dir",
+            str(corpus_dir),
+            "--records",
+            "200",
+            "--seed",
+            str(_SEED),
+            "--pdf-share",
+            str(_PDF_SHARE),
+            "--report-out",
+            str(report),
+            "--json-out",
+            str(json_out),
+            "--date",
+            _DATE,
+        ]
+    )
+    assert rc == 1
+    assert "not what the generator produces" in capsys.readouterr().err
+    assert not report.exists()
+    assert not json_out.exists()
+
+
+def test_a_csv_only_corpus_is_refused_for_a_pdf_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Fail closed: the recorded share must describe the measured layout."""
+
+    corpus_dir = tmp_path / "corpus"
+    corpus = generate(total_records=200, seed=_SEED)
+    write_corpus(corpus, corpus_dir, seed=_SEED, total_records=200)
+    report = tmp_path / "wrong-layout.md"
+    rc = stage_baseline.main(
+        [
+            "--out-dir",
+            str(corpus_dir),
+            "--records",
+            "200",
+            "--seed",
+            str(_SEED),
+            "--pdf-share",
+            str(_PDF_SHARE),
+            "--report-out",
+            str(report),
+            "--date",
+            _DATE,
+        ]
+    )
+    assert rc == 1
+    assert "does not match" in capsys.readouterr().err
+    assert not report.exists()
