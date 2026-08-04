@@ -59,7 +59,9 @@ def input_digests(paths: Iterable[Path]) -> dict[str, str]:
 
     Keys are file names; a directory's children are keyed ``dirname/childname``
     so two sources with the same file name stay distinct. Values are hex
-    digests. No field value enters the manifest, only hashes.
+    digests. No field value enters the manifest, only hashes. Repair planning
+    (``repair.py``) recomputes this mapping to prove the current source batch
+    is the one the manifest describes.
     """
 
     digests: dict[str, str] = {}

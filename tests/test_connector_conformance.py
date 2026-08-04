@@ -35,6 +35,7 @@ from constituent_reconciler.connectors import (
     Connector,
     get_factory,
 )
+from constituent_reconciler.connectors.repair import repair_declaration, supported_operations
 from constituent_reconciler.models import Consent, GoldenRecord
 from tests.conftest import (
     FakeAirtableTransport,
@@ -252,6 +253,21 @@ def test_external_id_round_trips(name: str, tmp_path: Path) -> None:
         content = artifact.read_text(encoding="utf-8")
         for record in RECORDS:
             assert record.cluster_id in content
+
+
+@pytest.mark.parametrize("name", sorted(CONNECTOR_REGISTRY))
+def test_undeclared_connectors_offer_no_repair_operations(name: str) -> None:
+    """No declaration means no remote repair, for every registered adapter.
+
+    ADR 0012: repair exists only where an adapter has declared verified
+    destination/version pairs, and no adapter has. When the first (CiviCRM
+    pilot) declaration lands, this test changes deliberately to assert that
+    declaration's contract instead of universal absence.
+    """
+
+    assert repair_declaration(name) is None
+    for version in ("", "5.81.0", "latest"):
+        assert supported_operations(name, version) == ()
 
 
 def test_unknown_name_raises_and_lists_known_names() -> None:

@@ -106,6 +106,7 @@ this table is aspirational.
 | `resolved.csv` | `connectors/csv_out.py` | the `--out` directory | Yes: golden-record field values, member ids, consent | The default write target. Skipped on `--dry-run`. |
 | `civicrm_import.csv`, `salesforce_import.csv` | `connectors/crm_csv.py` | the `--out` directory | Yes: import-shaped field values | Local files, so permitted under the `dv` pack. Skipped on `--dry-run`. |
 | Live CRM records | `connectors/civicrm.py`, `connectors/salesforce.py` | the remote CRM | Yes | Non-local; refused fail-closed under the `dv` pack (`pipeline.build_connector`). |
+| `repair_plan.json` | `repair.py` via `reconcile plan-split` | the run's `--out` directory, beside the manifest | Yes: proposed split records and restoration values for the members of one written cluster | Local only, never sent anywhere. The provenance log stores its digest, not its content. Regenerable at will from the manifest and sources, so destroying it loses nothing. |
 | `withheld.csv` | `pipeline._write_withheld` | the `--out` directory | Ids only | Cluster id, member record ids, reason. No field values, but ids resolve to people through the organization's own systems. |
 | `decisions.json` | `review/session.py` | the `--out` directory | Ids only | Pair ids and verdicts. No field values, by design. |
 | `stage_cache/` entry files | `stage_cache.py` via `pipeline.run` | `<out>/stage_cache`, or the recipe's explicit `[cache] dir` boundary | Yes: extracted and normalized field values, keyed by content digest | Written only when a recipe opts in. Covered by `reconcile destroy`; an explicit boundary is covered via `--cache-dir`. |
@@ -137,10 +138,13 @@ The default pack enforces no confidentiality invariants beyond the ordinary
 fail-closed gate (`policy.py`), so retention is governed entirely by the
 organization's existing records schedule. The model:
 
-* `review_queue.csv`, `resolved.csv`, and the CRM import CSVs carry the same
-  personal data as the source CRM export they came from. Put them under the
-  same schedule as that export, and delete the output directory once a run's
-  results have been applied.
+* `review_queue.csv`, `resolved.csv`, the CRM import CSVs, and
+  `repair_plan.json` carry the same personal data as the source CRM export
+  they came from. Put them under the same schedule as that export, and delete
+  the output directory once a run's results have been applied. A repair plan
+  in particular should be destroyed as soon as the repair is done or
+  abandoned: it concentrates the raw values of the people in a bad merge, and
+  it can be regenerated whenever it is needed again.
 * `provenance.jsonl`, `decisions.json`, and `withheld.csv` hold ids and hashes
   rather than field values and may outlive the record artifacts, which is what
   lets the audit trail survive routine cleanup.
@@ -156,19 +160,23 @@ their limits in [RESPONSIBLE-TECH-AUDITS.md](./RESPONSIBLE-TECH-AUDITS.md) and
 [RESEARCH-ROADMAP.md](./RESEARCH-ROADMAP.md). Under this pack the model is:
 
 **Destroy routinely.** The output-directory artifacts that hold individual
-records are `review_queue.csv` and `resolved.csv` (or the CRM import CSV when
-one is used). Destroy them once their purpose is served: the resolved records
-have landed in the organization's comparable database and the review decisions
-have been applied. A migration comparison's record-bearing artifacts
-(`cutover_report.csv`, `cutover_review.csv`, `target_corrections.csv`, and
-`corrections.json`) follow the same schedule once the correction file has been
-imported. The stage-cache entry files hold extracted and normalized survivor
-field values and belong on the same schedule; the destruction command reaches
-them wherever the recipe put the cache. `withheld.csv` and `decisions.json`
-hold record ids without field values, but those ids resolve to survivors
-inside the organization's own systems, so they go on the same destruction
-schedule, as do `compare_decisions.json` and `cutover_withheld.csv`. Source
-intake files are destroyed under the organization's own intake procedure.
+records are `review_queue.csv`, `resolved.csv` (or the CRM import CSV when
+one is used), and `repair_plan.json` when a split repair was planned. Destroy
+them once their purpose is served: the resolved records have landed in the
+organization's comparable database, the review decisions have been applied,
+and the repair is done or abandoned. The repair plan deserves the shortest
+life of the three, because it concentrates the raw values of the survivors
+caught in one bad merge and can be regenerated on demand. A migration
+comparison's record-bearing artifacts (`cutover_report.csv`,
+`cutover_review.csv`, `target_corrections.csv`, and `corrections.json`) follow
+the same schedule once the correction file has been imported. The stage-cache
+entry files hold extracted and normalized survivor field values and belong on
+the same schedule; the destruction command reaches them wherever the recipe
+put the cache. `withheld.csv` and `decisions.json` hold record ids without
+field values, but those ids resolve to survivors inside the organization's own
+systems, so they go on the same destruction schedule, as do
+`compare_decisions.json` and `cutover_withheld.csv`. Source intake files are
+destroyed under the organization's own intake procedure.
 
 **Retain.** `aggregate_summary.json` may be kept: it is already
 non-identifying, small cells are suppressed (`suppression.py`), and it is the

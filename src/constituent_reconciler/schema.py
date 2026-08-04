@@ -52,6 +52,16 @@ MIGRATION_SUMMARY_SCHEMA_VERSION = 1
 # column, and a manifest section carrying digests and counts only. A future
 # column or manifest-key change bumps this and ships a migration note.
 CUTOVER_CORRECTIONS_SCHEMA_VERSION = 1
+# The repair-plan artifact (repair_plan.json) that ``reconcile plan-split``
+# writes: the old external id, the proposed split records, the fields needing
+# restoration, and the operations the destination supports. A versioned
+# surface from its first byte, per docs/adr/0012-connector-repair-capabilities.md.
+REPAIR_PLAN_SCHEMA_VERSION = 1
+
+# The connector repair-capability declaration shape (connectors/repair.py):
+# destination, enumerated verified versions, operation vocabulary, and the
+# vendor evidence fields.
+REPAIR_CAPABILITY_SCHEMA_VERSION = 1
 
 
 def versions() -> dict[str, int]:
@@ -64,4 +74,6 @@ def versions() -> dict[str, int]:
         "decisions_schema": DECISIONS_SCHEMA_VERSION,
         "migration_summary": MIGRATION_SUMMARY_SCHEMA_VERSION,
         "cutover_corrections": CUTOVER_CORRECTIONS_SCHEMA_VERSION,
+        "repair_plan": REPAIR_PLAN_SCHEMA_VERSION,
+        "repair_capability": REPAIR_CAPABILITY_SCHEMA_VERSION,
     }

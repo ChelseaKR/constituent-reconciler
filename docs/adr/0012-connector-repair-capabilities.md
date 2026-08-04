@@ -213,3 +213,9 @@ PII artifact updates the retention and destruction inventory.
   what undo means in that system" differently than assumed here, or if the
   declaration proves too coarse because operations differ by sub-entity
   within one destination version.
+- Revisit the cannot-link timing when `apply_repair` lands: the shipped
+  planner deliberately binds at planning time rather than at the repair
+  completion described above, because rejection is authority a single
+  reviewer already holds in match review and because plan-time binding is
+  what keeps the next run from recreating the cluster while no apply path
+  exists.

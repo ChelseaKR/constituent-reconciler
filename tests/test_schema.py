@@ -14,6 +14,8 @@ from constituent_reconciler.schema import (
     CUTOVER_CORRECTIONS_SCHEMA_VERSION,
     DECISIONS_SCHEMA_VERSION,
     MIGRATION_SUMMARY_SCHEMA_VERSION,
+    REPAIR_CAPABILITY_SCHEMA_VERSION,
+    REPAIR_PLAN_SCHEMA_VERSION,
     REPORT_SCHEMA_VERSION,
     versions,
 )
@@ -35,6 +37,8 @@ def test_versions_mapping_matches_constants() -> None:
         "decisions_schema": DECISIONS_SCHEMA_VERSION,
         "migration_summary": MIGRATION_SUMMARY_SCHEMA_VERSION,
         "cutover_corrections": CUTOVER_CORRECTIONS_SCHEMA_VERSION,
+        "repair_plan": REPAIR_PLAN_SCHEMA_VERSION,
+        "repair_capability": REPAIR_CAPABILITY_SCHEMA_VERSION,
     }
 
 

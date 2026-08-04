@@ -41,6 +41,7 @@ from constituent_reconciler.models import (
     SourceSpan,
     TextSpan,
 )
+from constituent_reconciler.normalize import normalize_record
 from constituent_reconciler.policy import PolicyViolation
 from constituent_reconciler.provenance import ProvenanceLog, Rfc3161Authority, TimestampAuthority
 from constituent_reconciler.suppression import AggregateSummary, ComparableReport
@@ -633,6 +634,53 @@ class _StageTimer:
         now = time.perf_counter()
         self.durations[stage] = round(now - self._started, 6)
         self._started = now
+
+
+def ingest_normalized_records(
+    recipe: Recipe,
+    *,
+    corrections: Iterable[Correction] = (),
+    accounting: IngestAccumulator | None = None,
+) -> dict[str, Record]:
+    """Read every source, enforce id uniqueness, apply corrections, normalize.
+
+    The deterministic front half of ``run``, shared with repair planning
+    (``repair.py``), which needs the run's records without scoring anything or
+    touching a connector. Corrections replace raw field values before
+    normalization, exactly as they do on a full run.
+    """
+
+    if accounting is None:
+        accounting = IngestAccumulator()
+    raw_records: list[Record] = []
+    if recipe.existing is not None:
+        raw_records += _ingest_source(
+            recipe.existing,
+            "existing",
+            recipe=recipe,
+            id_prefix="E",
+            accounting=accounting,
+        )
+    raw_records += _ingest_source(
+        recipe.incoming,
+        "incoming",
+        recipe=recipe,
+        id_prefix="N",
+        accounting=accounting,
+    )
+    _check_distinct_ids(raw_records)
+    raw_records = _apply_corrections(
+        raw_records, _group_corrections(corrections, fields=recipe.fields)
+    )
+    return {
+        r.unique_id: normalize_record(
+            r,
+            recipe.fields,
+            address_backend=recipe.normalize.address_backend,
+            failures=accounting.normalization_failures,
+        )
+        for r in raw_records
+    }
 
 
 def run(

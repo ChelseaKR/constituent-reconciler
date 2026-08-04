@@ -83,7 +83,7 @@ constituent-reconciler/
 ├── src/constituent_reconciler/
 │   ├── __init__.py                # public API surface, intentionally small
 │   ├── address.py                 # deterministic CASS-style standardizer, not USPS-certified
-│   ├── cli.py                     # run/eval/compare(+-review/-apply)/review/apply/report/validate/destroy/verify/schema
+│   ├── cli.py                     # run/eval/compare(+-review/-apply)/review/apply/plan-split/report/validate/destroy/verify/schema
 │   ├── compare.py                 # read-only migration cutover comparison (reconcile compare)
 │   ├── compare_apply.py           # reviewed, consent-gated local correction-file export (compare-apply)
 │   ├── config.py                  # recipe.toml loading: sources, connector, thresholds, policy pack
@@ -93,6 +93,7 @@ constituent-reconciler/
 │   │   ├── civicrm.py             # CiviCRM live write-back (API v4 upsert)
 │   │   ├── crm_csv.py             # import-ready CRM export files (salesforce_csv, civicrm_csv)
 │   │   ├── csv_out.py             # default local CSV output
+│   │   ├── repair.py              # repair-capability declarations (ADR 0012); none published yet
 │   │   ├── salesforce.py          # Salesforce live write-back (REST upsert, NPSP Contact)
 │   │   └── webhook.py             # generic signed JSON webhook
 │   ├── consent.py                 # consent export gate; absent/revoked/expired withheld, fail-closed
@@ -118,6 +119,7 @@ constituent-reconciler/
 │   ├── policy.py                  # policy packs: default, dv (VAWA/FVPSA), hipaa
 │   ├── provenance.py              # BLAKE2b hash chain plus optional RFC 3161 authority
 │   ├── quality.py                 # per-source data-quality aggregation
+│   ├── repair.py                  # read-only split repair planning (UC-03); plans are local PII artifacts
 │   ├── report.py                  # run summary + committed eval report renderers
 │   ├── review/                    # local queue UI, session, server, reviewer calibration
 │   ├── schema.py                  # declared schema/interface versions for the stability contract

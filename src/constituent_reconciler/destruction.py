@@ -47,6 +47,9 @@ from constituent_reconciler.stage_cache import CACHE_DIR_NAME, EXTRACT_STAGE, NO
 # The stage cache is the one directory-shaped PII artifact; its files are
 # inventoried by ``_cache_entries`` below, bounded to the cache root the
 # pipeline wrote and to the exact entry shape the cache writes.
+# repair_plan.json is the split-repair plan ``reconcile plan-split`` writes:
+# it holds raw field values for the members of one written cluster, so it is
+# destroyed here and the provenance log keeps only its digest.
 PII_ARTIFACTS: tuple[str, ...] = (
     "resolved.csv",
     "review_queue.csv",
@@ -58,6 +61,7 @@ PII_ARTIFACTS: tuple[str, ...] = (
     "cutover_review.csv",
     "target_corrections.csv",
     "cutover_withheld.csv",
+    "repair_plan.json",
 )
 
 PROVENANCE_FILENAME = "provenance.jsonl"

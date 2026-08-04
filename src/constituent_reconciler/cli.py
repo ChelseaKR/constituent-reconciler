@@ -6,8 +6,10 @@ extractor against labeled fixtures, ``apply`` carries human review decisions
 back into a fresh run, ``compare`` reports how two read-only exports line up
 for a migration cutover, ``compare-review`` serves the same local web queue
 over a comparison's undecided pairs, ``compare-apply`` exports the local
-correction file once that review is complete, ``review`` serves the local web
-queue for a run, ``validate`` checks a recipe without running anything,
+correction file once that review is complete, ``plan-split`` writes a
+read-only repair plan for a written cluster a reviewer found to be a bad
+merge, ``review`` serves the local web queue for a run, ``validate`` checks a
+recipe without running anything,
 ``destroy`` deletes retained artifacts, ``verify`` checks a provenance log's
 hash chain, and ``schema`` prints the declared schema versions. The CLI uses
 argparse only, so the package has no runtime dependency beyond the matcher.
@@ -585,6 +587,88 @@ def _cmd_compare_apply(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_plan_split(args: argparse.Namespace) -> int:
+    """Plan the repair of one written cluster, read-only (UC-03, ADR 0012).
+
+    Everything printed here is ids, counts, paths, and hashes. The raw field
+    values a restoration needs live only in the local plan file, which
+    ``reconcile destroy`` covers and the provenance log references by digest.
+    """
+
+    from constituent_reconciler import repair
+
+    try:
+        recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+    except (RecipeError, PolicyViolation) as error:
+        print(f"plan-split error: {error}", file=sys.stderr)
+        return 2
+    manifest_path = Path(args.manifest)
+    decisions_path = (
+        Path(args.decisions) if args.decisions else manifest_path.parent / "decisions.json"
+    )
+    corrections_path = (
+        Path(args.corrections) if args.corrections else decisions_path.parent / "corrections.json"
+    )
+    # An explicit --corrections path asserts the written run applied
+    # corrections. The lineage check cannot see a correction that changed a
+    # value without changing which member supplied it, so degrading to "no
+    # corrections" here would plan stale restoration values with a clean exit.
+    # Only the default location may be probed for existence.
+    if args.corrections and not corrections_path.exists():
+        print(
+            f"plan-split error: corrections file not found: {corrections_path}; "
+            "planning cannot replay corrections from a missing file, so fix the "
+            "path or omit --corrections",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        corrections = _load_corrections(corrections_path) if corrections_path.exists() else []
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(
+            f"plan-split error: invalid corrections file {corrections_path}: {error}",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        planned = repair.plan_split(
+            recipe,
+            manifest_path=manifest_path,
+            cluster_id=args.cluster,
+            reason=args.reason,
+            reviewer=args.reviewer,
+            corrections=corrections,
+            decisions_path=decisions_path,
+        )
+    except repair.RepairPlanError as error:
+        print(f"plan-split error: {error}", file=sys.stderr)
+        return 2
+    print(f"repair plan: {planned.plan_path}")
+    print(f"  cluster:      {planned.cluster_id} ({len(planned.members)} members)")
+    print(f"  external id:  {planned.external_id}")
+    if planned.supported_operations:
+        print(
+            f"  destination:  {planned.destination} "
+            f"(verified operations: {', '.join(planned.supported_operations)})"
+        )
+    else:
+        print(
+            f"  destination:  {planned.destination} "
+            "(no verified repair operations; the plan is manual)"
+        )
+    print(f"  plan digest:  {planned.digest} (recorded in the provenance log)")
+    print(f"  cannot-links: {len(planned.cannot_links)} pair(s) bound in {planned.decisions_path}")
+    if planned.displaced_cluster is not None:
+        print(
+            f"warning: {planned.plan_path} previously held the plan for cluster "
+            f"{planned.displaced_cluster!r}; that plan was replaced and must be "
+            "regenerated with plan-split before its repair continues",
+            file=sys.stderr,
+        )
+    print("planning is read-only: nothing was sent to or changed in the destination.")
+    return 0
+
+
 def _cmd_export_comparable(args: argparse.Namespace) -> int:
     """One command: resolve, then emit only the suppressed comparable report.
 
@@ -1010,6 +1094,49 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     capply_parser.set_defaults(func=_cmd_compare_apply)
+
+    plan_parser = sub.add_parser(
+        "plan-split",
+        help=(
+            "write a read-only repair plan for a written cluster a reviewer found to be a bad merge"
+        ),
+    )
+    plan_parser.add_argument(
+        "--config", required=True, help="path to the recipe.toml the written run used"
+    )
+    plan_parser.add_argument(
+        "--manifest", required=True, help="the written run's run_manifest.json"
+    )
+    plan_parser.add_argument(
+        "--cluster", required=True, help="cluster id of the written record to split"
+    )
+    plan_parser.add_argument(
+        "--reason",
+        required=True,
+        help="why this cluster is a bad merge; recorded in the plan, never guessed",
+    )
+    plan_parser.add_argument(
+        "--reviewer",
+        required=True,
+        help="name recorded with the plan and with the cannot-links it binds",
+    )
+    plan_parser.add_argument(
+        "--decisions",
+        default=None,
+        help="decisions JSON to bind cannot-links into (default <manifest dir>/decisions.json)",
+    )
+    plan_parser.add_argument(
+        "--corrections",
+        default=None,
+        help="corrections JSON the written run applied; an explicitly passed path must "
+        "exist (default corrections.json beside --decisions)",
+    )
+    plan_parser.add_argument(
+        "--policy-pack",
+        default=None,
+        help="override the recipe's policy pack to match the written run; fail-closed on unknown",
+    )
+    plan_parser.set_defaults(func=_cmd_plan_split)
 
     comparable_parser = sub.add_parser(
         "export-comparable",
