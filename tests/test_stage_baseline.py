@@ -129,8 +129,19 @@ def test_composed_stages_match_the_pipeline(baseline: dict[str, Path]) -> None:
     pipeline.export(result, recipe, out_dir=expected_out, dry_run=False)
 
     work = baseline["corpus"] / "stage-baseline-work"
-    for name in ("review_queue.csv", "resolved.csv", "run_summary.json"):
+    for name in ("review_queue.csv", "resolved.csv"):
         assert (work / "out" / name).read_bytes() == (expected_out / name).read_bytes()
+    # run_summary.json is compared structurally: wall-clock stage durations
+    # (and any other timing the summary may carry) differ between two
+    # executions by nature, while every count must still agree exactly.
+    volatile = ("stage_durations_seconds",)
+    summaries = []
+    for base in (work / "out", expected_out):
+        summary = json.loads((base / "run_summary.json").read_text(encoding="utf-8"))
+        for key in volatile:
+            summary.pop(key, None)
+        summaries.append(summary)
+    assert summaries[0] == summaries[1]
     assert (work / "review-artifact" / "review_queue.csv").read_bytes() == (
         expected_out / "review_queue.csv"
     ).read_bytes()
