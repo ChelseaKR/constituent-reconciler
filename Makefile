@@ -1,4 +1,4 @@
-.PHONY: install verify format-check lint type test security axe-fixtures axe eval eval-extraction eval-bias eval-large run docker bundle clean
+.PHONY: install verify format-check lint type test security axe-fixtures axe eval eval-extraction eval-bias eval-large perf-baseline perf-baseline-pdf run docker bundle clean
 
 # Reproduce the full local toolchain. CI mirrors `make verify` byte for byte.
 # `uv sync --frozen` refuses to run (and exits non-zero) if uv.lock is stale
@@ -86,6 +86,37 @@ eval-large:
 	.venv/bin/python -m tools.corpusgen.run_large_eval \
 		--out-dir eval/large-corpus \
 		--report-out eval/large-corpus-report.md \
+		--regenerate
+
+# Stage-timing baseline over the large synthetic corpus (UC-01 "before"
+# numbers): per-stage wall clock and peak memory for ingest, extract,
+# normalize, score, review artifact, and write, as a dated report plus a JSON
+# companion the future cached run diffs against. Local command, not a CI job,
+# for the same reason as eval-large; the harness itself is smoke-tested on a
+# tiny corpus by tests/test_stage_baseline.py.
+PERF_DATE := $(shell date +%Y-%m-%d)
+perf-baseline:
+	.venv/bin/python -m tools.corpusgen.stage_baseline \
+		--out-dir eval/large-corpus \
+		--report-out eval/large-corpus-stage-baseline-$(PERF_DATE).md \
+		--json-out eval/large-corpus-stage-baseline-$(PERF_DATE).json \
+		--regenerate
+
+# The same measurement over a mixed CSV+PDF corpus. `perf-baseline` above is
+# honest that extract takes 0.0s, because that corpus is CSV-only and the
+# extractor never runs; this variant carries PDF_SHARE of the incoming rows as
+# seeded text-layer PDF intake documents so the extract row measures the
+# pipeline's own pdfplumber path. Its corpus goes in a separate directory:
+# the two layouts differ, and neither should overwrite the other's inputs.
+# Share and directory are pinned here so the command is reproducible; the
+# corpus is regenerated from the same seed on every run.
+PDF_SHARE := 0.15
+perf-baseline-pdf:
+	.venv/bin/python -m tools.corpusgen.stage_baseline \
+		--out-dir eval/large-corpus-pdf \
+		--pdf-share $(PDF_SHARE) \
+		--report-out eval/large-corpus-stage-baseline-pdf-$(PERF_DATE).md \
+		--json-out eval/large-corpus-stage-baseline-pdf-$(PERF_DATE).json \
 		--regenerate
 
 # Run the demo end to end and write outputs to ./out.

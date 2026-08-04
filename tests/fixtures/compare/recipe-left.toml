@@ -1,0 +1,19 @@
+# Legacy-side recipe for the migration-comparison fixtures. The planted cases:
+# an exact duplicate of Maria Lopez inside this export and across both exports,
+# a Devon Price whose date of birth disagrees with the target side, a
+# left-only Alice Nguyen, and a Sam Okafor whose email conflicts with the
+# target side.
+
+[input]
+incoming = "left.csv"
+
+[mapping]
+first_name = "First"
+last_name = "Last"
+dob = "Birth"
+email = "Email"
+
+[thresholds]
+prior = 0.01
+auto = 0.97
+review = 0.80

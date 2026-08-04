@@ -22,6 +22,13 @@ from pathlib import Path
 from typing import cast
 
 from constituent_reconciler.config import OutputConfig
+from constituent_reconciler.connectors.airtable import (
+    AirtableConfig,
+    AirtableConnector,
+)
+from constituent_reconciler.connectors.airtable import (
+    Transport as AirtableTransport,
+)
 from constituent_reconciler.connectors.base import (
     WRITE_ACTIONS,
     Connector,
@@ -61,6 +68,8 @@ __all__ = [
     "ConnectorError",
     "WriteResult",
     "CsvConnector",
+    "AirtableConnector",
+    "AirtableConfig",
     "CrmCsvConnector",
     "CivicrmConnector",
     "CivicrmConfig",
@@ -71,6 +80,7 @@ __all__ = [
     "Transport",
     "UrllibTransport",
     "WebhookTransport",
+    "AirtableTransport",
     "ConnectorFactory",
     "CONNECTOR_REGISTRY",
     "register",
@@ -187,3 +197,16 @@ def _build_webhook(
     )
     transport = cast("WebhookTransport | None", transports.get("webhook"))
     return WebhookConnector(config, transport=transport)
+
+
+@register("airtable")
+def _build_airtable(
+    output: OutputConfig, out_dir: Path, transports: Mapping[str, object]
+) -> Connector:
+    config = AirtableConfig(
+        endpoint=output.endpoint,
+        access_token=os.environ.get(output.auth_env, ""),
+        external_id_field=output.external_id_field,
+    )
+    transport = cast("AirtableTransport | None", transports.get("airtable"))
+    return AirtableConnector(config, transport=transport)

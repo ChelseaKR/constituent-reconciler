@@ -1,0 +1,38 @@
+# Push resolved, consented records to an Airtable table with native upsert.
+#
+# Provision fields named first_name, last_name, dob, email, phone, and
+# external_identifier in the target table. The external_identifier field must
+# be writable and must uniquely identify a row. Pass a personal access token
+# with data.records:write access through the environment:
+#
+#   AIRTABLE_TOKEN=your-pat reconcile run \
+#     --config examples/intake-demo/recipe-airtable.toml --out out
+#
+# The connector sends at most ten rows per request, as Airtable requires. Under
+# the dv policy pack it is refused because Airtable is a hosted network target.
+
+[input]
+existing = "existing.csv"
+incoming = "incoming.csv"
+id_column = "id"
+
+[mapping]
+first_name = "First Name"
+last_name = "Last Name"
+dob = "DOB"
+email = "Email"
+phone = "Phone"
+
+[consent]
+column = "Consent"
+
+[thresholds]
+prior = 0.01
+auto = 0.97
+review = 0.80
+
+[output]
+connector = "airtable"
+endpoint = "https://api.airtable.com/v0/appXXXXXXXXXXXXXX/Constituents"
+auth_env = "AIRTABLE_TOKEN"
+external_id_field = "external_identifier"

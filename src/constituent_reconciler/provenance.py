@@ -43,6 +43,11 @@ GENESIS_HASH = "0" * 64
 # record id, members, or consent.
 RUN_START_ACTION = "run-start"
 
+# Action recorded when a repair plan is written for a previously written
+# cluster (``reconcile plan-split``). The entry's content hash is the plan
+# file's own digest; the plan's raw field values never enter the log.
+REPAIR_PLAN_ACTION = "repair-plan"
+
 
 def content_hash(payload: dict[str, str]) -> str:
     """BLAKE2b-256 over a canonical JSON encoding of the written fields."""
@@ -401,6 +406,34 @@ class ProvenanceLog:
             consent=None,
             digest=manifest_hash,
             external_id=None,
+            field_sources=None,
+            fill_policy="",
+        )
+
+    def append_repair_plan(
+        self,
+        *,
+        cluster_id: str,
+        members: Sequence[str],
+        plan_digest: str,
+        external_id: str,
+    ) -> dict[str, object]:
+        """Record that a repair plan was written for one written cluster.
+
+        The entry carries the plan file's digest as its content hash, the
+        cluster and member ids, and the destination's external id, never the
+        plan's field values (docs/adr/0012-connector-repair-capabilities.md).
+        Consent is null: the entry records planning, not a disclosure, and
+        planning discloses nothing.
+        """
+
+        return self._append(
+            action=REPAIR_PLAN_ACTION,
+            record_id=cluster_id,
+            members=members,
+            consent=None,
+            digest=plan_digest,
+            external_id=external_id,
             field_sources=None,
             fill_policy="",
         )

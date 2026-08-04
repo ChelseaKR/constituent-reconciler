@@ -2,8 +2,8 @@
 
 The registry in ``connectors/__init__.py`` is the single list of write
 targets a recipe can name, so this suite parametrizes over it: a new
-connector added to the registry is picked up here with no test edits, and
-must honor the same behavioral contract as the existing four.
+connector added to the registry is picked up here and must honor the same
+behavioral contract.
 
 The contract, drawn from ``connectors/base.py`` and the DV pack's no-egress
 invariant:
@@ -21,6 +21,7 @@ invariant:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -34,8 +35,14 @@ from constituent_reconciler.connectors import (
     Connector,
     get_factory,
 )
+from constituent_reconciler.connectors.repair import repair_declaration, supported_operations
 from constituent_reconciler.models import Consent, GoldenRecord
-from tests.conftest import FakeCivicrmTransport, FakeSalesforceTransport, FakeWebhookTransport
+from tests.conftest import (
+    FakeAirtableTransport,
+    FakeCivicrmTransport,
+    FakeSalesforceTransport,
+    FakeWebhookTransport,
+)
 
 FIELDS = ("first_name", "last_name", "dob", "email", "phone")
 
@@ -71,6 +78,12 @@ def _auth_token(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _output_for(name: str) -> OutputConfig:
+    if name == "airtable":
+        return OutputConfig(
+            connector=name,
+            endpoint="https://api.airtable.com/v0/app123/Constituents",
+            auth_env=AUTH_ENV,
+        )
     if name == "civicrm":
         return OutputConfig(connector=name, endpoint="https://crm.example/api4", auth_env=AUTH_ENV)
     if name == "salesforce":
@@ -85,6 +98,17 @@ def _output_for(name: str) -> OutputConfig:
 
 
 def _fake_transport(name: str, *, live: bool) -> object | None:
+    if name == "airtable":
+        if not live:
+            return FakeAirtableTransport([])
+        ids = [f"rec{i:03d}" for i, _ in enumerate(RECORDS, start=1)]
+        body = json.dumps(
+            {
+                "records": [{"id": value, "fields": {}} for value in ids],
+                "createdRecords": ids,
+            }
+        ).encode()
+        return FakeAirtableTransport([(200, body)])
     if name == "civicrm":
         responses: list[tuple[int, dict[str, object]]] = []
         if live:
@@ -124,7 +148,15 @@ def _build(name: str, out_dir: Path, *, live: bool) -> tuple[Connector, list[Any
     transports = {name: fake} if fake is not None else {}
     calls = (
         fake.calls
-        if isinstance(fake, (FakeCivicrmTransport, FakeSalesforceTransport, FakeWebhookTransport))
+        if isinstance(
+            fake,
+            (
+                FakeAirtableTransport,
+                FakeCivicrmTransport,
+                FakeSalesforceTransport,
+                FakeWebhookTransport,
+            ),
+        )
         else []
     )
     connector = get_factory(name)(_output_for(name), out_dir, transports)
@@ -140,6 +172,7 @@ def test_registry_covers_the_recipe_connector_names() -> None:
     # to this set; removing or renaming one is a breaking recipe change.
     assert set(CONNECTOR_REGISTRY) >= {
         "csv",
+        "airtable",
         "salesforce_csv",
         "civicrm_csv",
         "civicrm",
@@ -220,6 +253,21 @@ def test_external_id_round_trips(name: str, tmp_path: Path) -> None:
         content = artifact.read_text(encoding="utf-8")
         for record in RECORDS:
             assert record.cluster_id in content
+
+
+@pytest.mark.parametrize("name", sorted(CONNECTOR_REGISTRY))
+def test_undeclared_connectors_offer_no_repair_operations(name: str) -> None:
+    """No declaration means no remote repair, for every registered adapter.
+
+    ADR 0012: repair exists only where an adapter has declared verified
+    destination/version pairs, and no adapter has. When the first (CiviCRM
+    pilot) declaration lands, this test changes deliberately to assert that
+    declaration's contract instead of universal absence.
+    """
+
+    assert repair_declaration(name) is None
+    for version in ("", "5.81.0", "latest"):
+        assert supported_operations(name, version) == ()
 
 
 def test_unknown_name_raises_and_lists_known_names() -> None:

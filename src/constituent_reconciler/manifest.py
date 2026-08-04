@@ -23,6 +23,7 @@ from pathlib import Path
 
 from constituent_reconciler import __version__
 from constituent_reconciler.config import Recipe
+from constituent_reconciler.models import CacheStats
 from constituent_reconciler.schema import versions
 
 MANIFEST_FILENAME = "run_manifest.json"
@@ -40,19 +41,27 @@ def file_digest(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _splink_version() -> str | None:
+def splink_version() -> str | None:
+    """The installed Splink version, or ``None`` outside a full install.
+
+    Public because the comparison manifest (``compare.py``) records the same
+    matcher provenance the run manifest does.
+    """
+
     try:
         return metadata.version("splink")
     except metadata.PackageNotFoundError:
         return None
 
 
-def _input_digests(paths: Iterable[Path]) -> dict[str, str]:
+def input_digests(paths: Iterable[Path]) -> dict[str, str]:
     """Digest each input file. A directory contributes every regular file in it.
 
     Keys are file names; a directory's children are keyed ``dirname/childname``
     so two sources with the same file name stay distinct. Values are hex
-    digests. No field value enters the manifest, only hashes.
+    digests. No field value enters the manifest, only hashes. Repair planning
+    (``repair.py``) recomputes this mapping to prove the current source batch
+    is the one the manifest describes.
     """
 
     digests: dict[str, str] = {}
@@ -70,25 +79,40 @@ def build_manifest(
     recipe_path: Path | None,
     input_paths: Iterable[Path],
     recipe: Recipe,
+    *,
+    cache: CacheStats | None = None,
 ) -> dict[str, object]:
     """Assemble the reproducibility manifest for one run.
 
     ``recipe_path`` may be None when the Recipe was built in code rather than
     loaded from a file; the manifest then records a null recipe hash instead
     of inventing one.
+
+    ``cache`` carries the run's stage-cache accounting. The manifest records
+    the cache policy (whether caching was on, and whether the recipe named a
+    custom retention boundary) and the hit/miss counts, never the cache
+    directory's path and never any cached value, so the manifest stays free
+    of both content and machine-local locations.
     """
 
+    stats = cache if cache is not None else CacheStats()
     return {
         "created_at": datetime.now(UTC).isoformat(),
         "recipe_hash": file_digest(recipe_path) if recipe_path is not None else None,
-        "input_hashes": _input_digests(input_paths),
+        "input_hashes": input_digests(input_paths),
         "package_version": __version__,
-        "splink_version": _splink_version(),
+        "splink_version": splink_version(),
         "policy_pack": recipe.policy_pack,
         "thresholds": {
             "prior": recipe.prior,
             "auto": recipe.auto_threshold,
             "review": recipe.review_threshold,
+        },
+        "cache": {
+            "enabled": recipe.cache.enabled,
+            "custom_boundary": recipe.cache.dir is not None,
+            "hits": dict(stats.hits),
+            "misses": dict(stats.misses),
         },
         "schema_versions": versions(),
     }
