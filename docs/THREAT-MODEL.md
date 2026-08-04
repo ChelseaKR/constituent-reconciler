@@ -8,9 +8,10 @@ and pairs with [`SECURITY.md`](../SECURITY.md), which owns reporting and the
 out-of-scope list.
 
 Status: committed 2026-07-02, re-verified 2026-07-12 against the implemented
-Bedrock and local-model seams, and updated 2026-07-17 when the sandboxed
-extraction path became the pipeline default. Revisit whenever the extraction
-surface changes.
+Bedrock and local-model seams, updated 2026-07-17 when the sandboxed
+extraction path became the pipeline default, and extended 2026-08-03 with the
+repair-plan surface that ADR 0012 names as a prerequisite for storing plans.
+Revisit whenever the extraction or repair surface changes.
 
 ## System description and trust boundaries
 
@@ -139,6 +140,46 @@ The boundaries that matter:
   pipeline's privileges (containment, not a syscall sandbox), and when a
   cloud or local seam is enabled for a low-confidence page, the page render
   for the seam still happens in the parent process.
+
+### Added 2026-08-03: the repair-plan surface (UC-03, ADR 0012)
+
+`reconcile plan-split` writes `repair_plan.json`, a local file that
+concentrates the raw field values of everyone caught in one bad merge, and a
+future pull request will add `apply_repair`, a remote-mutation path. Both are
+modeled here before the first plan is stored, as the ADR requires.
+
+- **T6, plan-file theft or exposure (information disclosure).** The plan is
+  the one artifact that gathers a bad merge's restoration values into a
+  single small file. Mitigations present: the plan is written only into the
+  operator's `--out` directory and is never transmitted; the provenance log
+  stores its BLAKE2b digest, never its content; `destruction.PII_ARTIFACTS`
+  lists it, so `reconcile destroy` removes it with a certificate
+  (`tests/test_destruction.py`); and because planning is repeatable from the
+  manifest and sources, the file can be destroyed the moment the repair is
+  done without losing anything. The full-disk-encryption caveat from the
+  retention model applies to it as to every other local PII artifact.
+- **T7, a tampered plan applied remotely (tampering).** An edited plan could
+  redirect a restoration or a split at apply time. Mitigation present: the
+  digest recorded at planning time identifies the exact plan bytes.
+  Mitigation that arrives with the apply path, which is not implemented yet:
+  both required approvals bind to that digest, and any destructive remote
+  operation requires two distinct reviewers in every policy pack, so a
+  swapped plan invalidates the approvals rather than riding them.
+- **T8, credential scope (elevation of privilege).** An API token that can
+  delete or merge destination records is a larger asset than the
+  upsert-scoped token `write_all` needs. No adapter holds such a token today
+  because no adapter declares repair capabilities
+  (`tests/test_connector_conformance.py` asserts the absence). When the
+  CiviCRM pilot lands, its declaration and adoption docs must state the
+  minimum token scope, and operators should issue repair credentials
+  separately from routine write credentials and revoke them after use.
+
+Planning itself stays inside the existing boundaries: it reconstructs the
+cluster offline from the manifest-verified sources and the provenance chain,
+constructs no connector, and opens no network connection. The ADR permits a
+non-mutating `inspect_repair` read of the destination, which the DV pack will
+refuse for non-local destinations through the same policy gate as every other
+egress; that read does not exist yet, and the boundary test lands with it.
 
 ### Planned
 

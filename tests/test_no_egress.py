@@ -13,13 +13,46 @@ from pathlib import Path
 
 import pytest
 
-from constituent_reconciler import pipeline
-from constituent_reconciler.config import load_recipe
+from constituent_reconciler import pipeline, stage_cache
+from constituent_reconciler.config import RecipeError, load_recipe
 from constituent_reconciler.consent import partition_by_consent
 from constituent_reconciler.extract.seam import LocalSeam, NoOpSeam, make_seam
 from constituent_reconciler.policy import PolicyViolation
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "intake-demo"
+
+_DV_CACHE_RECIPE = """
+[input]
+existing = "{examples}/existing.csv"
+incoming = "{examples}/incoming.csv"
+id_column = "id"
+
+[mapping]
+first_name = "First Name"
+last_name = "Last Name"
+dob = "DOB"
+email = "Email"
+phone = "Phone"
+
+[consent]
+column = "Consent"
+
+[policy]
+pack = "dv"
+
+[cache]
+enabled = true
+{cache_dir_line}
+"""
+
+
+def _write_dv_cache_recipe(tmp_path: Path, *, cache_dir: str | None = None) -> Path:
+    path = tmp_path / "recipe.toml"
+    line = f'dir = "{cache_dir}"' if cache_dir is not None else ""
+    path.write_text(
+        _DV_CACHE_RECIPE.format(examples=EXAMPLES, cache_dir_line=line), encoding="utf-8"
+    )
+    return path
 
 
 def test_dv_pack_refuses_a_non_local_write_target(tmp_path: Path) -> None:
@@ -192,3 +225,46 @@ def test_default_pack_writes_no_aggregate_summary(tmp_path: Path) -> None:
     assert summary.aggregate is None
     assert summary.aggregate_path is None
     assert not (tmp_path / "aggregate_summary.json").exists()
+
+
+def test_stage_cache_writes_only_under_its_configured_local_directory(tmp_path: Path) -> None:
+    # The stage cache stores extracted and normalized field values, so where
+    # it writes is a data-boundary question. With an explicitly configured
+    # local boundary, every file the cached run creates lands under that
+    # boundary and nowhere else, including under the out root.
+    boundary = tmp_path / "boundary"
+    out_dir = tmp_path / "out"
+    recipe = load_recipe(_write_dv_cache_recipe(tmp_path, cache_dir=str(boundary)))
+    cache = stage_cache.for_recipe(recipe, out_dir)
+    assert cache is not None
+    assert cache.root == boundary
+
+    before = {p for p in tmp_path.rglob("*") if p.is_file()}
+    pipeline.run(recipe, cache=cache)
+    created = {p for p in tmp_path.rglob("*") if p.is_file()} - before
+    assert created, "the cached run must have written cache entries"
+    assert all(p.is_relative_to(boundary) for p in created)
+    assert not out_dir.exists()
+
+
+def test_dv_pack_cache_defaults_under_the_local_output_root(tmp_path: Path) -> None:
+    # Absent an explicit boundary, the DV pack's cache lives inside the run's
+    # own output root: the one directory the operator already controls and
+    # `reconcile destroy` already reaches.
+    out_dir = tmp_path / "out"
+    recipe = load_recipe(_write_dv_cache_recipe(tmp_path))
+    cache = stage_cache.for_recipe(recipe, out_dir)
+    assert cache is not None
+    assert cache.root == out_dir / "stage_cache"
+    pipeline.run(recipe, cache=cache)
+    entries = [p for p in (out_dir / "stage_cache").rglob("*") if p.is_file()]
+    assert entries
+
+
+def test_cache_dir_refuses_a_non_local_value(tmp_path: Path) -> None:
+    # A URL-shaped cache directory would point PII at a remote boundary; the
+    # recipe loader refuses it before any record is read.
+    for value in ("s3://bucket/cache", "https://cache.example.org/x"):
+        path = _write_dv_cache_recipe(tmp_path, cache_dir=value)
+        with pytest.raises(RecipeError, match="local filesystem path"):
+            load_recipe(path)

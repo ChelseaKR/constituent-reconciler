@@ -3,11 +3,16 @@
 The subcommands: ``run`` produces resolved records and a review queue, ``eval``
 scores a run against ground-truth clusters, ``eval-extraction`` scores the PDF
 extractor against labeled fixtures, ``apply`` carries human review decisions
-back into a fresh run, ``review`` serves the local web queue, ``validate``
-checks a recipe without running anything, ``destroy`` deletes retained
-artifacts, ``verify`` checks a provenance log's hash chain, and ``schema``
-prints the declared schema versions. The CLI uses argparse only, so the
-package has no runtime dependency beyond the matcher.
+back into a fresh run, ``compare`` reports how two read-only exports line up
+for a migration cutover, ``compare-review`` serves the same local web queue
+over a comparison's undecided pairs, ``compare-apply`` exports the local
+correction file once that review is complete, ``plan-split`` writes a
+read-only repair plan for a written cluster a reviewer found to be a bad
+merge, ``review`` serves the local web queue for a run, ``validate`` checks a
+recipe without running anything,
+``destroy`` deletes retained artifacts, ``verify`` checks a provenance log's
+hash chain, and ``schema`` prints the declared schema versions. The CLI uses
+argparse only, so the package has no runtime dependency beyond the matcher.
 """
 
 from __future__ import annotations
@@ -18,7 +23,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from constituent_reconciler import __version__, pipeline
+from constituent_reconciler import __version__, compare, compare_apply, pipeline, stage_cache
 from constituent_reconciler.config import Recipe, RecipeError, load_recipe
 from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.consent import partition_by_consent
@@ -171,7 +176,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
     except PolicyViolation as error:
         print(f"policy error: {error}", file=sys.stderr)
         return 2
-    result = pipeline.run(recipe)
+    out_dir = Path(args.out)
+    # A dry run must not touch disk, so it also runs without the stage cache:
+    # neither reading a stale entry nor writing a fresh one.
+    cache = None if args.dry_run else stage_cache.for_recipe(recipe, out_dir)
+    result = pipeline.run(recipe, cache=cache)
     _, withheld = partition_by_consent(
         result.golden,
         require_consent=recipe.require_consent,
@@ -179,7 +188,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
     )
     print(render_run_summary(result, withheld=len(withheld)))
     try:
-        out_dir = Path(args.out)
         summary = pipeline.export(result, recipe, out_dir=out_dir, dry_run=args.dry_run)
     except PolicyViolation as error:
         print(f"\npolicy error: {error}", file=sys.stderr)
@@ -372,6 +380,7 @@ def _cmd_apply(args: argparse.Namespace) -> int:
         force_auto=force_auto,
         force_drop=force_drop,
         corrections=corrections,
+        cache=stage_cache.for_recipe(recipe, Path(args.out)),
     )
     _, withheld = partition_by_consent(
         result.golden,
@@ -394,6 +403,269 @@ def _cmd_apply(args: argparse.Namespace) -> int:
         print(f"\nconnector error: {error}", file=sys.stderr)
         return 2
     _print_export(recipe, summary, dry_run=False)
+    return 0
+
+
+def _cmd_compare(args: argparse.Namespace) -> int:
+    """Compare two read-only exports for a migration cutover (UC-02).
+
+    Both sides are sources; no connector is constructed on any path of this
+    command, and ``tests/test_compare.py`` holds that as an invariant. The
+    artifacts are all local: the cutover report and review pairs (field
+    values, PII), the count-only migration summary, and the comparison
+    manifest binding both recipes and input digests.
+    """
+
+    try:
+        left = compare.load_side(args.left, label="left")
+        right = compare.load_side(args.right, label="right")
+        result = compare.run_compare(left, right)
+    except (compare.CompareError, RecipeError, OSError) as error:
+        print(f"compare error: {error}", file=sys.stderr)
+        return 2
+    except PolicyViolation as error:
+        print(f"policy error: {error}", file=sys.stderr)
+        return 2
+
+    out_dir = Path(args.out)
+    report_path = compare.write_cutover_report(result, out_dir)
+    review_path = compare.write_cutover_review(result, out_dir)
+    summary_path = compare.write_migration_summary(result, out_dir)
+    manifest_path = compare.write_compare_manifest(
+        compare.build_compare_manifest(left, right, result), out_dir
+    )
+    print(compare.render_compare_summary(result))
+    print(f"\n  cutover report:  {report_path}")
+    print(f"  review pairs:    {review_path}")
+    print(f"  count summary:   {summary_path}")
+    print(f"  manifest:        {manifest_path}")
+    return 0
+
+
+def _cmd_compare_review(args: argparse.Namespace) -> int:
+    """Serve the local review queue over a comparison's undecided pairs.
+
+    The session, queue, and server are the same surfaces ``reconcile review``
+    uses; only the pairs come from the comparison. Verdicts save to the
+    compare decisions file so ``reconcile compare-apply`` can enforce that
+    every uncertain pair was decided before the correction file exists.
+    """
+
+    from constituent_reconciler.review.server import serve
+    from constituent_reconciler.review.session import ReviewSession
+
+    try:
+        left = compare.load_side(args.left, label="left")
+        right = compare.load_side(args.right, label="right")
+        result = compare.run_compare(left, right)
+    except (compare.CompareError, RecipeError, OSError) as error:
+        print(f"compare error: {error}", file=sys.stderr)
+        return 2
+    except PolicyViolation as error:
+        print(f"policy error: {error}", file=sys.stderr)
+        return 2
+    print(compare.render_compare_summary(result))
+    if not result.review_pairs:
+        print(
+            "\nno undecided pairs: this comparison has nothing to review, and "
+            "reconcile compare-apply may export without a review step"
+        )
+        return 0
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    decisions_path = (
+        Path(args.decisions)
+        if args.decisions
+        else out_dir / compare_apply.COMPARE_DECISIONS_FILENAME
+    )
+    # Either side's pack can require two-person review or a local-only server;
+    # the stricter side governs, fail-closed, and the flag can only add.
+    require_second = (
+        bool(args.require_second_reviewer)
+        or left.recipe.require_second_reviewer
+        or right.recipe.require_second_reviewer
+    )
+    privacy = left.recipe.require_local_targets or right.recipe.require_local_targets
+    try:
+        session = ReviewSession(
+            compare.as_run_result(result),
+            result.fields,
+            decisions_path,
+            reviewer=args.reviewer,
+            privacy_mode=privacy,
+            require_second_reviewer=require_second,
+        )
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    try:
+        serve(
+            session,
+            host=args.host,
+            port=args.port,
+            open_browser=not args.no_browser,
+        )
+    except PolicyViolation as error:
+        print(f"\npolicy error: {error}", file=sys.stderr)
+        return 2
+    counts = session.counts()
+    line = (
+        f"\nreview saved to {decisions_path}: "
+        f"{counts.approved} approved, {counts.rejected} rejected, {counts.pending} pending"
+    )
+    if counts.awaiting_second:
+        line += f", {counts.awaiting_second} awaiting a second reviewer"
+    print(line)
+    return 0
+
+
+def _cmd_compare_apply(args: argparse.Namespace) -> int:
+    """Export the reviewed, consent-gated correction file for the target side.
+
+    Refuses while any review pair is undecided, when the comparison manifest
+    is missing or no longer matches the inputs, or when the decisions file
+    belongs to a different comparison. Writes only local files; no connector
+    is constructed on any path of this command.
+    """
+
+    out_dir = Path(args.out)
+    decisions_path = (
+        Path(args.decisions)
+        if args.decisions
+        else out_dir / compare_apply.COMPARE_DECISIONS_FILENAME
+    )
+    corrections_path = (
+        Path(args.corrections) if args.corrections else decisions_path.parent / "corrections.json"
+    )
+    try:
+        corrections = _load_corrections(corrections_path) if corrections_path.exists() else []
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(
+            f"compare error: invalid corrections file {corrections_path}: {error}", file=sys.stderr
+        )
+        return 2
+    try:
+        left = compare.load_side(args.left, label="left")
+        right = compare.load_side(args.right, label="right")
+        result = compare.run_compare(left, right, corrections=corrections)
+        stored_manifest = compare_apply.verify_compare_manifest(out_dir, left, right, result)
+        approved, rejected = compare_apply.read_decisions(decisions_path, result)
+        orphan = next(
+            (correction.pair for correction in corrections if correction.pair not in approved),
+            None,
+        )
+        if orphan is not None:
+            raise compare.CompareError(
+                f"correction for {sorted(orphan)!r} is not attached to a fully approved pair"
+            )
+        applied = compare_apply.apply_review(result, approved, rejected)
+        export = compare_apply.export_corrections(
+            left,
+            right,
+            applied,
+            out_dir,
+            fmt=args.format,
+            stored_manifest=stored_manifest,
+            decisions_path=decisions_path,
+            corrections_path=corrections_path if corrections_path.exists() else None,
+        )
+    except (compare.CompareError, RecipeError, OSError) as error:
+        print(f"compare error: {error}", file=sys.stderr)
+        return 2
+    except PolicyViolation as error:
+        print(f"policy error: {error}", file=sys.stderr)
+        return 2
+    print(compare_apply.render_export_summary(export))
+    print(f"\n  correction file: {export.path} (format: {export.format})")
+    if export.withheld_path:
+        print(f"  withheld:        {export.withheld_path}")
+    print(f"  manifest:        {export.manifest_path}")
+    print(
+        "\nThis file is local. Nothing was sent to either live system; load it "
+        "with the target CRM's own import tool."
+    )
+    return 0
+
+
+def _cmd_plan_split(args: argparse.Namespace) -> int:
+    """Plan the repair of one written cluster, read-only (UC-03, ADR 0012).
+
+    Everything printed here is ids, counts, paths, and hashes. The raw field
+    values a restoration needs live only in the local plan file, which
+    ``reconcile destroy`` covers and the provenance log references by digest.
+    """
+
+    from constituent_reconciler import repair
+
+    try:
+        recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+    except (RecipeError, PolicyViolation) as error:
+        print(f"plan-split error: {error}", file=sys.stderr)
+        return 2
+    manifest_path = Path(args.manifest)
+    decisions_path = (
+        Path(args.decisions) if args.decisions else manifest_path.parent / "decisions.json"
+    )
+    corrections_path = (
+        Path(args.corrections) if args.corrections else decisions_path.parent / "corrections.json"
+    )
+    # An explicit --corrections path asserts the written run applied
+    # corrections. The lineage check cannot see a correction that changed a
+    # value without changing which member supplied it, so degrading to "no
+    # corrections" here would plan stale restoration values with a clean exit.
+    # Only the default location may be probed for existence.
+    if args.corrections and not corrections_path.exists():
+        print(
+            f"plan-split error: corrections file not found: {corrections_path}; "
+            "planning cannot replay corrections from a missing file, so fix the "
+            "path or omit --corrections",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        corrections = _load_corrections(corrections_path) if corrections_path.exists() else []
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(
+            f"plan-split error: invalid corrections file {corrections_path}: {error}",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        planned = repair.plan_split(
+            recipe,
+            manifest_path=manifest_path,
+            cluster_id=args.cluster,
+            reason=args.reason,
+            reviewer=args.reviewer,
+            corrections=corrections,
+            decisions_path=decisions_path,
+        )
+    except repair.RepairPlanError as error:
+        print(f"plan-split error: {error}", file=sys.stderr)
+        return 2
+    print(f"repair plan: {planned.plan_path}")
+    print(f"  cluster:      {planned.cluster_id} ({len(planned.members)} members)")
+    print(f"  external id:  {planned.external_id}")
+    if planned.supported_operations:
+        print(
+            f"  destination:  {planned.destination} "
+            f"(verified operations: {', '.join(planned.supported_operations)})"
+        )
+    else:
+        print(
+            f"  destination:  {planned.destination} "
+            "(no verified repair operations; the plan is manual)"
+        )
+    print(f"  plan digest:  {planned.digest} (recorded in the provenance log)")
+    print(f"  cannot-links: {len(planned.cannot_links)} pair(s) bound in {planned.decisions_path}")
+    if planned.displaced_cluster is not None:
+        print(
+            f"warning: {planned.plan_path} previously held the plan for cluster "
+            f"{planned.displaced_cluster!r}; that plan was replaced and must be "
+            "regenerated with plan-split before its repair continues",
+            file=sys.stderr,
+        )
+    print("planning is read-only: nothing was sent to or changed in the destination.")
     return 0
 
 
@@ -541,6 +813,15 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     print(f"  extract backend: {recipe.extract.backend}")
     print(f"  address backend: {recipe.normalize.address_backend}")
     print(f"  output connector: {recipe.output.connector}")
+    if recipe.cache.enabled:
+        boundary = (
+            str(recipe.cache.dir)
+            if recipe.cache.dir is not None
+            else "stage_cache under the output root"
+        )
+        print(f"  cache: enabled=True ({boundary})")
+    else:
+        print("  cache: enabled=False")
 
     if problems:
         print("\nproblems:", file=sys.stderr)
@@ -562,21 +843,32 @@ def _cmd_destroy(args: argparse.Namespace) -> int:
     except ValueError as error:
         print(f"destroy error: {error}", file=sys.stderr)
         return 2
+    cache_dir = Path(args.cache_dir) if args.cache_dir else None
     log = ProvenanceLog(out_dir / "provenance.jsonl")
-    summary = destroy(out_dir, older_than, policy=args.older_than, log=log, dry_run=args.dry_run)
+    try:
+        summary = destroy(
+            out_dir,
+            older_than,
+            policy=args.older_than,
+            log=log,
+            dry_run=args.dry_run,
+            cache_dir=cache_dir,
+        )
+    except ValueError as error:
+        # A refusal (a --cache-dir without the stage-cache shape, or the
+        # provenance log on the candidate list) happens before any deletion.
+        print(f"destroy error: {error}", file=sys.stderr)
+        return 2
     if args.dry_run:
         for name in summary.candidates:
-            print(f"would destroy: {out_dir / name}")
+            print(f"would destroy: {name}")
         print(
             f"\ndry run: {len(summary.candidates)} artifact(s) eligible under "
             f"--older-than {summary.policy}; nothing deleted, nothing logged"
         )
         return 0
     for artifact in summary.destroyed:
-        print(
-            f"destroyed: {out_dir / artifact.name} (sha256 {artifact.sha256}, "
-            f"{artifact.size} bytes)"
-        )
+        print(f"destroyed: {artifact.name} (sha256 {artifact.sha256}, {artifact.size} bytes)")
     print(f"\ndestroyed {len(summary.destroyed)} artifact(s) under --older-than {summary.policy}")
     if summary.destroyed:
         print(f"  certificates: {log.path}")
@@ -698,6 +990,154 @@ def build_parser() -> argparse.ArgumentParser:
     )
     apply_parser.set_defaults(func=_cmd_apply)
 
+    compare_parser = sub.add_parser(
+        "compare",
+        help=(
+            "compare two read-only exports for a migration cutover; "
+            "writes local artifacts only, never a connector"
+        ),
+    )
+    compare_parser.add_argument(
+        "--left",
+        required=True,
+        help="legacy side: a recipe .toml, or a .csv whose header uses canonical field names",
+    )
+    compare_parser.add_argument(
+        "--right",
+        required=True,
+        help="target side: a recipe .toml, or a .csv whose header uses canonical field names",
+    )
+    compare_parser.add_argument("--out", default="out", help="output directory")
+    compare_parser.set_defaults(func=_cmd_compare)
+
+    creview_parser = sub.add_parser(
+        "compare-review",
+        help="review a comparison's undecided pairs in the local web queue",
+    )
+    creview_parser.add_argument(
+        "--left",
+        required=True,
+        help="legacy side: a recipe .toml, or a .csv whose header uses canonical field names",
+    )
+    creview_parser.add_argument(
+        "--right",
+        required=True,
+        help="target side: a recipe .toml, or a .csv whose header uses canonical field names",
+    )
+    creview_parser.add_argument(
+        "--reviewer",
+        required=True,
+        help="name recorded with every verdict; the decisions file attributes each decision",
+    )
+    creview_parser.add_argument(
+        "--require-second-reviewer",
+        action="store_true",
+        help=(
+            "hold each approval until a second, different reviewer also approves "
+            "(a side whose policy pack requires it turns this on regardless)"
+        ),
+    )
+    creview_parser.add_argument("--out", default="out", help="output directory")
+    creview_parser.add_argument(
+        "--decisions",
+        default=None,
+        help="decisions file to write (default <out>/compare_decisions.json)",
+    )
+    creview_parser.add_argument(
+        "--host", default="127.0.0.1", help="bind host (loopback only under the dv pack)"
+    )
+    creview_parser.add_argument(
+        "--port", type=int, default=8765, help="bind port (0 picks a free one)"
+    )
+    creview_parser.add_argument(
+        "--no-browser", action="store_true", help="do not open a browser window"
+    )
+    creview_parser.set_defaults(func=_cmd_compare_review)
+
+    capply_parser = sub.add_parser(
+        "compare-apply",
+        help=(
+            "export the local, import-ready correction file for the target side; "
+            "refuses while any comparison review pair is undecided"
+        ),
+    )
+    capply_parser.add_argument(
+        "--left",
+        required=True,
+        help="legacy side: a recipe .toml, or a .csv whose header uses canonical field names",
+    )
+    capply_parser.add_argument(
+        "--right",
+        required=True,
+        help="target side: a recipe .toml, or a .csv whose header uses canonical field names",
+    )
+    capply_parser.add_argument(
+        "--out", default="out", help="output directory holding the comparison manifest"
+    )
+    capply_parser.add_argument(
+        "--decisions",
+        default=None,
+        help="decisions JSON from compare-review (default <out>/compare_decisions.json)",
+    )
+    capply_parser.add_argument(
+        "--corrections",
+        default=None,
+        help="corrections JSON (default: corrections.json beside --decisions)",
+    )
+    capply_parser.add_argument(
+        "--format",
+        choices=sorted(compare_apply.CORRECTION_FORMATS),
+        default="csv",
+        help=(
+            "correction-file column shape: canonical csv, or a CRM import map "
+            "(salesforce_csv, civicrm_csv); the file is local in every case"
+        ),
+    )
+    capply_parser.set_defaults(func=_cmd_compare_apply)
+
+    plan_parser = sub.add_parser(
+        "plan-split",
+        help=(
+            "write a read-only repair plan for a written cluster a reviewer found to be a bad merge"
+        ),
+    )
+    plan_parser.add_argument(
+        "--config", required=True, help="path to the recipe.toml the written run used"
+    )
+    plan_parser.add_argument(
+        "--manifest", required=True, help="the written run's run_manifest.json"
+    )
+    plan_parser.add_argument(
+        "--cluster", required=True, help="cluster id of the written record to split"
+    )
+    plan_parser.add_argument(
+        "--reason",
+        required=True,
+        help="why this cluster is a bad merge; recorded in the plan, never guessed",
+    )
+    plan_parser.add_argument(
+        "--reviewer",
+        required=True,
+        help="name recorded with the plan and with the cannot-links it binds",
+    )
+    plan_parser.add_argument(
+        "--decisions",
+        default=None,
+        help="decisions JSON to bind cannot-links into (default <manifest dir>/decisions.json)",
+    )
+    plan_parser.add_argument(
+        "--corrections",
+        default=None,
+        help="corrections JSON the written run applied; an explicitly passed path must "
+        "exist (default corrections.json beside --decisions)",
+    )
+    plan_parser.add_argument(
+        "--policy-pack",
+        default=None,
+        help="override the recipe's policy pack to match the written run; fail-closed on unknown",
+    )
+    plan_parser.set_defaults(func=_cmd_plan_split)
+
     comparable_parser = sub.add_parser(
         "export-comparable",
         help="emit only the suppressed, CoC-shaped comparable report (no CRM write)",
@@ -770,6 +1210,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "retention window, e.g. 30d or 12h (0d means regardless of age); "
             "required because no default window ships"
+        ),
+    )
+    destroy_parser.add_argument(
+        "--cache-dir",
+        default=None,
+        help=(
+            "also destroy stage-cache entries under this explicitly configured "
+            "[cache] dir boundary; the stage_cache directory under --out is "
+            "always covered"
         ),
     )
     destroy_parser.add_argument(

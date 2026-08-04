@@ -55,7 +55,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from constituent_reconciler import decisions, matching, pipeline
+from constituent_reconciler import decisions, matching, pipeline, stage_cache
 from constituent_reconciler.config import Recipe, load_recipe
 from constituent_reconciler.models import Record, RunResult
 from constituent_reconciler.normalize import normalize_record
@@ -183,7 +183,11 @@ def measure(recipe: Recipe, *, work_dir: Path) -> Measurement:
         id_prefix: str,
         _seen: dict[str, int] | None = None,
         accounting: pipeline.IngestAccumulator | None = None,
+        active_cache: stage_cache.ActiveCache | None = None,
     ) -> list[Record]:
+        # The baseline is the pre-cache "before" number, so the walk below
+        # passes no cache; the parameter exists to match the reader the
+        # pipeline calls, and is forwarded rather than dropped.
         nonlocal pdf_reader_seconds, pdf_reader_calls
         call_started = time.perf_counter()
         try:
@@ -194,6 +198,7 @@ def measure(recipe: Recipe, *, work_dir: Path) -> Measurement:
                 id_prefix=id_prefix,
                 _seen=_seen,
                 accounting=accounting,
+                active_cache=active_cache,
             )
         finally:
             pdf_reader_seconds += time.perf_counter() - call_started
