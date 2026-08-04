@@ -10,8 +10,9 @@ re-merging on later runs, and a local output file can be regenerated from its
 inputs. Neither helps the administrator who discovers a false merge after the
 batch was written into a live CRM. That person needs a safe way to understand
 and execute the repair in the destination, which is the problem
-`docs/NOVEL-USE-CASES-PLAN.md` scopes as UC-03 and sequences as "Now-3: study
-plus three pull requests," with this decision record as the first deliverable.
+`docs/NOVEL-USE-CASES-PLAN.md` scopes as UC-03 and sequences as "Now-3: UC-03
+repair planning (study + 3 PRs)", with this decision record as the first
+deliverable.
 
 The roadmap closeout resolved the older "un-merge" idea (E7) by decision, not
 by implementation: a generic connector protocol cannot truthfully promise
@@ -96,7 +97,12 @@ precious state. Both reviewers can independently regenerate and compare it, an
 interrupted planning session leaves the destination untouched, and when the
 destination has drifted since planning, the stale plan is discarded and
 regenerated rather than patched. Read-only planning is also what makes it safe
-to run against a destination with no repair declaration at all.
+to run against a destination with no repair declaration at all. That includes
+the probe: `inspect_repair` may read a destination and version no declaration
+covers, because the declaration gates verified mutation semantics and
+`apply_repair` alone requires them. The read still passes the policy gate, so
+the DV pack blocks it on a non-local destination, and the implementation PR
+must make that boundary a test.
 
 A completed repair feeds back into the local decision record: the split pairs
 receive binding cannot-links, so the next run cannot recreate the bad cluster.
