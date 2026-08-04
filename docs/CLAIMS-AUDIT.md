@@ -1,6 +1,7 @@
 # Capability claims audit
 
-**Audited:** 2026-07-22 (roadmap closeout re-verification).
+**Audited:** 2026-07-22 (roadmap closeout re-verification); stage-baseline
+row added 2026-08-03.
 **Scope:** every capability claim in `README.md` and `CLAUDE.md`, read against
 the code in `src/constituent_reconciler/`.
 **Method:** each claim below was checked by opening the named module, not by
@@ -35,6 +36,7 @@ Status values: **implemented** (the code does what the sentence says),
 | Consent-gated export: non-consented records withheld, fail-closed | README.md:74, 92-95 | `consent.py` `partition_by_consent`; `pipeline.py` writes `withheld.csv` with ids and reason only | implemented (enforced when the active pack requires consent: dv and hipaa; the default pack does not) |
 | CASS-style address standardization, not USPS-certified | README.md:64-66 (step 3) | `address.py` | implemented |
 | CLAUDE.md architecture map matches the code | CLAUDE.md:72-108 formerly listed `ingest.py`, `gate.py`, `resolve.py`, `extract/deterministic.py`, a `policy/` package, and `test_consent_blocks_export.py`, none of which exist | as built: `pipeline.py` (ingest lives here), `decisions.py` (banding and the fail-closed gate), `matching.py` (Splink wrapper), `extract/pdf.py`, `policy.py`, `tests/test_consent.py` | corrected 2026-07-02 |
+| Large-corpus stage-timing baseline: per-stage wall clock and peak memory, pre-cache | eval/README.md "The stage-timing baseline"; eval/large-corpus-stage-baseline-2026-08-03.md | `tools/corpusgen/stage_baseline.py` (`make perf-baseline`); harness smoke-tested and drift-checked against `pipeline.run`/`export` in `tests/test_stage_baseline.py` | implemented (numbers measured once on one named machine class; the report and JSON state they are not a performance promise) |
 
 ## Re-running this audit
 

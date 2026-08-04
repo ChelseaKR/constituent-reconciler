@@ -35,14 +35,15 @@ from constituent_reconciler.report import render_eval_markdown
 from tools.corpusgen.generate import generate, write_corpus
 
 
-def _peak_memory_mb() -> float:
+def peak_memory_mb() -> float:
     """Peak resident set size of this process, in MiB.
 
     ``ru_maxrss`` is bytes on macOS/BSD and kibibytes on Linux; both are
     normalized to MiB. This is the peak since process start (monotonically
     increasing), so it covers corpus generation plus the pipeline run when
     both happen in this process, which is the honest "how much memory does
-    this whole large-eval pass need" number.
+    this whole large-eval pass need" number. ``stage_baseline.py`` imports
+    this helper so both large-corpus tools measure memory the same way.
     """
 
     raw = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -134,7 +135,7 @@ def run(
     report = evaluate(result.pairs, clusters, n_records=len(result.records))
 
     wall_seconds = time.perf_counter() - wall_start
-    peak_mb = _peak_memory_mb()
+    peak_mb = peak_memory_mb()
     records_per_minute = (len(result.records) / wall_seconds) * 60 if wall_seconds > 0 else 0.0
 
     labels = _load_labels(out_dir)

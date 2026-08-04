@@ -7,6 +7,22 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **Large-corpus stage-timing baseline (UC-01 "before" side).**
+  `tools/corpusgen/stage_baseline.py`, run with `make perf-baseline`, times
+  the six pipeline stages (ingest, extract, normalize, score, review
+  artifact, write) over the seeded 50k synthetic corpus and records peak
+  resident memory per stage, with the pinned corpus parameters, an input
+  digest, and the measuring machine's environment captured content-free:
+  counts and durations only, no field values, no user paths. The dated
+  report and its JSON companion are committed at
+  `eval/large-corpus-stage-baseline-2026-08-03.{md,json}` as the pre-cache
+  numbers the UC-01 stage cache is measured against; the future cached run
+  diffs its own JSON against this one. Both artifacts state plainly that
+  they describe one run on one named machine class and are not a
+  performance promise. A CI-sized smoke test proves the harness on a tiny
+  corpus and asserts byte-for-byte that its composed stages produce the
+  same artifacts `pipeline.run` and `pipeline.export` produce, so harness
+  drift fails CI instead of skewing a committed baseline.
 - **Airtable native-upsert connector (roadmap E3).** The new `airtable`
   destination batches at Airtable's ten-record limit, uses
   `performUpsert` on the configured external-id field, reads a personal access

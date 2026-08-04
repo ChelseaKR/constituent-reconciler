@@ -66,3 +66,28 @@ See `tools/corpusgen/__init__.py` and
 `docs/ideation/02-large-scale-fixes.md` (FIX-11) for what this corpus does
 and does not claim, and for the plan to calibrate it against real, consented
 pilot data once one exists (EXP-08 / E8).
+
+## The stage-timing baseline
+
+`large-corpus-stage-baseline-2026-08-03.md`, with a JSON companion of the
+same name, records where the large-corpus run spends its time and memory,
+stage by stage: ingest, extract, normalize, score, review artifact, write.
+It is the committed "before" side of the UC-01 stage-cache work in
+`docs/NOVEL-USE-CASES-PLAN.md`. When the cache lands, the same command rerun
+on the same machine class produces the "after" side, and the two JSON files
+are the diff.
+
+Regenerate with:
+
+```sh
+make perf-baseline
+```
+
+Like `make eval-large`, this is a local command, not a CI job. CI proves the
+harness itself works by running it on a tiny corpus
+(`tests/test_stage_baseline.py`), including a byte-for-byte check that the
+harness's composed stages produce the same artifacts `pipeline.run` and
+`pipeline.export` produce. The committed numbers were measured once on the
+one machine class the report names. They describe that run honestly and are
+not a performance promise; different hardware produces different absolute
+values, so before/after comparisons belong on a single machine.
