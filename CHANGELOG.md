@@ -7,6 +7,16 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **External-gates runbook.** `docs/EXTERNAL-GATES-RUNBOOK.md` writes down the
+  maintainer's exact hand-run steps for the five "External gate" rows in
+  `docs/ROADMAP-CLOSEOUT.md`'s canonical 1.0 gates table: the screen-reader
+  walkthrough with reviewed Spanish copy and ACR, the ruleset apply plus the
+  signed-tag release ceremony, the recorded CiviCRM demonstration, real
+  adopting organizations, and the schema-stability window. Each section names
+  the repository prerequisites that already exist, the ordered steps, the
+  evidence artifact and where it gets recorded, and honest failure notes. The
+  closeout's no-fabricated-evidence principle governs throughout; the runbook
+  never substitutes a fixture for a human result.
 - **Content-addressed stage cache for extraction and normalization (UC-01).**
   A recipe's new `[cache]` section (validated fail-closed; absent means off)
   stores extraction and normalization results as content-addressed files
