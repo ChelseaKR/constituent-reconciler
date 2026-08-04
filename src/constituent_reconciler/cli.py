@@ -3,7 +3,8 @@
 The subcommands: ``run`` produces resolved records and a review queue, ``eval``
 scores a run against ground-truth clusters, ``eval-extraction`` scores the PDF
 extractor against labeled fixtures, ``apply`` carries human review decisions
-back into a fresh run, ``review`` serves the local web queue, ``validate``
+back into a fresh run, ``compare`` reports how two read-only exports line up
+for a migration cutover, ``review`` serves the local web queue, ``validate``
 checks a recipe without running anything, ``destroy`` deletes retained
 artifacts, ``verify`` checks a provenance log's hash chain, and ``schema``
 prints the declared schema versions. The CLI uses argparse only, so the
@@ -18,7 +19,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from constituent_reconciler import __version__, pipeline, stage_cache
+from constituent_reconciler import __version__, compare, pipeline, stage_cache
 from constituent_reconciler.config import Recipe, RecipeError, load_recipe
 from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.consent import partition_by_consent
@@ -401,6 +402,42 @@ def _cmd_apply(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compare(args: argparse.Namespace) -> int:
+    """Compare two read-only exports for a migration cutover (UC-02).
+
+    Both sides are sources; no connector is constructed on any path of this
+    command, and ``tests/test_compare.py`` holds that as an invariant. The
+    artifacts are all local: the cutover report and review pairs (field
+    values, PII), the count-only migration summary, and the comparison
+    manifest binding both recipes and input digests.
+    """
+
+    try:
+        left = compare.load_side(args.left, label="left")
+        right = compare.load_side(args.right, label="right")
+        result = compare.run_compare(left, right)
+    except (compare.CompareError, RecipeError, OSError) as error:
+        print(f"compare error: {error}", file=sys.stderr)
+        return 2
+    except PolicyViolation as error:
+        print(f"policy error: {error}", file=sys.stderr)
+        return 2
+
+    out_dir = Path(args.out)
+    report_path = compare.write_cutover_report(result, out_dir)
+    review_path = compare.write_cutover_review(result, out_dir)
+    summary_path = compare.write_migration_summary(result, out_dir)
+    manifest_path = compare.write_compare_manifest(
+        compare.build_compare_manifest(left, right, result), out_dir
+    )
+    print(compare.render_compare_summary(result))
+    print(f"\n  cutover report:  {report_path}")
+    print(f"  review pairs:    {review_path}")
+    print(f"  count summary:   {summary_path}")
+    print(f"  manifest:        {manifest_path}")
+    return 0
+
+
 def _cmd_export_comparable(args: argparse.Namespace) -> int:
     """One command: resolve, then emit only the suppressed comparable report.
 
@@ -721,6 +758,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="override [provenance].tsa_url for RFC 3161 trusted timestamps",
     )
     apply_parser.set_defaults(func=_cmd_apply)
+
+    compare_parser = sub.add_parser(
+        "compare",
+        help=(
+            "compare two read-only exports for a migration cutover; "
+            "writes local artifacts only, never a connector"
+        ),
+    )
+    compare_parser.add_argument(
+        "--left",
+        required=True,
+        help="legacy side: a recipe .toml, or a .csv whose header uses canonical field names",
+    )
+    compare_parser.add_argument(
+        "--right",
+        required=True,
+        help="target side: a recipe .toml, or a .csv whose header uses canonical field names",
+    )
+    compare_parser.add_argument("--out", default="out", help="output directory")
+    compare_parser.set_defaults(func=_cmd_compare)
 
     comparable_parser = sub.add_parser(
         "export-comparable",

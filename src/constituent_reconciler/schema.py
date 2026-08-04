@@ -36,6 +36,15 @@ REPORT_SCHEMA_VERSION = 4
 # the version-1 lists, which are kept as-is so ``apply`` reads both versions.
 DECISIONS_SCHEMA_VERSION = 2
 
+# The count-only migration_summary.json written by ``reconcile compare``:
+# matched, single-side, ambiguous, and conflicting identity counts, per-side
+# ingest accounting in count form, and the thresholds used. Never a field
+# value. Versioned on its own because the
+# artifact is read outside the run pipeline's report family (a migration
+# runbook or a funder memo), and its consumers should not have to track the
+# run-report schema to parse it.
+MIGRATION_SUMMARY_SCHEMA_VERSION = 1
+
 
 def versions() -> dict[str, int]:
     """Return the declared schema versions as a mapping."""
@@ -45,4 +54,5 @@ def versions() -> dict[str, int]:
         "connector_interface": CONNECTOR_INTERFACE_VERSION,
         "report_schema": REPORT_SCHEMA_VERSION,
         "decisions_schema": DECISIONS_SCHEMA_VERSION,
+        "migration_summary": MIGRATION_SUMMARY_SCHEMA_VERSION,
     }
