@@ -12,6 +12,8 @@ from constituent_reconciler.schema import (
     CONFIG_SCHEMA_VERSION,
     CONNECTOR_INTERFACE_VERSION,
     DECISIONS_SCHEMA_VERSION,
+    REPAIR_CAPABILITY_SCHEMA_VERSION,
+    REPAIR_PLAN_SCHEMA_VERSION,
     REPORT_SCHEMA_VERSION,
     versions,
 )
@@ -31,6 +33,8 @@ def test_versions_mapping_matches_constants() -> None:
         "connector_interface": CONNECTOR_INTERFACE_VERSION,
         "report_schema": REPORT_SCHEMA_VERSION,
         "decisions_schema": DECISIONS_SCHEMA_VERSION,
+        "repair_plan": REPAIR_PLAN_SCHEMA_VERSION,
+        "repair_capability": REPAIR_CAPABILITY_SCHEMA_VERSION,
     }
 
 

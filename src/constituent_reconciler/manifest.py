@@ -47,12 +47,14 @@ def _splink_version() -> str | None:
         return None
 
 
-def _input_digests(paths: Iterable[Path]) -> dict[str, str]:
+def input_digests(paths: Iterable[Path]) -> dict[str, str]:
     """Digest each input file. A directory contributes every regular file in it.
 
     Keys are file names; a directory's children are keyed ``dirname/childname``
     so two sources with the same file name stay distinct. Values are hex
-    digests. No field value enters the manifest, only hashes.
+    digests. No field value enters the manifest, only hashes. Repair planning
+    (``repair.py``) recomputes this mapping to prove the current source batch
+    is the one the manifest describes.
     """
 
     digests: dict[str, str] = {}
@@ -81,7 +83,7 @@ def build_manifest(
     return {
         "created_at": datetime.now(UTC).isoformat(),
         "recipe_hash": file_digest(recipe_path) if recipe_path is not None else None,
-        "input_hashes": _input_digests(input_paths),
+        "input_hashes": input_digests(input_paths),
         "package_version": __version__,
         "splink_version": _splink_version(),
         "policy_pack": recipe.policy_pack,

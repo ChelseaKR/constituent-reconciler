@@ -34,6 +34,17 @@ REPORT_SCHEMA_VERSION = 3
 # the version-1 lists, which are kept as-is so ``apply`` reads both versions.
 DECISIONS_SCHEMA_VERSION = 2
 
+# The repair-plan artifact (repair_plan.json) that ``reconcile plan-split``
+# writes: the old external id, the proposed split records, the fields needing
+# restoration, and the operations the destination supports. A versioned
+# surface from its first byte, per docs/adr/0012-connector-repair-capabilities.md.
+REPAIR_PLAN_SCHEMA_VERSION = 1
+
+# The connector repair-capability declaration shape (connectors/repair.py):
+# destination, enumerated verified versions, operation vocabulary, and the
+# vendor evidence fields.
+REPAIR_CAPABILITY_SCHEMA_VERSION = 1
+
 
 def versions() -> dict[str, int]:
     """Return the declared schema versions as a mapping."""
@@ -43,4 +54,6 @@ def versions() -> dict[str, int]:
         "connector_interface": CONNECTOR_INTERFACE_VERSION,
         "report_schema": REPORT_SCHEMA_VERSION,
         "decisions_schema": DECISIONS_SCHEMA_VERSION,
+        "repair_plan": REPAIR_PLAN_SCHEMA_VERSION,
+        "repair_capability": REPAIR_CAPABILITY_SCHEMA_VERSION,
     }

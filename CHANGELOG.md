@@ -7,6 +7,31 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **Read-only split repair planning (UC-03, second pull request).**
+  `reconcile plan-split --manifest <run manifest> --cluster <id>` turns one
+  written cluster a reviewer identified as a bad merge into a local repair
+  plan. Planning requires a stated reason and a reviewer identity, verifies
+  the recipe and source batch against the manifest's digests, and takes the
+  written cluster's members, external id, fill policy, and field lineage from
+  the intact provenance chain before recomputing the golden record over
+  exactly that member set; any drift refuses rather than guessing.
+  Reconstruction is fully offline and contacts no destination. The plan file
+  (`repair_plan.json`, schema version 1) records the old external id, one
+  proposed split record per member, the fields whose written value came from
+  a member being split away, and the operations the destination supports;
+  its raw values live only in that local file, which joins
+  `destruction.PII_ARTIFACTS`, the retention inventory, and the threat model,
+  while provenance stores the plan's digest in a new `repair-plan` entry.
+  Every split pair becomes a binding rejected cannot-link in the decisions
+  file, and a test proves the next run cannot re-form the cluster. Beside the
+  planner, `connectors/repair.py` adds the ADR 0012 capability-declaration
+  surface: exact enumerated destination versions, operations marked
+  destructive or not, and required vendor-evidence fields, with wildcard or
+  range versions refused at construction. No adapter publishes a declaration,
+  conformance tests assert that undeclared means no repair operations, and
+  unsupported destinations get manual instructions with no flag to force a
+  generic operation. `apply_repair` execution and the CiviCRM pilot remain
+  unimplemented.
 - **Repair-capability decision record (UC-03 study).**
   `docs/adr/0012-connector-repair-capabilities.md` decides the protocol for
   post-write split repair ahead of implementation: `inspect_repair` and

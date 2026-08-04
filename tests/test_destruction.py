@@ -140,6 +140,41 @@ def test_destroy_deletes_hashes_and_certifies(tmp_path: Path) -> None:
     assert ok, message
 
 
+def test_repair_plan_is_a_listed_artifact_and_is_destroyed(tmp_path: Path) -> None:
+    """The split-repair plan holds raw field values, so destroy must cover it.
+
+    ADR 0012 names the destruction-inventory entry a prerequisite for storing
+    plans at all: without it, `reconcile destroy` would leave the one artifact
+    that concentrates a bad merge's raw values behind.
+    """
+
+    assert "repair_plan.json" in PII_ARTIFACTS
+    out_dir = _make_out_dir(tmp_path)
+    plan_path = out_dir / "repair_plan.json"
+    plan_path.write_text(
+        json.dumps({"split_records": [{"fields": {"email": SENTINEL}}]}), encoding="utf-8"
+    )
+    _age(plan_path, 2 * DAY_SECONDS)
+
+    log = ProvenanceLog(out_dir / PROVENANCE_FILENAME)
+    summary = destroy(out_dir, timedelta(days=1), policy="1d", log=log, dry_run=False)
+
+    assert not plan_path.exists()
+    assert "repair_plan.json" in {artifact.name for artifact in summary.destroyed}
+    entries = [
+        json.loads(line)
+        for line in (out_dir / PROVENANCE_FILENAME).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    certified = [
+        e for e in entries if e["action"] == "destroyed" and e["record_id"] == plan_path.name
+    ]
+    assert len(certified) == 1
+    assert SENTINEL not in (out_dir / PROVENANCE_FILENAME).read_text(encoding="utf-8")
+    ok, message = verify_log(out_dir / PROVENANCE_FILENAME)
+    assert ok, message
+
+
 def test_no_planted_value_survives_under_out_dir(tmp_path: Path) -> None:
     out_dir = _make_out_dir(tmp_path)
     log = ProvenanceLog(out_dir / PROVENANCE_FILENAME)

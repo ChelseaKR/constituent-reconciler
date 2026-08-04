@@ -34,13 +34,17 @@ from constituent_reconciler.provenance import ProvenanceLog
 # pipeline is known to have written (decisions.json carries ids and verdicts
 # only, aggregate_summary.json is non-identifying by construction,
 # run_manifest.json carries file digests and configuration only, and the
-# provenance log is the evidence of destruction itself).
+# provenance log is the evidence of destruction itself). repair_plan.json is
+# the split-repair plan ``reconcile plan-split`` writes: it holds raw field
+# values for the members of one written cluster, so it is destroyed here and
+# the provenance log keeps only its digest.
 PII_ARTIFACTS: tuple[str, ...] = (
     "resolved.csv",
     "review_queue.csv",
     "withheld.csv",
     "salesforce_import.csv",
     "civicrm_import.csv",
+    "repair_plan.json",
 )
 
 PROVENANCE_FILENAME = "provenance.jsonl"

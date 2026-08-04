@@ -550,22 +550,22 @@ def _apply_corrections(
     return corrected
 
 
-def run(
+def ingest_normalized_records(
     recipe: Recipe,
     *,
-    force_auto: Iterable[frozenset[str]] = (),
-    force_drop: Iterable[frozenset[str]] = (),
     corrections: Iterable[Correction] = (),
-) -> RunResult:
-    """Execute the pipeline and return the result.
+    accounting: IngestAccumulator | None = None,
+) -> dict[str, Record]:
+    """Read every source, enforce id uniqueness, apply corrections, normalize.
 
-    ``force_auto`` and ``force_drop`` carry human review decisions back in: an
-    approved review pair becomes a confident merge, a rejected one is dropped.
-    Corrections replace raw field values before normalization, so matching,
-    golden-record reduction, lineage, and export all see the reviewed value.
+    The deterministic front half of ``run``, shared with repair planning
+    (``repair.py``), which needs the run's records without scoring anything or
+    touching a connector. Corrections replace raw field values before
+    normalization, exactly as they do on a full run.
     """
 
-    accounting = IngestAccumulator()
+    if accounting is None:
+        accounting = IngestAccumulator()
     raw_records: list[Record] = []
     if recipe.existing is not None:
         raw_records += _ingest_source(
@@ -586,8 +586,7 @@ def run(
     raw_records = _apply_corrections(
         raw_records, _group_corrections(corrections, fields=recipe.fields)
     )
-
-    records = {
+    return {
         r.unique_id: normalize_record(
             r,
             recipe.fields,
@@ -596,6 +595,25 @@ def run(
         )
         for r in raw_records
     }
+
+
+def run(
+    recipe: Recipe,
+    *,
+    force_auto: Iterable[frozenset[str]] = (),
+    force_drop: Iterable[frozenset[str]] = (),
+    corrections: Iterable[Correction] = (),
+) -> RunResult:
+    """Execute the pipeline and return the result.
+
+    ``force_auto`` and ``force_drop`` carry human review decisions back in: an
+    approved review pair becomes a confident merge, a rejected one is dropped.
+    Corrections replace raw field values before normalization, so matching,
+    golden-record reduction, lineage, and export all see the reviewed value.
+    """
+
+    accounting = IngestAccumulator()
+    records = ingest_normalized_records(recipe, corrections=corrections, accounting=accounting)
 
     scored = matching.score_pairs(records.values(), recipe.fields, prior=recipe.prior)
     pairs = decisions.band_pairs(
