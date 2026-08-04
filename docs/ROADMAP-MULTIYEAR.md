@@ -6,7 +6,7 @@ which holds the near-term Now/Next/Later detail, and
 [ROADMAP-CLOSEOUT.md](ROADMAP-CLOSEOUT.md), which records terminal states and
 the external 1.0 gates. [ROADMAP.md](ROADMAP.md) is the historical phase
 record.  
-**Dates:** quarters and halves only. Where the future depends on people
+**Dates:** halves and years only. Where the future depends on people
 outside this repository, this document states the gate instead of a date.
 
 ## Strategy recap
@@ -41,21 +41,21 @@ converts an external gate into an engineering estimate.
 | --- | --- | --- |
 | 2026 H2 | Land the Now horizon (UC-01, UC-02, UC-03) and initiate every external 1.0 gate | none; the work is committed in NOVEL-USE-CASES-PLAN.md |
 | 2027 | Validate UC-01 and UC-02 with an adopting organization; re-rank the Next horizon from observed demand | at least one real adopting organization |
-| 2028 | Later-horizon preconditions (outreach partner for UC-07, second consumer for UC-08) and the schema-stability record | named external partners; two real releases without a breaking change |
+| 2028 | Later-horizon preconditions (outreach partner for UC-07, second consumer for UC-08) and the schema-stability record | named external partners |
 | 2029 | Sustained maintenance, with community handoff options and an honest graduation or archival decision | evidence accumulated in the prior horizons |
 
 ## 2026 H2
 
 ### Product depth
 
-The Now horizon of NOVEL-USE-CASES-PLAN.md is in flight: the first PRs of
-UC-01 (returning-client batch reconciliation), UC-02 (data-migration cutover
-assurance), and UC-03 (post-write split and repair planning) are landing now.
-The remainder of the half follows the plan's numbered sequencing:
+NOVEL-USE-CASES-PLAN.md commits this half to its Now horizon: UC-01
+(returning-client batch reconciliation), UC-02 (data-migration cutover
+assurance), and UC-03 (post-write split and repair planning). The plan's
+numbered sequencing, Now-1 through Now-3, orders the work:
 
-1. finish the UC-01 stage cache, including destruction and manifest coverage;
-2. land the UC-02 read-only compare model and its review artifacts;
-3. commit the UC-03 capability ADR, then read-only repair planning.
+1. Now-1: the UC-01 stage cache, including destruction and manifest coverage;
+2. Now-2: the UC-02 read-only compare model and its review artifacts;
+3. Now-3: the UC-03 capability ADR, then read-only repair planning.
 
 UC-03's reviewed remote repair is
 piloted against one destination, CiviCRM first because it is self-hostable;
@@ -106,9 +106,9 @@ shipped code distinct from live evidence.
 
 The DPG registry nomination (closeout item E10) is ready for submission and
 is a maintainer action with an external outcome; it can be filed this half.
-The HSDS boundary set by closeout item E1 and UC-05 holds: service
-identifiers may travel as non-matching metadata, and client records are never
-mapped into HSDS.
+Closeout item E1 and UC-05 keep the HSDS boundary in place: service
+identifiers may travel as non-matching metadata, and client records are
+never mapped into HSDS.
 
 ### Maintenance capacity
 
