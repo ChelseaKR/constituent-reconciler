@@ -120,6 +120,7 @@ constituent-reconciler/
 │   ├── report.py                  # run summary + committed eval report renderers
 │   ├── review/                    # local queue UI, session, server, reviewer calibration
 │   ├── schema.py                  # declared schema/interface versions for the stability contract
+│   ├── stage_cache.py             # content-addressed cache for extraction and normalization only
 │   ├── suppression.py             # aggregate suppression-aware summaries for external sharing
 │   └── telemetry.py               # content-free optional model-call telemetry
 ├── tests/

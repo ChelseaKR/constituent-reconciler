@@ -7,6 +7,38 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **Content-addressed stage cache for extraction and normalization (UC-01).**
+  A recipe's new `[cache]` section (validated fail-closed; absent means off)
+  stores extraction and normalization results as content-addressed files
+  under `stage_cache/` inside the output root, or under an explicitly
+  configured local `dir` boundary; URL-shaped values are refused at load
+  time. Keys digest the input, the declared recipe schema version, the
+  active field mapping, the package version, the installed version of the
+  library doing the stage's work (pdfplumber for PDF extraction, the postal
+  package under the libpostal address backend), and the stage's backend
+  configuration, so editing one source row re-keys that row alone, a
+  dependency upgrade orphans that dependency's old entries, and any
+  mismatched entry is ignored rather than coerced. A stage whose backing
+  library version cannot be determined is not cached at all, and a parse the
+  sandbox killed against a resource limit is returned fail-closed but never
+  stored, so a transient timeout or memory cap cannot freeze a document out
+  of reconciliation. Scoring, banding, and clustering never touch the
+  cache: term frequencies and cross-batch candidates change pair
+  probabilities whenever the population changes, and a merge-blocking test
+  proves cached and uncached runs byte-identical. OCR and model-seam
+  extraction backends bypass the cache because their output is not a pure
+  function of the file bytes. The run manifest and `run_summary.json` record
+  cache policy, hit/miss counts, and stage durations, all content-free
+  (report schema version 4). The cache directory is a PII artifact:
+  `reconcile destroy` covers it, `--cache-dir` reaches an explicit boundary
+  but refuses any directory that does not have the stage-cache shape, the
+  cache walk deletes nothing outside `extract/` and `normalize/` entry
+  files, and each deleted entry gets its own destruction certificate. Two
+  UC-01 items are deliberately not part of this change: the progress-event
+  work planned beside it in docs/NOVEL-USE-CASES-PLAN.md, and the
+  large-corpus wall-clock and peak-memory before/after numbers from the same
+  plan item's acceptance criteria. No benchmark has been run, so none is
+  claimed; docs/CLAIMS-AUDIT.md records both gaps.
 - **Read-only migration cutover comparison (UC-02, first PR).** `reconcile
   compare --left <recipe or csv> --right <recipe or csv>` resolves a legacy
   CRM export against a target export without building any connector. Records

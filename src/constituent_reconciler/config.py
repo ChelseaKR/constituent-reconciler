@@ -56,6 +56,7 @@ _SECTION_KEYS: dict[str, frozenset[str]] = {
         }
     ),
     "household": frozenset({"enabled"}),
+    "cache": frozenset({"enabled", "dir"}),
     "comparable": frozenset({"export", "breakdown_fields", "period"}),
     "provenance": frozenset({"tsa_url"}),
     "review": frozenset({"require_second_reviewer", "calibration"}),
@@ -175,6 +176,30 @@ class HouseholdConfig:
 
 
 @dataclass(frozen=True)
+class CacheConfig:
+    """Stage-cache settings, loaded from the recipe's [cache] section (UC-01).
+
+    ``enabled`` defaults to False: an absent section means no cache, under
+    every policy pack. When enabled, extraction and normalization results are
+    stored content-addressed (see stage_cache.py) under the ``stage_cache``
+    directory inside the run's output root, so the cache sits inside the same
+    local retention boundary as every other run artifact and ``reconcile
+    destroy`` reaches it without extra configuration.
+
+    ``dir`` names a different local directory as the cache's retention
+    boundary. Setting it is an explicit operator decision: the value must be
+    a local filesystem path (a URL-shaped value is refused at load time), it
+    is resolved relative to the recipe like every other recipe path, and the
+    operator takes on destroying that directory on their own schedule
+    (``reconcile destroy --cache-dir`` covers it). Setting ``dir`` while the
+    cache is disabled is refused rather than ignored.
+    """
+
+    enabled: bool = False
+    dir: Path | None = None
+
+
+@dataclass(frozen=True)
 class OutputConfig:
     """Where resolved records are written. Secrets are never stored here.
 
@@ -249,6 +274,7 @@ class Recipe:
     extract: ExtractConfig = field(default_factory=ExtractConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     household: HouseholdConfig = field(default_factory=HouseholdConfig)
+    cache: CacheConfig = field(default_factory=CacheConfig)
     tsa_url: str = ""
     recipe_path: Path | None = None
 
@@ -256,6 +282,38 @@ class Recipe:
 def _resolve(base: Path, value: str) -> Path:
     candidate = Path(value)
     return candidate if candidate.is_absolute() else (base / candidate)
+
+
+def _load_cache_config(cache_section: dict[str, Any], base: Path) -> CacheConfig:
+    """Validate and build the [cache] section, fail-closed on every bad shape.
+
+    The cache stores extracted and normalized field values, so a misread
+    setting here would put PII somewhere the operator did not choose. Each
+    check raises rather than defaulting: a non-boolean ``enabled``, a
+    non-string or URL-shaped ``dir``, and a ``dir`` on a disabled cache are
+    all refused by name.
+    """
+
+    enabled = cache_section.get("enabled", False)
+    if not isinstance(enabled, bool):
+        raise RecipeError(f"recipe [cache] enabled must be true or false, got {enabled!r}")
+    dir_value = cache_section.get("dir")
+    if dir_value is None:
+        return CacheConfig(enabled=enabled)
+    if not isinstance(dir_value, str) or not dir_value.strip():
+        raise RecipeError(f"recipe [cache] dir must be a non-empty path string, got {dir_value!r}")
+    if "://" in dir_value:
+        raise RecipeError(
+            f"recipe [cache] dir must be a local filesystem path, got the URL-shaped "
+            f"value {dir_value!r}; the stage cache holds constituent field values "
+            f"and never leaves this machine"
+        )
+    if not enabled:
+        raise RecipeError(
+            "recipe [cache] sets dir while enabled is false or absent; "
+            "set enabled = true or remove dir"
+        )
+    return CacheConfig(enabled=True, dir=_resolve(base, dir_value))
 
 
 def load_recipe(
@@ -286,6 +344,7 @@ def load_recipe(
     extract_section = data.get("extract", {})
     output_section = data.get("output", {})
     household_section = data.get("household", {})
+    cache_section = data.get("cache", {})
     comparable_section = data.get("comparable", {})
     review_section = data.get("review", {})
     provenance_section = data.get("provenance", {})
@@ -353,6 +412,10 @@ def load_recipe(
     # the only source of "enabled" is the recipe itself.
     household = HouseholdConfig(enabled=bool(household_section.get("enabled", False)))
 
+    # Off unless the recipe opts in; an absent [cache] section means no cache
+    # under every policy pack. Validation is fail-closed in _load_cache_config.
+    cache = _load_cache_config(cache_section, base)
+
     # Comparable-export settings. The identifying-field check runs here, at
     # load time, so a bad recipe fails before any record is read, not only
     # when the report is actually built (comparable_summary re-checks too, as
@@ -407,6 +470,7 @@ def load_recipe(
         extract=extract,
         output=output,
         household=household,
+        cache=cache,
         tsa_url=tsa_url if tsa_url is not None else str(provenance_section.get("tsa_url", "")),
         recipe_path=recipe_path,
     )
