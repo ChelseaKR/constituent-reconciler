@@ -513,6 +513,137 @@ def test_invalid_corrections_file_refuses(
     assert not (out_dir / REPAIR_PLAN_FILENAME).exists()
 
 
+def test_explicit_corrections_path_that_does_not_exist_refuses(
+    run_dir: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A typo'd --corrections path refuses instead of planning without it.
+
+    The lineage check cannot see a correction that changed a value without
+    changing which member supplied it, so silently degrading to "no
+    corrections" would emit a plan carrying stale restoration values with a
+    clean exit code, and a person would apply them to the live CRM by hand.
+    """
+
+    demo, out_dir = run_dir
+    log_before = (out_dir / "provenance.jsonl").read_bytes()
+    missing = out_dir / "no-such-corrections.json"
+
+    code = main(_plan_args(demo, out_dir, MERGED_CLUSTER, **{"--corrections": str(missing)}))
+
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "plan-split error" in err
+    assert "no-such-corrections.json" in err
+    assert "not found" in err
+    assert not (out_dir / REPAIR_PLAN_FILENAME).exists()
+    assert not (out_dir / "decisions.json").exists()
+    assert (out_dir / "provenance.jsonl").read_bytes() == log_before
+
+
+def test_decisions_file_that_is_not_an_object_refuses_with_no_artifacts(
+    run_dir: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A decisions file holding a JSON array refuses before any bytes land.
+
+    The refusal must leave no plan file and no provenance entry, matching
+    RepairPlanError's contract; the malformed decisions file itself stays
+    untouched for the operator to inspect.
+    """
+
+    demo, out_dir = run_dir
+    decisions_path = out_dir / "decisions.json"
+    decisions_path.write_text("[1, 2]", encoding="utf-8")
+    log_before = (out_dir / "provenance.jsonl").read_bytes()
+
+    assert main(_plan_args(demo, out_dir, MERGED_CLUSTER)) == 2
+
+    err = capsys.readouterr().err
+    assert "plan-split error" in err
+    assert "JSON object" in err
+    assert not (out_dir / REPAIR_PLAN_FILENAME).exists()
+    assert (out_dir / "provenance.jsonl").read_bytes() == log_before
+    assert decisions_path.read_text(encoding="utf-8") == "[1, 2]"
+
+
+def test_decisions_file_that_is_not_json_refuses_with_no_artifacts(
+    run_dir: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A decisions file that does not parse gets the standard refusal.
+
+    The raw JSONDecodeError must not escape as a traceback: the CLI prints
+    its usual plan-split error, exits 2, and leaves no plan file and no
+    provenance entry behind.
+    """
+
+    demo, out_dir = run_dir
+    decisions_path = out_dir / "decisions.json"
+    decisions_path.write_text("not json", encoding="utf-8")
+    log_before = (out_dir / "provenance.jsonl").read_bytes()
+
+    assert main(_plan_args(demo, out_dir, MERGED_CLUSTER)) == 2
+
+    err = capsys.readouterr().err
+    assert "plan-split error" in err
+    assert "not valid JSON" in err
+    assert not (out_dir / REPAIR_PLAN_FILENAME).exists()
+    assert (out_dir / "provenance.jsonl").read_bytes() == log_before
+
+
+def test_planning_a_second_cluster_names_the_displaced_plan(
+    run_dir: tuple[Path, Path], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Replacing a different cluster's plan is announced, never silent.
+
+    The plan filename is fixed because the destruction inventory lists
+    artifacts by exact name, so one out directory holds one plan file.
+    Planning a second cluster replaces the first cluster's plan; the CLI must
+    name the displaced cluster so the operator regenerates it before that
+    repair continues. Replanning the same cluster stays quiet.
+    """
+
+    demo, _ = run_dir
+    recipe = load_recipe(demo / "recipe.toml")
+    records = pipeline.ingest_normalized_records(recipe)
+    first_members = ("existing:E001", "existing:E004")
+    [first_golden] = decisions_mod.golden_records(
+        [Cluster(cluster_id="existing:E001", members=first_members)], records, recipe.fields
+    )
+    synthetic = _synthetic_out(
+        run_dir,
+        tmp_path,
+        record_id="existing:E001",
+        members=list(first_members),
+        field_sources=first_golden.field_sources,
+    )
+    second_members = ("existing:E002", "incoming:N004")
+    [second_golden] = decisions_mod.golden_records(
+        [Cluster(cluster_id="existing:E002", members=second_members)], records, recipe.fields
+    )
+    ProvenanceLog(synthetic / "provenance.jsonl").append(
+        action="written",
+        record_id="existing:E002",
+        members=list(second_members),
+        consent=True,
+        payload={},
+        external_id="existing:E002",
+        field_sources=second_golden.field_sources,
+        fill_policy="survivor-then-lowest-id",
+    )
+
+    assert main(_plan_args(demo, synthetic, "existing:E001")) == 0
+    assert capsys.readouterr().err == ""
+
+    assert main(_plan_args(demo, synthetic, "existing:E002")) == 0
+    err = capsys.readouterr().err
+    assert "warning" in err
+    assert "existing:E001" in err
+    assert "replaced" in err
+    assert _plan(synthetic)["cluster_id"] == "existing:E002"
+
+    assert main(_plan_args(demo, synthetic, "existing:E002")) == 0
+    assert capsys.readouterr().err == ""
+
+
 # -- unsupported destinations cannot be forced --------------------------------
 
 

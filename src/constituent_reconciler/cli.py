@@ -420,6 +420,19 @@ def _cmd_plan_split(args: argparse.Namespace) -> int:
     corrections_path = (
         Path(args.corrections) if args.corrections else decisions_path.parent / "corrections.json"
     )
+    # An explicit --corrections path asserts the written run applied
+    # corrections. The lineage check cannot see a correction that changed a
+    # value without changing which member supplied it, so degrading to "no
+    # corrections" here would plan stale restoration values with a clean exit.
+    # Only the default location may be probed for existence.
+    if args.corrections and not corrections_path.exists():
+        print(
+            f"plan-split error: corrections file not found: {corrections_path}; "
+            "planning cannot replay corrections from a missing file, so fix the "
+            "path or omit --corrections",
+            file=sys.stderr,
+        )
+        return 2
     try:
         corrections = _load_corrections(corrections_path) if corrections_path.exists() else []
     except (OSError, ValueError, json.JSONDecodeError) as error:
@@ -456,6 +469,13 @@ def _cmd_plan_split(args: argparse.Namespace) -> int:
         )
     print(f"  plan digest:  {planned.digest} (recorded in the provenance log)")
     print(f"  cannot-links: {len(planned.cannot_links)} pair(s) bound in {planned.decisions_path}")
+    if planned.displaced_cluster is not None:
+        print(
+            f"warning: {planned.plan_path} previously held the plan for cluster "
+            f"{planned.displaced_cluster!r}; that plan was replaced and must be "
+            "regenerated with plan-split before its repair continues",
+            file=sys.stderr,
+        )
     print("planning is read-only: nothing was sent to or changed in the destination.")
     return 0
 
@@ -794,8 +814,8 @@ def build_parser() -> argparse.ArgumentParser:
     plan_parser.add_argument(
         "--corrections",
         default=None,
-        help="corrections JSON the written run applied (default corrections.json beside "
-        "--decisions)",
+        help="corrections JSON the written run applied; an explicitly passed path must "
+        "exist (default corrections.json beside --decisions)",
     )
     plan_parser.add_argument(
         "--policy-pack",

@@ -31,10 +31,11 @@ cannot-link binding adds nothing the file already holds.
 
 One honest limit: a correction that changes a field's value without changing
 which member supplied it is invisible to the lineage check, so operators pass
-the corrections file the written run applied (the CLI loads it from the
-default location ``reconcile apply`` uses). Both reviewers regenerating and
-comparing plans, and the apply path's digest binding, are the controls the ADR
-places around that gap.
+the corrections file the written run applied (the CLI refuses an explicitly
+passed corrections path that does not exist, and otherwise loads the default
+location ``reconcile apply`` uses). Both reviewers regenerating and comparing
+plans, and the apply path's digest binding, are the controls the ADR places
+around that gap.
 """
 
 from __future__ import annotations
@@ -67,7 +68,11 @@ REJECTED_VERDICT = "rejected"
 
 
 class RepairPlanError(ValueError):
-    """Planning refused, fail-closed. No plan file is written on this path."""
+    """Planning refused, fail-closed.
+
+    Every raise happens before any plan bytes exist: no plan file is written,
+    no provenance entry is appended, and no decision is bound on this path.
+    """
 
 
 @dataclass(frozen=True)
@@ -76,8 +81,10 @@ class PlannedSplit:
 
     ``plan_path`` is the local plan file (the PII-bearing artifact);
     ``digest`` is the BLAKE2b-256 over its exact bytes, the value recorded in
-    the provenance log and later bound to apply-time approvals. Everything
-    else here is ids and counts, safe to print.
+    the provenance log and later bound to apply-time approvals.
+    ``displaced_cluster`` names the different cluster whose plan file this
+    planning pass replaced, or ``None`` when nothing was displaced.
+    Everything else here is ids and counts, safe to print.
     """
 
     plan_path: Path
@@ -90,6 +97,7 @@ class PlannedSplit:
     mode: str
     cannot_links: tuple[tuple[str, str], ...]
     decisions_path: Path
+    displaced_cluster: str | None
 
 
 def _require(value: str, what: str) -> str:
@@ -367,10 +375,59 @@ def _decision_lists(data: dict[str, object]) -> tuple[list[list[str]], list[list
     return pairs_of("approved"), pairs_of("rejected")
 
 
-def _bind_cannot_links(path: Path, links: Sequence[tuple[str, str]], reviewer: str) -> None:
+def _load_decisions(path: Path) -> dict[str, object]:
+    """Load and validate the decisions file before any plan bytes are written.
+
+    A file that is not valid JSON, or is valid JSON but not an object, refuses
+    here, while nothing is on disk yet, so the refusal leaves no plan file and
+    no provenance entry behind. A missing file is an empty record; binding
+    creates it.
+    """
+
+    if not path.exists():
+        return {}
+    try:
+        loaded: object = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise RepairPlanError(f"decisions file is not valid JSON: {path}") from error
+    if not isinstance(loaded, dict):
+        raise RepairPlanError(f"decisions file must be a JSON object: {path}")
+    return {str(key): value for key, value in loaded.items()}
+
+
+def _displaced_cluster(plan_path: Path, cluster_id: str) -> str | None:
+    """Name the different cluster whose existing plan the next write replaces.
+
+    The plan filename is fixed because ``destruction.PII_ARTIFACTS`` lists
+    artifacts by exact name, so planning a second cluster in one out directory
+    replaces the first cluster's plan file. Plans are regenerable by design,
+    but the replacement must not be silent; the CLI turns this value into a
+    warning. Replanning the same cluster, and an existing file that does not
+    parse as a plan, name nothing.
+    """
+
+    if not plan_path.is_file():
+        return None
+    try:
+        existing: object = json.loads(plan_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(existing, dict):
+        return None
+    previous = existing.get("cluster_id")
+    if isinstance(previous, str) and previous and previous != cluster_id:
+        return previous
+    return None
+
+
+def _bind_cannot_links(
+    path: Path, data: dict[str, object], links: Sequence[tuple[str, str]], reviewer: str
+) -> None:
     """Record every split pair as rejected in the decisions file.
 
-    The rejected list is what ``reconcile apply`` loads as ``force_drop``, and
+    ``data`` is the file's content, loaded and validated by
+    ``_load_decisions`` before any plan bytes were written. The rejected list
+    is what ``reconcile apply`` loads as ``force_drop``, and
     ``decisions.enforce_cannot_links`` treats those pairs as binding: the next
     run cannot recreate the split cluster, and any surviving automatic edge in
     the group returns to review. A split pair found in ``approved`` is
@@ -379,12 +436,6 @@ def _bind_cannot_links(path: Path, links: Sequence[tuple[str, str]], reviewer: s
     records, and every added rejection is attributed in the audit section.
     """
 
-    data: dict[str, object] = {}
-    if path.exists():
-        loaded: object = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(loaded, dict):
-            raise RepairPlanError(f"decisions file must be a JSON object: {path}")
-        data = {str(key): value for key, value in loaded.items()}
     approved, rejected = _decision_lists(data)
     audit_raw = data.get("audit")
     audit: dict[str, list[dict[str, str]]] = (
@@ -435,11 +486,15 @@ def plan_split(
     Refuses, fail-closed, on a blank reason or reviewer, a manifest that does
     not match the loaded recipe and current sources, a provenance log that
     does not verify or does not record the manifest's run, an unknown or
-    never-written cluster id, a single-record cluster, a member the batch
-    cannot reconstruct, or lineage that no longer matches the write entry.
+    never-written cluster id, a single-record cluster, a decisions file that
+    is not valid JSON or not a JSON object, a member the batch cannot
+    reconstruct, or lineage that no longer matches the write entry. Every
+    refusal happens before any plan bytes exist, so a refused planning pass
+    leaves no plan file, no provenance entry, and no bound decision.
     On success the plan file is written beside the manifest, its digest is
     appended to the provenance log, and the split pairs become binding
-    cannot-links in the decisions file.
+    cannot-links in the decisions file; when the plan file replaced a
+    different cluster's plan, ``displaced_cluster`` names it.
     """
 
     reason_text = _require(reason, "a reason")
@@ -451,6 +506,10 @@ def plan_split(
     entry = _written_entry(provenance_path, manifest_digest, cluster_key)
     members = _entry_members(entry, cluster_key)
     external_id = _entry_external_id(entry, cluster_key)
+    resolved_decisions = (
+        decisions_path if decisions_path is not None else out_dir / "decisions.json"
+    )
+    decisions_data = _load_decisions(resolved_decisions)
     try:
         records = pipeline.ingest_normalized_records(recipe, corrections=corrections)
     except ValueError as error:
@@ -470,6 +529,7 @@ def plan_split(
     encoded = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     digest = hashlib.blake2b(encoded.encode("utf-8"), digest_size=32).hexdigest()
     plan_path = out_dir / REPAIR_PLAN_FILENAME
+    displaced = _displaced_cluster(plan_path, cluster_key)
     plan_path.write_text(encoded, encoding="utf-8")
     log = ProvenanceLog(provenance_path)
     log.append_repair_plan(
@@ -479,10 +539,7 @@ def plan_split(
         external_id=external_id,
     )
     links = tuple((left, right) for left, right in combinations(members, 2))
-    resolved_decisions = (
-        decisions_path if decisions_path is not None else out_dir / "decisions.json"
-    )
-    _bind_cannot_links(resolved_decisions, links, reviewer_name)
+    _bind_cannot_links(resolved_decisions, decisions_data, links, reviewer_name)
     operations = supported_operations(recipe.output.connector, "")
     return PlannedSplit(
         plan_path=plan_path,
@@ -495,4 +552,5 @@ def plan_split(
         mode="verified" if operations else "manual",
         cannot_links=links,
         decisions_path=resolved_decisions,
+        displaced_cluster=displaced,
     )
