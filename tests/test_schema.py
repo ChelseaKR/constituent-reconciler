@@ -11,6 +11,7 @@ from constituent_reconciler.config import load_recipe
 from constituent_reconciler.schema import (
     CONFIG_SCHEMA_VERSION,
     CONNECTOR_INTERFACE_VERSION,
+    CUTOVER_CORRECTIONS_SCHEMA_VERSION,
     DECISIONS_SCHEMA_VERSION,
     MIGRATION_SUMMARY_SCHEMA_VERSION,
     REPORT_SCHEMA_VERSION,
@@ -33,6 +34,7 @@ def test_versions_mapping_matches_constants() -> None:
         "report_schema": REPORT_SCHEMA_VERSION,
         "decisions_schema": DECISIONS_SCHEMA_VERSION,
         "migration_summary": MIGRATION_SUMMARY_SCHEMA_VERSION,
+        "cutover_corrections": CUTOVER_CORRECTIONS_SCHEMA_VERSION,
     }
 
 

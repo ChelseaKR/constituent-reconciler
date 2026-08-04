@@ -83,8 +83,9 @@ constituent-reconciler/
 ├── src/constituent_reconciler/
 │   ├── __init__.py                # public API surface, intentionally small
 │   ├── address.py                 # deterministic CASS-style standardizer, not USPS-certified
-│   ├── cli.py                     # run/eval/compare/review/apply/report/validate/destroy/verify/schema
+│   ├── cli.py                     # run/eval/compare(+-review/-apply)/review/apply/report/validate/destroy/verify/schema
 │   ├── compare.py                 # read-only migration cutover comparison (reconcile compare)
+│   ├── compare_apply.py           # reviewed, consent-gated local correction-file export (compare-apply)
 │   ├── config.py                  # recipe.toml loading: sources, connector, thresholds, policy pack
 │   ├── connectors/
 │   │   ├── airtable.py            # Airtable native batched upsert

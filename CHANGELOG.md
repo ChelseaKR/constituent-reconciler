@@ -7,6 +7,30 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **Cutover review and correction-file export (UC-02, second PR).** Two new
+  subcommands finish the migration-assurance flow. `reconcile compare-review`
+  serves the same local web review queue, session, and decisions machinery
+  `reconcile run` uses, over a comparison's undecided pairs; verdicts save to
+  `compare_decisions.json` and reviewer field corrections to
+  `corrections.json`, both re-scored on apply. `reconcile compare-apply` then
+  emits `target_corrections.csv`, a local, import-ready correction file for
+  the target side, built with the same import field maps and local writer as
+  the `salesforce_csv` and `civicrm_csv` exports (`--format` chooses the
+  shape; the default keeps canonical column names). The export fails closed
+  three ways: it refuses while any review pair is undecided or awaiting a
+  second reviewer (a comparison with zero review pairs may export without a
+  review step), it refuses when `compare_manifest.json` is missing or no
+  longer matches the inputs, and identities without active consent are
+  withheld and counted (`cutover_withheld.csv`, ids and reason only) whenever
+  either side's recipe requires consent. After a successful export the
+  comparison manifest gains an `export` section binding the correction and
+  decisions files by digest with counts only, under the new versioned
+  `cutover_corrections` schema. No comparison command can reach a live
+  connector; `tests/test_compare_apply.py` holds that invariant alongside
+  the review, manifest, and consent gates. `target_corrections.csv`,
+  `cutover_withheld.csv`, and `corrections.json` join the destruction
+  inventory, closing a pre-existing gap for the run pipeline's corrections
+  file, and docs/DATA-FLOW-AND-RETENTION.md covers all of them.
 - **Large-corpus stage-timing baseline (UC-01 "before" side).**
   `tools/corpusgen/stage_baseline.py`, run with `make perf-baseline`, times
   the six pipeline stages (ingest, extract, normalize, score, review

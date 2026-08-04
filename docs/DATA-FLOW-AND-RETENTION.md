@@ -66,6 +66,19 @@ backend may route low-confidence pages through the policy-gated seam, and the
 pin the fused-off seam under the `dv` pack alongside the no-connector
 invariant.
 
+Two follow-on commands complete the comparison flow. `reconcile
+compare-review` serves the same loopback review UI over the comparison's
+undecided pairs; its disk side effects are `compare_decisions.json` (pair ids
+and verdicts, no field values) and, when a reviewer corrects a value,
+`corrections.json` (which does hold the replacement values). `reconcile
+compare-apply` (`compare_apply.py`) then writes `target_corrections.csv`, a
+local, import-ready correction file for the target side, only after every
+review pair is decided and after the consent gate withholds any identity
+without active consent. It refuses when the comparison manifest is missing or
+no longer matches the inputs, and it constructs no connector beyond the local
+import-file writer; `tests/test_compare_apply.py` enforces the review gate,
+the consent gate, and the no-live-connector invariant.
+
 ```mermaid
 flowchart TD
     SRC[Operator's source files<br/>existing/incoming CSVs, intake PDFs<br/>read in place, never copied] --> ING[ingest + offline extract<br/>pipeline.py, extract/pdf.py]
@@ -101,7 +114,11 @@ this table is aspirational.
 | `cutover_report.csv` | `compare.write_cutover_report` | the `--out` directory | Yes: per-identity field values from both compared exports, with conflict flags | Written by `reconcile compare` only. In the destruction inventory (`destruction.PII_ARTIFACTS`). |
 | `cutover_review.csv` | `compare.write_cutover_review` | the `--out` directory | Yes: field values of the undecided cross-export pairs | Written by `reconcile compare` only. In the destruction inventory. |
 | `migration_summary.json` | `compare.write_migration_summary` | the `--out` directory | No | Identity and conflict counts under the versioned `migration_summary` schema; no field values, asserted by `tests/test_compare.py`. |
-| `compare_manifest.json` | `compare.write_compare_manifest` | the `--out` directory | No field values | Digests of both recipes and every input file, both column mappings, thresholds. |
+| `compare_manifest.json` | `compare.write_compare_manifest` | the `--out` directory | No field values | Digests of both recipes and every input file, both column mappings, thresholds. `reconcile compare-apply` adds an `export` section binding the correction and decisions files by digest, with row and withheld counts only. |
+| `compare_decisions.json` | `review/session.py` via `reconcile compare-review` | the `--out` directory | Ids only | Pair ids, verdicts, reviewer names, timestamps: the same shape as `decisions.json`. |
+| `corrections.json` | `review/session.py` (either review surface) | the `--out` directory | Yes: reviewer-supplied replacement field values | Written only when a reviewer corrects a value during review. In the destruction inventory (`destruction.PII_ARTIFACTS`). |
+| `target_corrections.csv` | `compare_apply.export_corrections` | the `--out` directory | Yes: import-shaped golden field values for the target side | Written by `reconcile compare-apply` only, after review completeness and the consent gate. In the destruction inventory. |
+| `cutover_withheld.csv` | `compare_apply._write_cutover_withheld` | the `--out` directory | Ids only | Identity id, member record ids, withhold reason. Written only when consent withholds an identity from the correction file. In the destruction inventory. |
 | `eval/report.md` | `report.py` via `reconcile eval` | the path given to `--out` | No | Match-quality rates on seeded synthetic fixtures; the fixtures contain no real personal data. |
 | Terminal output | `report.render_run_summary`, `suppression.render_summary` | the operator's terminal | No | Per-stage counts and the suppressed aggregate. |
 | Cloud seam egress | `extract/seam.py` | Amazon Bedrock | Yes, when enabled | Low-confidence PDF pages only. A no-op under `dv` and `hipaa`, asserted by `tests/test_no_egress.py`. |
@@ -142,13 +159,16 @@ their limits in [RESPONSIBLE-TECH-AUDITS.md](./RESPONSIBLE-TECH-AUDITS.md) and
 records are `review_queue.csv` and `resolved.csv` (or the CRM import CSV when
 one is used). Destroy them once their purpose is served: the resolved records
 have landed in the organization's comparable database and the review decisions
-have been applied. The stage-cache entry files hold extracted and normalized
-survivor field values and belong on the same schedule; the destruction command
-reaches them wherever the recipe put the cache. `withheld.csv` and
-`decisions.json` hold record ids without field values, but those ids resolve
-to survivors inside the organization's own systems, so they go on the same
-destruction schedule. Source intake files are destroyed under the
-organization's own intake procedure.
+have been applied. A migration comparison's record-bearing artifacts
+(`cutover_report.csv`, `cutover_review.csv`, `target_corrections.csv`, and
+`corrections.json`) follow the same schedule once the correction file has been
+imported. The stage-cache entry files hold extracted and normalized survivor
+field values and belong on the same schedule; the destruction command reaches
+them wherever the recipe put the cache. `withheld.csv` and `decisions.json`
+hold record ids without field values, but those ids resolve to survivors
+inside the organization's own systems, so they go on the same destruction
+schedule, as do `compare_decisions.json` and `cutover_withheld.csv`. Source
+intake files are destroyed under the organization's own intake procedure.
 
 **Retain.** `aggregate_summary.json` may be kept: it is already
 non-identifying, small cells are suppressed (`suppression.py`), and it is the
@@ -210,9 +230,10 @@ entity's own retention schedule to all of it.
 The flow half of this model is enforced by merge-blocking tests: non-egress
 under the `dv` pack and the stage cache's local write boundary
 (`tests/test_no_egress.py`), the consent gate (`tests/test_consent.py`),
-suppression in the aggregate (`tests/test_suppression.py`), and the
-minimization of the review artifacts (`tests/test_review.py`). The
-destruction executor and its provenance certificates are enforced by
-`tests/test_destruction.py`, and cache-entry destruction by
-`tests/test_stage_cache.py`; choosing the retention window remains operator
-procedure.
+suppression in the aggregate (`tests/test_suppression.py`), the minimization
+of the review artifacts (`tests/test_review.py`), and the comparison flow's
+review, consent, and no-live-connector gates (`tests/test_compare.py`,
+`tests/test_compare_apply.py`). The destruction executor and its provenance
+certificates are enforced by `tests/test_destruction.py`, and cache-entry
+destruction by `tests/test_stage_cache.py`; choosing the retention window
+remains operator procedure.
