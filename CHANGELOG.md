@@ -7,6 +7,16 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **External-gates runbook.** `docs/EXTERNAL-GATES-RUNBOOK.md` writes down the
+  maintainer's exact hand-run steps for the five "External gate" rows in
+  `docs/ROADMAP-CLOSEOUT.md`'s canonical 1.0 gates table: the screen-reader
+  walkthrough with reviewed Spanish copy and ACR, the ruleset apply plus the
+  signed-tag release ceremony, the recorded CiviCRM demonstration, real
+  adopting organizations, and the schema-stability window. Each section names
+  the repository prerequisites that already exist, the ordered steps, the
+  evidence artifact and where it gets recorded, and honest failure notes. The
+  closeout's no-fabricated-evidence principle governs throughout; the runbook
+  never substitutes a fixture for a human result.
 - **Airtable native-upsert connector (roadmap E3).** The new `airtable`
   destination batches at Airtable's ten-record limit, uses
   `performUpsert` on the configured external-id field, reads a personal access
