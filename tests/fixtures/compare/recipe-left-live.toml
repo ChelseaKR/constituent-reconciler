@@ -1,0 +1,22 @@
+# The legacy-side recipe with a live network write target configured. The
+# compare command must never construct this connector: the [output] section
+# here exists so tests/test_compare.py can prove the comparison ignores it on
+# every path, in the spirit of tests/test_no_egress.py.
+
+[input]
+incoming = "left.csv"
+
+[mapping]
+first_name = "First"
+last_name = "Last"
+dob = "Birth"
+email = "Email"
+
+[thresholds]
+prior = 0.01
+auto = 0.97
+review = 0.80
+
+[output]
+connector = "civicrm"
+endpoint = "https://crm.example.org/civicrm/ajax/api4"
