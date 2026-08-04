@@ -41,8 +41,8 @@ from constituent_reconciler.models import (
     SourceSpan,
     TextSpan,
 )
-from constituent_reconciler.normalize import normalize_record
 from constituent_reconciler.policy import PolicyViolation
+from constituent_reconciler.progress import NULL_SINK, ProgressEvent, ProgressSink
 from constituent_reconciler.provenance import ProvenanceLog, Rfc3161Authority, TimestampAuthority
 from constituent_reconciler.suppression import AggregateSummary, ComparableReport
 
@@ -404,7 +404,194 @@ def read_text_records(
     return _mint_document_records(extracted.rows, source, id_prefix=id_prefix, seen=seen)
 
 
-def _ingest_source(  # noqa: C901 - routes all supported source types and skips.
+_PlanItem = tuple[str, Path]
+"""One unit of planned ingest work: a reader kind (csv, pdf, text) and a file."""
+
+
+def _route(path: Path, recipe: Recipe) -> tuple[str, str]:
+    """Classify one file: (reader kind, skip reason); the kind is "" when skipped.
+
+    The routing rules are unchanged from the original single-pass reader:
+    .csv goes to the structured reader, .pdf to the PDF extractor, and .txt
+    or .eml to the text extractor, with the document readers available only
+    while ``extract.backend`` is not "none".
+    """
+
+    suffix = path.suffix.lower()
+    if suffix == ".csv":
+        return "csv", ""
+    if suffix == ".pdf":
+        if recipe.extract.backend != "none":
+            return "pdf", ""
+        return "", 'pdf extraction disabled (extract.backend = "none")'
+    if suffix in (".txt", ".eml"):
+        if recipe.extract.backend != "none":
+            return "text", ""
+        return "", 'text extraction disabled (extract.backend = "none")'
+    return "", f"unsupported extension: {suffix or '(none)'}"
+
+
+def _plan_source(
+    path: Path,
+    *,
+    recipe: Recipe,
+    accounting: IngestAccumulator | None = None,
+) -> list[_PlanItem]:
+    """Classify a source path into ordered (reader, file) work items.
+
+    The plan is what gives ingest and extract progress an honest denominator:
+    every file the run will read is counted before any file is opened. A
+    directory is listed in sorted order, and each child that will not be read
+    is recorded as skipped in ``accounting``, with the reason, at planning
+    time. A single file is routed by extension, with an unrouted extension
+    falling through to the CSV reader as before.
+    """
+
+    if not path.is_dir():
+        kind, _ = _route(path, recipe)
+        return [(kind or "csv", path)]
+    items: list[_PlanItem] = []
+    for child in sorted(path.iterdir()):
+        if child.is_dir():
+            if accounting is not None:
+                accounting.note_skipped(child, "directory: not walked recursively")
+            continue
+        kind, reason = _route(child, recipe)
+        if not kind:
+            if accounting is not None:
+                accounting.note_skipped(child, reason)
+            continue
+        items.append((kind, child))
+    return items
+
+
+@dataclass
+class _IngestTracker:
+    """Emit ingest and extract progress as planned files are read.
+
+    ``files_total`` and ``documents_total`` come from the pre-read plans, so
+    both stages carry a denominator that was true before the first file was
+    opened. The extract stage exists only when the plans hold at least one
+    document (PDF or text) file: a run with none emits no extract event at
+    all, rather than a fabricated 0/0 stage.
+    """
+
+    sink: ProgressSink
+    files_total: int
+    documents_total: int
+    files_done: int = 0
+    documents_done: int = 0
+
+    def start(self) -> None:
+        self.sink.emit(ProgressEvent("ingest", "started", completed=0, total=self.files_total))
+        if self.documents_total:
+            self.sink.emit(
+                ProgressEvent("extract", "started", completed=0, total=self.documents_total)
+            )
+
+    def note_file(self, *, document: bool) -> None:
+        self.files_done += 1
+        if document:
+            self.documents_done += 1
+            self.sink.emit(
+                ProgressEvent(
+                    "extract",
+                    "advanced",
+                    completed=self.documents_done,
+                    total=self.documents_total,
+                )
+            )
+        self.sink.emit(
+            ProgressEvent("ingest", "advanced", completed=self.files_done, total=self.files_total)
+        )
+
+    def finish(self, duration_seconds: float) -> None:
+        # Extraction has no clock of its own: its work is interleaved with the
+        # rest of ingest, whose duration below is the one the run summary
+        # records, so the extract finish carries counts only.
+        if self.documents_total:
+            self.sink.emit(
+                ProgressEvent(
+                    "extract",
+                    "finished",
+                    completed=self.documents_done,
+                    total=self.documents_total,
+                )
+            )
+        self.sink.emit(
+            ProgressEvent(
+                "ingest",
+                "finished",
+                completed=self.files_done,
+                total=self.files_total,
+                duration_seconds=duration_seconds,
+            )
+        )
+
+
+def _read_plan(
+    plan: Sequence[_PlanItem],
+    source: str,
+    *,
+    recipe: Recipe,
+    id_prefix: str,
+    accounting: IngestAccumulator | None = None,
+    active_cache: stage_cache.ActiveCache | None = None,
+    tracker: _IngestTracker | None = None,
+) -> list[Record]:
+    """Read one source's planned files in order.
+
+    One duplicate-row counter spans every file of the source, so
+    exact-duplicate rows across files stay distinct without spurious
+    collisions. Each file read is answered for in ``accounting`` and, when a
+    tracker is passed, reported as ingest (and for documents, extract)
+    progress.
+    """
+
+    seen: dict[str, int] = {}
+    records: list[Record] = []
+    for kind, child in plan:
+        if kind == "csv":
+            records += read_records(
+                child,
+                source,
+                mapping=recipe.mapping,
+                id_column=recipe.id_column,
+                consent_column=recipe.consent_column,
+                consent_date_column=recipe.consent_date_column,
+                consent_expires_column=recipe.consent_expires_column,
+                consent_scope_column=recipe.consent_scope_column,
+                id_prefix=id_prefix,
+                _seen=seen,
+            )
+        elif kind == "pdf":
+            records += read_pdf_records(
+                child,
+                source,
+                recipe=recipe,
+                id_prefix=id_prefix,
+                _seen=seen,
+                accounting=accounting,
+                active_cache=active_cache,
+            )
+        else:
+            records += read_text_records(
+                child,
+                source,
+                recipe=recipe,
+                id_prefix=id_prefix,
+                _seen=seen,
+                accounting=accounting,
+                active_cache=active_cache,
+            )
+        if accounting is not None:
+            accounting.note_read(child)
+        if tracker is not None:
+            tracker.note_file(document=kind != "csv")
+    return records
+
+
+def _ingest_source(
     path: Path,
     source: str,
     *,
@@ -413,121 +600,24 @@ def _ingest_source(  # noqa: C901 - routes all supported source types and skips.
     accounting: IngestAccumulator | None = None,
     active_cache: stage_cache.ActiveCache | None = None,
 ) -> list[Record]:
-    """Route a source path to the right reader based on file type.
+    """Route a source path to the right readers and read it in one call.
 
-    A directory is walked; each .csv is read as a structured source, each .pdf
-    is run through the PDF extractor, and each .txt or .eml is run through the
-    text extractor. A single file is routed by extension. Files with other
-    extensions are skipped inside a directory; passed as a direct argument
-    they fall through to the CSV reader. One duplicate-row counter spans every
-    file of the source, so exact-duplicate rows across files stay distinct
-    without spurious collisions. Every child of a directory is answered for in
-    ``accounting`` when one is passed: read, or skipped with the reason why.
+    Planning and reading are separate steps (``_plan_source`` and
+    ``_read_plan``) so ``run`` can total every source's files before opening
+    the first one; this wrapper keeps the single-source path available as one
+    call for callers with no progress denominator to build (``compare.py``,
+    the corpus-generation tooling, and their tests).
     """
-    seen: dict[str, int] = {}
-    if path.is_dir():
-        records: list[Record] = []
-        for child in sorted(path.iterdir()):
-            suffix = child.suffix.lower()
-            if child.is_dir():
-                if accounting is not None:
-                    accounting.note_skipped(child, "directory: not walked recursively")
-            elif suffix == ".csv":
-                chunk = read_records(
-                    child,
-                    source,
-                    mapping=recipe.mapping,
-                    id_column=recipe.id_column,
-                    consent_column=recipe.consent_column,
-                    consent_date_column=recipe.consent_date_column,
-                    consent_expires_column=recipe.consent_expires_column,
-                    consent_scope_column=recipe.consent_scope_column,
-                    id_prefix=id_prefix,
-                    _seen=seen,
-                )
-                records += chunk
-                if accounting is not None:
-                    accounting.note_read(child)
-            elif suffix == ".pdf" and recipe.extract.backend != "none":
-                chunk = read_pdf_records(
-                    child,
-                    source,
-                    recipe=recipe,
-                    id_prefix=id_prefix,
-                    _seen=seen,
-                    accounting=accounting,
-                    active_cache=active_cache,
-                )
-                records += chunk
-                if accounting is not None:
-                    accounting.note_read(child)
-            elif suffix in (".txt", ".eml") and recipe.extract.backend != "none":
-                chunk = read_text_records(
-                    child,
-                    source,
-                    recipe=recipe,
-                    id_prefix=id_prefix,
-                    _seen=seen,
-                    accounting=accounting,
-                    active_cache=active_cache,
-                )
-                records += chunk
-                if accounting is not None:
-                    accounting.note_read(child)
-            elif accounting is not None:
-                if suffix == ".pdf":
-                    accounting.note_skipped(
-                        child, 'pdf extraction disabled (extract.backend = "none")'
-                    )
-                elif suffix in (".txt", ".eml"):
-                    accounting.note_skipped(
-                        child, 'text extraction disabled (extract.backend = "none")'
-                    )
-                else:
-                    accounting.note_skipped(child, f"unsupported extension: {suffix or '(none)'}")
-        return records
-    elif path.suffix.lower() == ".pdf" and recipe.extract.backend != "none":
-        chunk = read_pdf_records(
-            path,
-            source,
-            recipe=recipe,
-            id_prefix=id_prefix,
-            _seen=seen,
-            accounting=accounting,
-            active_cache=active_cache,
-        )
-        if accounting is not None:
-            accounting.note_read(path)
-        return chunk
-    elif path.suffix.lower() in (".txt", ".eml") and recipe.extract.backend != "none":
-        chunk = read_text_records(
-            path,
-            source,
-            recipe=recipe,
-            id_prefix=id_prefix,
-            _seen=seen,
-            accounting=accounting,
-            active_cache=active_cache,
-        )
-        if accounting is not None:
-            accounting.note_read(path)
-        return chunk
-    else:
-        chunk = read_records(
-            path,
-            source,
-            mapping=recipe.mapping,
-            id_column=recipe.id_column,
-            consent_column=recipe.consent_column,
-            consent_date_column=recipe.consent_date_column,
-            consent_expires_column=recipe.consent_expires_column,
-            consent_scope_column=recipe.consent_scope_column,
-            id_prefix=id_prefix,
-            _seen=seen,
-        )
-        if accounting is not None:
-            accounting.note_read(path)
-        return chunk
+
+    plan = _plan_source(path, recipe=recipe, accounting=accounting)
+    return _read_plan(
+        plan,
+        source,
+        recipe=recipe,
+        id_prefix=id_prefix,
+        accounting=accounting,
+        active_cache=active_cache,
+    )
 
 
 def _check_distinct_ids(records: Sequence[Record]) -> None:
@@ -641,6 +731,9 @@ def ingest_normalized_records(
     *,
     corrections: Iterable[Correction] = (),
     accounting: IngestAccumulator | None = None,
+    active_cache: stage_cache.ActiveCache | None = None,
+    progress: ProgressSink = NULL_SINK,
+    timer: _StageTimer | None = None,
 ) -> dict[str, Record]:
     """Read every source, enforce id uniqueness, apply corrections, normalize.
 
@@ -648,39 +741,84 @@ def ingest_normalized_records(
     (``repair.py``), which needs the run's records without scoring anything or
     touching a connector. Corrections replace raw field values before
     normalization, exactly as they do on a full run.
+
+    This is the single source of ingest, extract, and normalize progress:
+    ``progress`` receives content-free events (``progress.py``) as each stage
+    starts, advances, and finishes, with completed/total counts from the
+    pre-read file/document plan or the record batch. The default sink
+    discards everything, so a caller who ignores progress (``repair.py``)
+    sees no change in behavior. ``run`` builds one ``_StageTimer`` for the
+    whole pipeline and passes it in via ``timer``, so this function's
+    "ingest" and "normalize" marks land in the same ``stage_durations`` the
+    run summary reports; a caller that passes no timer gets a private one
+    whose marks are never read.
+
+    ``active_cache`` threads the optional stage cache (UC-01) through
+    extraction and normalization exactly as ``run`` does. Repair planning
+    passes none, so its ingest is always uncached and its normalization
+    falls through to plain ``normalize_record``, matching prior behavior.
     """
 
     if accounting is None:
         accounting = IngestAccumulator()
-    raw_records: list[Record] = []
+    if timer is None:
+        timer = _StageTimer()
+
+    sources: list[tuple[Path, str, str]] = []
     if recipe.existing is not None:
-        raw_records += _ingest_source(
-            recipe.existing,
-            "existing",
-            recipe=recipe,
-            id_prefix="E",
-            accounting=accounting,
-        )
-    raw_records += _ingest_source(
-        recipe.incoming,
-        "incoming",
-        recipe=recipe,
-        id_prefix="N",
-        accounting=accounting,
+        sources.append((recipe.existing, "existing", "E"))
+    sources.append((recipe.incoming, "incoming", "N"))
+    plans = [
+        (_plan_source(path, recipe=recipe, accounting=accounting), source, prefix)
+        for path, source, prefix in sources
+    ]
+    tracker = _IngestTracker(
+        sink=progress,
+        files_total=sum(len(plan) for plan, _, _ in plans),
+        documents_total=sum(1 for plan, _, _ in plans for kind, _ in plan if kind != "csv"),
     )
+    tracker.start()
+    raw_records: list[Record] = []
+    for plan, source, prefix in plans:
+        raw_records += _read_plan(
+            plan,
+            source,
+            recipe=recipe,
+            id_prefix=prefix,
+            accounting=accounting,
+            active_cache=active_cache,
+            tracker=tracker,
+        )
     _check_distinct_ids(raw_records)
     raw_records = _apply_corrections(
         raw_records, _group_corrections(corrections, fields=recipe.fields)
     )
-    return {
-        r.unique_id: normalize_record(
+    timer.mark("ingest")
+    tracker.finish(timer.durations["ingest"])
+
+    progress.emit(ProgressEvent("normalize", "started", completed=0, total=len(raw_records)))
+    records: dict[str, Record] = {}
+    for r in raw_records:
+        records[r.unique_id] = stage_cache.normalize_via_cache(
+            active_cache,
             r,
-            recipe.fields,
-            address_backend=recipe.normalize.address_backend,
+            recipe,
             failures=accounting.normalization_failures,
         )
-        for r in raw_records
-    }
+        progress.emit(
+            ProgressEvent("normalize", "advanced", completed=len(records), total=len(raw_records))
+        )
+    timer.mark("normalize")
+    progress.emit(
+        ProgressEvent(
+            "normalize",
+            "finished",
+            completed=len(records),
+            total=len(raw_records),
+            duration_seconds=timer.durations["normalize"],
+        )
+    )
+    return records
 
 
 def run(
@@ -690,6 +828,7 @@ def run(
     force_drop: Iterable[frozenset[str]] = (),
     corrections: Iterable[Correction] = (),
     cache: stage_cache.StageCache | None = None,
+    progress: ProgressSink = NULL_SINK,
 ) -> RunResult:
     """Execute the pipeline and return the result.
 
@@ -706,48 +845,35 @@ def run(
     term frequencies and cross-batch candidates change pair probabilities
     whenever the population changes, so those stages are computed fresh on
     every run regardless of what is cached.
+
+    ``progress`` receives content-free events (``progress.py``) as the
+    ingest, extract, normalize, and score stages start, advance, and finish,
+    with completed/total counts where a denominator exists and the same stage
+    durations the run summary records. Ingest, extract, and normalize events
+    come from ``ingest_normalized_records``, the same deterministic front
+    half repair planning shares, so the two never carry separate tracking
+    logic. The default sink discards everything, so a caller who ignores
+    progress sees no change in behavior.
     """
 
     active = stage_cache.ActiveCache(cache) if cache is not None else None
     timer = _StageTimer()
     accounting = IngestAccumulator()
-    raw_records: list[Record] = []
-    if recipe.existing is not None:
-        raw_records += _ingest_source(
-            recipe.existing,
-            "existing",
-            recipe=recipe,
-            id_prefix="E",
-            accounting=accounting,
-            active_cache=active,
-        )
-    raw_records += _ingest_source(
-        recipe.incoming,
-        "incoming",
-        recipe=recipe,
-        id_prefix="N",
+    records = ingest_normalized_records(
+        recipe,
+        corrections=corrections,
         accounting=accounting,
         active_cache=active,
+        progress=progress,
+        timer=timer,
     )
-    _check_distinct_ids(raw_records)
-    raw_records = _apply_corrections(
-        raw_records, _group_corrections(corrections, fields=recipe.fields)
-    )
-    timer.mark("ingest")
 
-    records = {
-        r.unique_id: stage_cache.normalize_via_cache(
-            active,
-            r,
-            recipe,
-            failures=accounting.normalization_failures,
-        )
-        for r in raw_records
-    }
-    timer.mark("normalize")
-
+    # Scoring has no honest denominator before it runs: the candidate-pair
+    # count is a product of the scoring itself, so the events carry no counts.
+    progress.emit(ProgressEvent("score", "started"))
     scored = matching.score_pairs(records.values(), recipe.fields, prior=recipe.prior)
     timer.mark("score")
+    progress.emit(ProgressEvent("score", "finished", duration_seconds=timer.durations["score"]))
     pairs = decisions.band_pairs(
         scored,
         auto_threshold=recipe.auto_threshold,
@@ -1064,6 +1190,7 @@ def export(
     webhook_transport: WebhookTransport | None = None,
     airtable_transport: AirtableTransport | None = None,
     confirmed_households: Iterable[str] = (),
+    progress: ProgressSink = NULL_SINK,
 ) -> ExportSummary:
     """Write resolved records through the configured connector.
 
@@ -1071,6 +1198,12 @@ def export(
     consent (under a consent-required policy) are withheld and never handed to a
     connector. Each real write is recorded in the append-only provenance log. A
     dry run performs no writes and logs nothing.
+
+    ``progress`` receives content-free events for the write stage (denominator:
+    exportable records) and the review-artifact stage (denominator: review
+    pairs). A dry run emits the same events, because both stages still execute
+    there: the connector classifies every record without touching its target,
+    and the review queue is written either way.
 
     Every non-dry-run export also stamps ``out/run_manifest.json`` (see
     ``manifest.py``): BLAKE2b digests of the recipe file and each input file,
@@ -1117,7 +1250,19 @@ def export(
     )
     if household_map and isinstance(connector, CrmCsvConnector):
         connector.set_household_column(household_map)
+    progress.emit(ProgressEvent("write", "started", completed=0, total=len(exportable)))
+    write_timer = _StageTimer()
     write_results = connector.write_all(exportable, recipe.fields, dry_run=dry_run)
+    write_timer.mark("write")
+    progress.emit(
+        ProgressEvent(
+            "write",
+            "finished",
+            completed=len(write_results),
+            total=len(exportable),
+            duration_seconds=write_timer.durations["write"],
+        )
+    )
 
     provenance_path = out_dir / "provenance.jsonl"
     manifest_path: Path | None = None
@@ -1148,7 +1293,21 @@ def export(
             )
             logged += 1
 
+    progress.emit(
+        ProgressEvent("review_artifact", "started", completed=0, total=len(result.review_pairs))
+    )
+    review_timer = _StageTimer()
     review_path = _write_review_queue(result, recipe, out_dir)
+    review_timer.mark("review_artifact")
+    progress.emit(
+        ProgressEvent(
+            "review_artifact",
+            "finished",
+            completed=len(result.review_pairs),
+            total=len(result.review_pairs),
+            duration_seconds=review_timer.durations["review_artifact"],
+        )
+    )
     withheld_path = _write_withheld(withheld, out_dir) if withheld else None
 
     # Under a pack that requires aggregate sharing (the DV pack), build a

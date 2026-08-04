@@ -117,6 +117,7 @@ constituent-reconciler/
 │   ├── normalize.py               # deterministic name/date/address normalization, offline
 │   ├── pipeline.py                # orchestrator: ingest -> extract -> normalize -> resolve -> review -> write
 │   ├── policy.py                  # policy packs: default, dv (VAWA/FVPSA), hipaa
+│   ├── progress.py                # content-free progress events; no-op default, CLI renderer
 │   ├── provenance.py              # BLAKE2b hash chain plus optional RFC 3161 authority
 │   ├── quality.py                 # per-source data-quality aggregation
 │   ├── repair.py                  # read-only split repair planning (UC-03); plans are local PII artifacts
