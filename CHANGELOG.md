@@ -31,6 +31,64 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   `cutover_withheld.csv`, and `corrections.json` join the destruction
   inventory, closing a pre-existing gap for the run pipeline's corrections
   file, and docs/DATA-FLOW-AND-RETENTION.md covers all of them.
+- **Large-corpus stage-timing baseline (UC-01 "before" side).**
+  `tools/corpusgen/stage_baseline.py`, run with `make perf-baseline`, times
+  the six pipeline stages (ingest, extract, normalize, score, review
+  artifact, write) over the seeded 50k synthetic corpus and records peak
+  resident memory per stage, with the pinned corpus parameters, an input
+  digest, and the measuring machine's environment captured content-free:
+  counts and durations only, no field values, no user paths. The dated
+  report and its JSON companion are committed at
+  `eval/large-corpus-stage-baseline-2026-08-03.{md,json}` as the pre-cache
+  numbers the UC-01 stage cache is measured against; the future cached run
+  diffs its own JSON against this one. Both artifacts state plainly that
+  they describe one run on one named machine class and are not a
+  performance promise. A CI-sized smoke test proves the harness on a tiny
+  corpus and asserts byte-for-byte that its composed stages produce the
+  same artifacts `pipeline.run` and `pipeline.export` produce, so harness
+  drift fails CI instead of skewing a committed baseline.
+- **External-gates runbook.** `docs/EXTERNAL-GATES-RUNBOOK.md` writes down the
+  maintainer's exact hand-run steps for the five "External gate" rows in
+  `docs/ROADMAP-CLOSEOUT.md`'s canonical 1.0 gates table: the screen-reader
+  walkthrough with reviewed Spanish copy and ACR, the ruleset apply plus the
+  signed-tag release ceremony, the recorded CiviCRM demonstration, real
+  adopting organizations, and the schema-stability window. Each section names
+  the repository prerequisites that already exist, the ordered steps, the
+  evidence artifact and where it gets recorded, and honest failure notes. The
+  closeout's no-fabricated-evidence principle governs throughout; the runbook
+  never substitutes a fixture for a human result.
+- **Content-addressed stage cache for extraction and normalization (UC-01).**
+  A recipe's new `[cache]` section (validated fail-closed; absent means off)
+  stores extraction and normalization results as content-addressed files
+  under `stage_cache/` inside the output root, or under an explicitly
+  configured local `dir` boundary; URL-shaped values are refused at load
+  time. Keys digest the input, the declared recipe schema version, the
+  active field mapping, the package version, the installed version of the
+  library doing the stage's work (pdfplumber for PDF extraction, the postal
+  package under the libpostal address backend), and the stage's backend
+  configuration, so editing one source row re-keys that row alone, a
+  dependency upgrade orphans that dependency's old entries, and any
+  mismatched entry is ignored rather than coerced. A stage whose backing
+  library version cannot be determined is not cached at all, and a parse the
+  sandbox killed against a resource limit is returned fail-closed but never
+  stored, so a transient timeout or memory cap cannot freeze a document out
+  of reconciliation. Scoring, banding, and clustering never touch the
+  cache: term frequencies and cross-batch candidates change pair
+  probabilities whenever the population changes, and a merge-blocking test
+  proves cached and uncached runs byte-identical. OCR and model-seam
+  extraction backends bypass the cache because their output is not a pure
+  function of the file bytes. The run manifest and `run_summary.json` record
+  cache policy, hit/miss counts, and stage durations, all content-free
+  (report schema version 4). The cache directory is a PII artifact:
+  `reconcile destroy` covers it, `--cache-dir` reaches an explicit boundary
+  but refuses any directory that does not have the stage-cache shape, the
+  cache walk deletes nothing outside `extract/` and `normalize/` entry
+  files, and each deleted entry gets its own destruction certificate. Two
+  UC-01 items are deliberately not part of this change: the progress-event
+  work planned beside it in docs/NOVEL-USE-CASES-PLAN.md, and the
+  large-corpus wall-clock and peak-memory before/after numbers from the same
+  plan item's acceptance criteria. No benchmark has been run, so none is
+  claimed; docs/CLAIMS-AUDIT.md records both gaps.
 - **Read-only migration cutover comparison (UC-02, first PR).** `reconcile
   compare --left <recipe or csv> --right <recipe or csv>` resolves a legacy
   CRM export against a target export without building any connector. Records
@@ -48,6 +106,31 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   construct a write connector, in the spirit of `tests/test_no_egress.py`.
   The post-review correction-file export is the second UC-02 change and is
   not part of this one.
+- **Multiyear roadmap, 2026 H2 through 2029.** `docs/ROADMAP-MULTIYEAR.md`
+  arranges the Now/Next/Later plan and the closeout's external 1.0 gates into
+  four horizons, each organized by workstream, under the one-maintainer
+  60/30/10 capacity model. External gates stay visibly external and are never
+  booked as engineering; where the future depends on adopters or partners the
+  document states the gate instead of a date. It carries the closeout's
+  product principles and the plan's exclusions forward as permanent non-goals
+  and sets a per-release and per-half review cadence in which adopter
+  evidence outranks synthetic personas. `docs/ROADMAP.md` gains a pointer
+  marking it a historical record, and `docs/NOVEL-USE-CASES-PLAN.md` one
+  marking it the near-term detail under the new umbrella document.
+- **Repair-capability decision record (UC-03 study).**
+  `docs/adr/0012-connector-repair-capabilities.md` decides the protocol for
+  post-write split repair ahead of implementation: `inspect_repair` and
+  `apply_repair` as optional connector capabilities separate from
+  `Connector.write_all`, a declaration that names the exact destination and
+  version pairs an adapter verified, read-only repeatable planning, a
+  mandatory second reviewer for remote destructive operations, manual
+  instructions instead of a forced generic delete on unsupported
+  destinations, CiviCRM as the pilot, and the threat-model and
+  destruction-inventory updates required before any repair plan is stored.
+  Vendor delete/merge/restore semantics are named as open inputs to be read
+  from current documentation and a live disposable instance, not asserted.
+  `docs/NOVEL-USE-CASES-PLAN.md` and `docs/ROADMAP-CLOSEOUT.md` cross-reference
+  the record. Documentation only; no code changes.
 - **Airtable native-upsert connector (roadmap E3).** The new `airtable`
   destination batches at Airtable's ten-record limit, uses
   `performUpsert` on the configured external-id field, reads a personal access

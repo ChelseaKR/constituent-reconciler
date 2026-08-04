@@ -23,6 +23,7 @@ from pathlib import Path
 
 from constituent_reconciler import __version__
 from constituent_reconciler.config import Recipe
+from constituent_reconciler.models import CacheStats
 from constituent_reconciler.schema import versions
 
 MANIFEST_FILENAME = "run_manifest.json"
@@ -76,14 +77,23 @@ def build_manifest(
     recipe_path: Path | None,
     input_paths: Iterable[Path],
     recipe: Recipe,
+    *,
+    cache: CacheStats | None = None,
 ) -> dict[str, object]:
     """Assemble the reproducibility manifest for one run.
 
     ``recipe_path`` may be None when the Recipe was built in code rather than
     loaded from a file; the manifest then records a null recipe hash instead
     of inventing one.
+
+    ``cache`` carries the run's stage-cache accounting. The manifest records
+    the cache policy (whether caching was on, and whether the recipe named a
+    custom retention boundary) and the hit/miss counts, never the cache
+    directory's path and never any cached value, so the manifest stays free
+    of both content and machine-local locations.
     """
 
+    stats = cache if cache is not None else CacheStats()
     return {
         "created_at": datetime.now(UTC).isoformat(),
         "recipe_hash": file_digest(recipe_path) if recipe_path is not None else None,
@@ -95,6 +105,12 @@ def build_manifest(
             "prior": recipe.prior,
             "auto": recipe.auto_threshold,
             "review": recipe.review_threshold,
+        },
+        "cache": {
+            "enabled": recipe.cache.enabled,
+            "custom_boundary": recipe.cache.dir is not None,
+            "hits": dict(stats.hits),
+            "misses": dict(stats.misses),
         },
         "schema_versions": versions(),
     }

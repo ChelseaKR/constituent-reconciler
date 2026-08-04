@@ -274,14 +274,38 @@ class IngestReport:
 
 
 @dataclass(frozen=True)
+class CacheStats:
+    """Stage-cache accounting for one run: counts only, no paths or field values.
+
+    ``enabled`` records whether a stage cache was active for the run at all.
+    ``hits`` and ``misses`` map a stage name (``"extract"`` or ``"normalize"``)
+    to how many lookups landed or missed. The counts feed ``run_summary.json``
+    and the run manifest, both of which stay content-free: nothing here can
+    name a cached value, a record, or a filesystem location.
+    """
+
+    enabled: bool = False
+    hits: dict[str, int] = field(default_factory=dict)
+    misses: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class RunResult:
-    """The full output of a pipeline run, before any file is written."""
+    """The full output of a pipeline run, before any file is written.
+
+    ``cache`` carries the stage-cache hit/miss accounting and
+    ``stage_durations`` the wall-clock seconds each pipeline stage took; both
+    are count-and-number metadata with no record content, so the summary
+    artifacts built from them stay shareable under every policy pack.
+    """
 
     records: dict[str, Record]
     pairs: tuple[Pair, ...]
     clusters: tuple[Cluster, ...]
     golden: tuple[GoldenRecord, ...]
     ingest: IngestReport = field(default_factory=IngestReport)
+    cache: CacheStats = field(default_factory=CacheStats)
+    stage_durations: dict[str, float] = field(default_factory=dict)
 
     @property
     def auto_pairs(self) -> tuple[Pair, ...]:

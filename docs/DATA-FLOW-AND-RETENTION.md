@@ -22,13 +22,22 @@ ships; the operator and counsel still set it.
 Source data enters through the readers in `pipeline.py`: CSVs via
 `read_records`, intake PDFs via `read_pdf_records` and the offline extractor in
 `extract/pdf.py`. Inputs are read in place and never copied; the tool holds no
-staging copy of the source files.
+staging copy of the source files. When a recipe opts into the stage cache
+(`[cache]` in the recipe, `stage_cache.py`), extraction and normalization
+results are stored as content-addressed local files. These are derived field
+values rather than copies of the sources, and they are PII artifacts covered
+by the destruction inventory below.
 
 Normalization (`normalize.py`), pair scoring (`matching/`), banding,
 clustering, and golden-record reduction (`decisions.py`) all happen in memory.
-`pipeline.run` returns a value and writes nothing, which is why a dry run can
-produce the same result without touching disk. Everything durable lands in the
-output directory passed as `--out`.
+`pipeline.run` returns a value and writes nothing except, when the caller
+passes an opted-in stage cache, entries under that cache's local directory;
+a dry run passes no cache and still touches no disk. Everything durable lands
+in the output directory passed as `--out`, with one bounded exception: the
+stage cache lives under `<out>/stage_cache` unless the recipe's `[cache] dir`
+names a different local directory as its retention boundary. A URL-shaped
+`dir` is refused at recipe load, and under the `dv` pack the default keeps
+every retained artifact inside the output root.
 
 Two classes of paths can move data off the machine, and both are policy-gated:
 
@@ -99,6 +108,7 @@ this table is aspirational.
 | Live CRM records | `connectors/civicrm.py`, `connectors/salesforce.py` | the remote CRM | Yes | Non-local; refused fail-closed under the `dv` pack (`pipeline.build_connector`). |
 | `withheld.csv` | `pipeline._write_withheld` | the `--out` directory | Ids only | Cluster id, member record ids, reason. No field values, but ids resolve to people through the organization's own systems. |
 | `decisions.json` | `review/session.py` | the `--out` directory | Ids only | Pair ids and verdicts. No field values, by design. |
+| `stage_cache/` entry files | `stage_cache.py` via `pipeline.run` | `<out>/stage_cache`, or the recipe's explicit `[cache] dir` boundary | Yes: extracted and normalized field values, keyed by content digest | Written only when a recipe opts in. Covered by `reconcile destroy`; an explicit boundary is covered via `--cache-dir`. |
 | `provenance.jsonl` | `provenance.py` | the `--out` directory | No field values | Each entry: BLAKE2b hash of the written payload, record and member ids, consent flag, timestamp, chain hashes. Payloads are referenced by hash, never stored. |
 | `aggregate_summary.json` | `pipeline._write_aggregate_summary` over `suppression.py` | the `--out` directory | No | Total and suppressed category counts. Written only under a pack with `aggregate_export` (the `dv` pack), and not on `--dry-run`. |
 | `cutover_report.csv` | `compare.write_cutover_report` | the `--out` directory | Yes: per-identity field values from both compared exports, with conflict flags | Written by `reconcile compare` only. In the destruction inventory (`destruction.PII_ARTIFACTS`). |
@@ -152,11 +162,13 @@ have landed in the organization's comparable database and the review decisions
 have been applied. A migration comparison's record-bearing artifacts
 (`cutover_report.csv`, `cutover_review.csv`, `target_corrections.csv`, and
 `corrections.json`) follow the same schedule once the correction file has been
-imported. `withheld.csv` and `decisions.json` hold record ids without
-field values, but those ids resolve to survivors inside the organization's own
-systems, so they go on the same destruction schedule, as do
-`compare_decisions.json` and `cutover_withheld.csv`. Source intake files are
-destroyed under the organization's own intake procedure.
+imported. The stage-cache entry files hold extracted and normalized survivor
+field values and belong on the same schedule; the destruction command reaches
+them wherever the recipe put the cache. `withheld.csv` and `decisions.json`
+hold record ids without field values, but those ids resolve to survivors
+inside the organization's own systems, so they go on the same destruction
+schedule, as do `compare_decisions.json` and `cutover_withheld.csv`. Source
+intake files are destroyed under the organization's own intake procedure.
 
 **Retain.** `aggregate_summary.json` may be kept: it is already
 non-identifying, small cells are suppressed (`suppression.py`), and it is the
@@ -169,6 +181,20 @@ same. It contains record ids, and a hash over a low-entropy payload can in
 principle be confirmed by guessing, so the log is evidence for the
 organization's own audits, not a shareable artifact.
 
+One consequence of per-entry cache destruction deserves naming here. A cache
+entry's destruction certificate records the entry's content-addressed name
+and the SHA-256 of the single-record entry file, and both are deterministic
+functions of one person's raw field values plus recipe and version
+components an insider could know. A holder of the retained provenance log
+who also has the recipe can therefore confirm a guessed individual's
+presence in a past run, including a person whose record was withheld from
+export. This is finer-grained than the whole-file certificates that preceded
+the cache, but it is the same exposure class as the content-derived record
+ids the log already carries, and it is accepted as a documented tradeoff on
+the same terms: the log stays local, per the paragraph above. A salted
+certificate scheme is the recorded alternative if a future pack needs to
+close this channel.
+
 **Trigger.** What "no longer needed" means differs across VAWA, FVPSA, and
 VOCA funding and across states. The pack defines the destroy/retain sort and
 the order of operations; the window is counsel-gated, consistent with the
@@ -176,9 +202,12 @@ jurisdiction note in [RESEARCH-ROADMAP.md](./RESEARCH-ROADMAP.md).
 
 **Execution.** Run `reconcile destroy --out <directory> --older-than <window>`;
 add `--dry-run` first to inspect the eligible inventory. The command deletes
-record-bearing artifacts older than the stated policy and appends destruction
-entries naming artifact hashes to the provenance chain, so the chain proves
-destruction without retaining content. One honest limit applies: deleting a
+record-bearing artifacts older than the stated policy, including every
+stage-cache entry under `<out>/stage_cache`, and appends destruction entries
+naming artifact hashes to the provenance chain, so the chain proves
+destruction without retaining content. A recipe that placed the cache at its
+own `[cache] dir` boundary adds `--cache-dir <that directory>` to the same
+command. One honest limit applies: deleting a
 file is not forensic erasure on a journaling filesystem. Full-disk encryption
 on the machine that runs the tool is the practical mitigation until something
 stronger is warranted.
@@ -199,11 +228,12 @@ entity's own retention schedule to all of it.
 ## What is enforced versus what is procedure
 
 The flow half of this model is enforced by merge-blocking tests: non-egress
-under the `dv` pack (`tests/test_no_egress.py`), the consent gate
-(`tests/test_consent.py`), suppression in the aggregate
-(`tests/test_suppression.py`), the minimization of the review artifacts
-(`tests/test_review.py`), and the comparison flow's review, consent, and
-no-live-connector gates (`tests/test_compare.py`,
+under the `dv` pack and the stage cache's local write boundary
+(`tests/test_no_egress.py`), the consent gate (`tests/test_consent.py`),
+suppression in the aggregate (`tests/test_suppression.py`), the minimization
+of the review artifacts (`tests/test_review.py`), and the comparison flow's
+review, consent, and no-live-connector gates (`tests/test_compare.py`,
 `tests/test_compare_apply.py`). The destruction executor and its provenance
-certificates are enforced by `tests/test_destruction.py`; choosing the
-retention window remains operator procedure.
+certificates are enforced by `tests/test_destruction.py`, and cache-entry
+destruction by `tests/test_stage_cache.py`; choosing the retention window
+remains operator procedure.
