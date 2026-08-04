@@ -1,21 +1,21 @@
-# Airtable connector — design brief, not implementation
+# Airtable connector
 
-Status: **research only, not built.** Part of roadmap item E3 ("More
-connectors: Apricot, Airtable, Sheets, generic webhook"). The generic webhook
-connector shipped (see `docs/connectors/webhook.md`); this vendor connector
-did not -- of the three remaining vendors, Airtable is the best-documented
-and the most straightforward to build, so it is the natural next pick once a
-priority decision is made and test credentials exist.
+Status: **implemented 2026-07-22.** `connectors/airtable.py` implements the
+design below with an injected transport, native `performUpsert`, batches of at
+most ten records, one `WriteResult` per record, and `is_local = False`.
+`examples/intake-demo/recipe-airtable.toml` is the runnable recipe shape.
+Adapter and connector-conformance tests use recorded contract shapes without
+contacting Airtable. A live throwaway-base exercise remains external evidence,
+not a prerequisite for testing request construction.
 
-## Why this is a brief, not code
+## Implementation boundary
 
-This project has no Airtable base to build and test against, and every
-connector here (CiviCRM, Salesforce) was built and tested against real,
-publicly documented request/response shapes with an injected `Transport`,
-not guessed at. Airtable's docs are public and precise enough that the shape
-below could plausibly be implemented and unit-tested with fakes the same way
-CiviCRM and Salesforce were -- so the remaining blocker is priority and a
-throwaway test base with a personal access token, not documentation gaps.
+The connector is write-only, like the existing CiviCRM and Salesforce
+adapters. The operator provisions a table whose writable field names are the
+canonical reconciler fields and whose external-id field matches
+`[output].external_id_field`. The full Airtable table endpoint goes in
+`[output].endpoint`; a personal access token is read from the environment named
+by `[output].auth_env`. The connector does not create or migrate a base schema.
 
 ## Auth model
 

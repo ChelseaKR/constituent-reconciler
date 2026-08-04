@@ -1,6 +1,6 @@
 # Capability claims audit
 
-**Audited:** 2026-07-12 (FIX-12 re-verification).
+**Audited:** 2026-07-22 (roadmap closeout re-verification).
 **Scope:** every capability claim in `README.md` and `CLAUDE.md`, read against
 the code in `src/constituent_reconciler/`.
 **Method:** each claim below was checked by opening the named module, not by
@@ -24,7 +24,9 @@ Status values: **implemented** (the code does what the sentence says),
 | CiviCRM live write-back (API v4 upsert) | README.md:74-76, 272-283 | `connectors/civicrm.py` | implemented |
 | Salesforce live write-back (REST upsert, NPSP Contact) | README.md:74-76, 285-292 | `connectors/salesforce.py` | implemented |
 | Generic webhook connector | README.md "What it does" step 6 | `connectors/webhook.py`; connector conformance tests | implemented |
-| Airtable, Sheets, and Apricot connectors | README.md "What it does" step 6 | design briefs only in `docs/connectors/` | planned pending priority and integration credentials |
+| Airtable connector | README.md "What it does" step 6 | `connectors/airtable.py`; connector conformance and adapter tests | implemented (native batched upsert; live-account evidence remains external) |
+| Google Sheets connector | `docs/connectors/sheets-design.md` | design brief only | closed as not meeting the atomic/idempotent upsert contract; reconsider only with an explicit weaker connector contract |
+| Apricot connector | `docs/connectors/apricot-design.md` | design brief only | blocked on a verifiable vendor write contract and authorized test account; no API shape is guessed |
 | Policy packs: default, dv, hipaa | README.md:89 (the dv pack); CLAUDE.md architecture map | `policy.py` `_PACKS` defines exactly `default`, `dv`, `hipaa` | implemented |
 | DV pack: cloud seam fused off, local write targets only, fail-closed | README.md:96-99; CLAUDE.md ground rules | `extract/seam.py` (packs that forbid cloud calls), `pipeline.py` `build_connector` (refuses non-local targets), `tests/test_no_egress.py` | implemented |
 | Optional Bedrock (Claude) extraction seam, policy-gated, low-confidence pages only | README.md:60-63 (step 2) | `extract/seam.py` `BedrockSeam` and its disabled fallback | implemented (requires boto3 and AWS credentials at deploy time) |

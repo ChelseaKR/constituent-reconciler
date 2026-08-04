@@ -8,10 +8,9 @@
 `constituent-reconciler` is an offline-first pipeline that turns intake
 documents plus a target case system into verified, deduplicated constituent
 records written back into that system, with a non-technical human review queue
-over every uncertain match. The inputs the code reads today are CSVs and
-digitally created (text-layer) PDFs. Scanned documents (OCR) and email bodies
-are planned, tracked as EXP-04 and EXP-08 in docs/ideation/03-expansions.md,
-and the README says the same. It chains five
+over every uncertain match. The inputs the code reads today are CSVs,
+digitally created PDFs, scanned PDFs through optional local OCR, plain text,
+and `.eml` message bodies. It chains five
 steps that already exist as separate libraries: extract, normalize, resolve,
 review, write. The contribution is the chain, the pre-tuned defaults, the
 review queue, and a privacy mode a victim-service provider can legally use.
@@ -84,33 +83,44 @@ constituent-reconciler/
 ├── src/constituent_reconciler/
 │   ├── __init__.py                # public API surface, intentionally small
 │   ├── address.py                 # deterministic CASS-style standardizer, not USPS-certified
-│   ├── cli.py                     # subcommands: run, eval, apply, review, validate, verify, schema
+│   ├── cli.py                     # run/eval/review/apply/report/validate/destroy/verify/schema
 │   ├── config.py                  # recipe.toml loading: sources, connector, thresholds, policy pack
 │   ├── connectors/
+│   │   ├── airtable.py            # Airtable native batched upsert
 │   │   ├── base.py                # connector interface (the jobradar adapter pattern)
 │   │   ├── civicrm.py             # CiviCRM live write-back (API v4 upsert)
 │   │   ├── crm_csv.py             # import-ready CRM export files (salesforce_csv, civicrm_csv)
 │   │   ├── csv_out.py             # default local CSV output
-│   │   └── salesforce.py          # Salesforce live write-back (REST upsert, NPSP Contact)
+│   │   ├── salesforce.py          # Salesforce live write-back (REST upsert, NPSP Contact)
+│   │   └── webhook.py             # generic signed JSON webhook
 │   ├── consent.py                 # consent export gate; absent/revoked/expired withheld, fail-closed
 │   ├── decisions.py               # banding, clustering, golden-record selection; the fail-closed gate
 │   ├── defaults.py                # pre-tuned matching defaults
+│   ├── destruction.py             # retention executor and destruction certificates
 │   ├── evaluate.py                # eval scoring: false-merge and missed-match rates, Wilson intervals
 │   ├── extract/
 │   │   ├── __init__.py            # public surface: the offline extractor and the seam gate
 │   │   ├── base.py                # extractor protocol and extraction result types
-│   │   ├── pdf.py                 # offline pdfplumber extraction; text-layer PDFs only, no OCR
-│   │   └── seam.py                # optional Bedrock seam, policy-gated, low-confidence pages only
-│   ├── matching.py                # Splink wrapper; pandas appears here and nowhere else
+│   │   ├── ocr.py                 # optional local Tesseract path for image-only pages
+│   │   ├── pdf.py                 # offline pdfplumber extraction
+│   │   ├── sandbox.py             # resource-limited extraction subprocess
+│   │   ├── seam.py                # optional hosted/local model seams, policy-gated
+│   │   └── text.py                # plain-text and .eml body extraction
+│   ├── household.py               # reviewed household suggestions, off by default
+│   ├── manifest.py                # reproducibility manifest and input hashes
+│   ├── matching/                  # backend protocol and Splink implementation
 │   ├── models.py                  # core dataclasses, free of matcher and framework types
+│   ├── narrative.py               # EN/ES count-only narrative report
 │   ├── normalize.py               # deterministic name/date/address normalization, offline
 │   ├── pipeline.py                # orchestrator: ingest -> extract -> normalize -> resolve -> review -> write
 │   ├── policy.py                  # policy packs: default, dv (VAWA/FVPSA), hipaa
-│   ├── provenance.py              # append-only BLAKE2b hash chain; RFC 3161 is a pluggable seam, not shipped
+│   ├── provenance.py              # BLAKE2b hash chain plus optional RFC 3161 authority
+│   ├── quality.py                 # per-source data-quality aggregation
 │   ├── report.py                  # run summary + committed eval report renderers
-│   ├── review/                    # local WCAG 2.2 AA queue UI: render.py, server.py, session.py
+│   ├── review/                    # local queue UI, session, server, reviewer calibration
 │   ├── schema.py                  # declared schema/interface versions for the stability contract
-│   └── suppression.py             # aggregate suppression-aware summaries for external sharing
+│   ├── suppression.py             # aggregate suppression-aware summaries for external sharing
+│   └── telemetry.py               # content-free optional model-call telemetry
 ├── tests/
 │   ├── fixtures/                  # seeded synthetic data, zero real PII, planted ground truth
 │   └── test_*.py                  # incl. test_no_egress.py, test_consent.py
@@ -199,6 +209,7 @@ pdfplumber extraction seam (v0.3), CASS-style address normalization (v0.4),
 the DV policy pack (v0.5), the v1.0 engineering deliverables — Salesforce
 connector, Docker self-host, schema-version declarations, DPG conformance
 note (v0.6), and the WCAG 2.2 AA web review UI plus import-ready CRM export
-files (v0.7). What remains before the 1.0 stability tag is a full
-accessibility audit, supply-chain hardening, and the real-organization
-adoption the tag is gated on.
+files (v0.7). What remains before the 1.0 stability tag is human
+accessibility evidence, the first live release/ruleset exercise, demonstrated
+schema stability across releases, and real-organization adoption. The
+supply-chain implementation itself has landed.

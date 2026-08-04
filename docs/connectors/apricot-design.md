@@ -1,11 +1,10 @@
 # Apricot (Bonterra) connector — design brief, not implementation
 
-Status: **research only, not built.** Part of roadmap item E3 ("More
-connectors: Apricot, Airtable, Sheets, generic webhook"). The generic webhook
-connector shipped (see `docs/connectors/webhook.md`); this vendor connector
-did not, for the reasons below. This brief exists so a future implementer (or
-a maintainer deciding what to prioritize) starts from real research instead
-of re-discovering the same gaps.
+Status: **externally blocked, not scheduled (confirmed 2026-07-22).** No
+connector will be implemented until an authorized Apricot customer supplies a
+test account and the vendor supplies a verifiable write contract. This is a
+fail-closed product decision: endpoint paths, authentication, and upsert
+semantics will not be guessed from partial public material.
 
 ## Why this is a brief, not code
 

@@ -20,6 +20,7 @@ from pathlib import Path
 from constituent_reconciler import consent, decisions, household, matching, suppression
 from constituent_reconciler.config import Recipe
 from constituent_reconciler.connectors import get_factory
+from constituent_reconciler.connectors.airtable import Transport as AirtableTransport
 from constituent_reconciler.connectors.base import Connector, WriteResult
 from constituent_reconciler.connectors.civicrm import Transport
 from constituent_reconciler.connectors.crm_csv import CrmCsvConnector
@@ -778,6 +779,7 @@ def build_connector(
     transport: Transport | None = None,
     sf_transport: SalesforceTransport | None = None,
     webhook_transport: WebhookTransport | None = None,
+    airtable_transport: AirtableTransport | None = None,
 ) -> Connector:
     """Construct the connector named by the recipe. Secrets come from the env.
 
@@ -795,6 +797,8 @@ def build_connector(
         transports["salesforce"] = sf_transport
     if webhook_transport is not None:
         transports["webhook"] = webhook_transport
+    if airtable_transport is not None:
+        transports["airtable"] = airtable_transport
     factory = get_factory(recipe.output.connector)
     connector = factory(recipe.output, out_dir, transports)
 
@@ -889,6 +893,7 @@ def export(
     transport: Transport | None = None,
     sf_transport: SalesforceTransport | None = None,
     webhook_transport: WebhookTransport | None = None,
+    airtable_transport: AirtableTransport | None = None,
     confirmed_households: Iterable[str] = (),
 ) -> ExportSummary:
     """Write resolved records through the configured connector.
@@ -939,6 +944,7 @@ def export(
         transport=transport,
         sf_transport=sf_transport,
         webhook_transport=webhook_transport,
+        airtable_transport=airtable_transport,
     )
     if household_map and isinstance(connector, CrmCsvConnector):
         connector.set_household_column(household_map)

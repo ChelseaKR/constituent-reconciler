@@ -12,9 +12,10 @@ destroyable and in what order, not how long anything is kept. Retention windows
 depend on funding stream, state law, and the adopting organization's own
 policies, and are the organization's and its counsel's to set.
 
-Status: model defined. Destruction is a manual procedure today; the planned
-automation is EXP-10 in `docs/ideation/03-expansions.md` (a `reconcile destroy`
-command that executes this model and logs destruction to the provenance chain).
+Status: model and executor implemented. `reconcile destroy --older-than
+<window>` previews or deletes the inventory below and appends content-free
+destruction certificates to the provenance chain. No default retention window
+ships; the operator and counsel still set it.
 
 ## Part 1: the data-flow map
 
@@ -23,19 +24,19 @@ Source data enters through the readers in `pipeline.py`: CSVs via
 `extract/pdf.py`. Inputs are read in place and never copied; the tool holds no
 staging copy of the source files.
 
-Normalization (`normalize.py`), pair scoring (`matching.py`), banding,
+Normalization (`normalize.py`), pair scoring (`matching/`), banding,
 clustering, and golden-record reduction (`decisions.py`) all happen in memory.
 `pipeline.run` returns a value and writes nothing, which is why a dry run can
 produce the same result without touching disk. Everything durable lands in the
 output directory passed as `--out`.
 
-Two paths can move data off the machine, and both are policy-gated:
+Two classes of paths can move data off the machine, and both are policy-gated:
 
 * The optional cloud extraction seam (`extract/seam.py`) may send a
   low-confidence PDF page to Claude via Amazon Bedrock when the recipe enables
   it. Under the `dv` and `hipaa` packs the seam is constructed as a no-op
   before any data flows, enforced by `tests/test_no_egress.py`.
-* The live CRM connectors (`connectors/civicrm.py`, `connectors/salesforce.py`)
+* Hosted write connectors (`civicrm`, `salesforce`, `webhook`, and `airtable`)
   push resolved records to a remote system. Under a pack that requires local
   targets (`dv`), `pipeline.build_connector` refuses them fail-closed.
 
@@ -54,7 +55,7 @@ flowchart TD
     UI --> DEC[out/decisions.json<br/>ids and verdicts only]
     MEM --> GATE{consent gate<br/>consent.py}
     GATE -->|no granted consent| WH[out/withheld.csv<br/>ids and reason only]
-    GATE -->|granted| CONN[connector write<br/>out/resolved.csv, CRM import CSV,<br/>or live CRM when the pack allows]
+    GATE -->|granted| CONN[connector write<br/>local/CRM import CSV,<br/>or hosted target when the pack allows]
     CONN --> PROV[out/provenance.jsonl<br/>hashes, ids, timestamps]
     GATE -->|granted, dv pack| AGG[out/aggregate_summary.json<br/>suppressed counts, no field values]
 ```
@@ -136,15 +137,14 @@ VOCA funding and across states. The pack defines the destroy/retain sort and
 the order of operations; the window is counsel-gated, consistent with the
 jurisdiction note in [RESEARCH-ROADMAP.md](./RESEARCH-ROADMAP.md).
 
-**Execution.** Today destruction is manual: delete the destroy-list artifacts
-above and keep the two retained ones. EXP-10 in
-`docs/ideation/03-expansions.md` scopes the automation, a `reconcile destroy`
-command that deletes record-bearing artifacts older than a stated policy and
-appends a destruction entry naming artifact hashes to the provenance chain, so
-the chain proves destruction without retaining content. One honest limit
-applies either way: deleting a file is not forensic erasure on a journaling
-filesystem. Full-disk encryption on the machine that runs the tool is the
-practical mitigation until something stronger is warranted.
+**Execution.** Run `reconcile destroy --out <directory> --older-than <window>`;
+add `--dry-run` first to inspect the eligible inventory. The command deletes
+record-bearing artifacts older than the stated policy and appends destruction
+entries naming artifact hashes to the provenance chain, so the chain proves
+destruction without retaining content. One honest limit applies: deleting a
+file is not forensic erasure on a journaling filesystem. Full-disk encryption
+on the machine that runs the tool is the practical mitigation until something
+stronger is warranted.
 
 ### hipaa
 
@@ -165,5 +165,6 @@ The flow half of this model is enforced by merge-blocking tests: non-egress
 under the `dv` pack (`tests/test_no_egress.py`), the consent gate
 (`tests/test_consent.py`), suppression in the aggregate
 (`tests/test_suppression.py`), and the minimization of the review artifacts
-(`tests/test_review.py`). The destruction half is operator procedure
-until EXP-10 lands, and this document is the checklist that procedure follows.
+(`tests/test_review.py`). The destruction executor and its provenance
+certificates are enforced by `tests/test_destruction.py`; choosing the
+retention window remains operator procedure.
