@@ -40,14 +40,20 @@ def file_digest(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _splink_version() -> str | None:
+def splink_version() -> str | None:
+    """The installed Splink version, or ``None`` outside a full install.
+
+    Public because the comparison manifest (``compare.py``) records the same
+    matcher provenance the run manifest does.
+    """
+
     try:
         return metadata.version("splink")
     except metadata.PackageNotFoundError:
         return None
 
 
-def _input_digests(paths: Iterable[Path]) -> dict[str, str]:
+def input_digests(paths: Iterable[Path]) -> dict[str, str]:
     """Digest each input file. A directory contributes every regular file in it.
 
     Keys are file names; a directory's children are keyed ``dirname/childname``
@@ -81,9 +87,9 @@ def build_manifest(
     return {
         "created_at": datetime.now(UTC).isoformat(),
         "recipe_hash": file_digest(recipe_path) if recipe_path is not None else None,
-        "input_hashes": _input_digests(input_paths),
+        "input_hashes": input_digests(input_paths),
         "package_version": __version__,
-        "splink_version": _splink_version(),
+        "splink_version": splink_version(),
         "policy_pack": recipe.policy_pack,
         "thresholds": {
             "prior": recipe.prior,

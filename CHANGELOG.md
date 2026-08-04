@@ -7,6 +7,23 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **Read-only migration cutover comparison (UC-02, first PR).** `reconcile
+  compare --left <recipe or csv> --right <recipe or csv>` resolves a legacy
+  CRM export against a target export without building any connector. Records
+  carry a left/right side label through the existing mapping, normalization,
+  and matcher backend, and the command classifies every identity as matched,
+  left-only, or right-only, flags value conflicts on matched people, and
+  marks identities an undecided pair touches as needing review. Field values
+  stay in two local artifacts, `cutover_report.csv` and `cutover_review.csv`,
+  both added to the destruction inventory. The count-only
+  `migration_summary.json` carries its own versioned schema
+  (`migration_summary` in `reconcile schema`), and `compare_manifest.json`
+  binds both mapping recipes and the digest of every input file. Recipes that
+  disagree on thresholds or address backend are refused rather than silently
+  reconciled, and a merge-blocking test proves no compare code path can
+  construct a write connector, in the spirit of `tests/test_no_egress.py`.
+  The post-review correction-file export is the second UC-02 change and is
+  not part of this one.
 - **Airtable native-upsert connector (roadmap E3).** The new `airtable`
   destination batches at Airtable's ten-record limit, uses
   `performUpsert` on the configured external-id field, reads a personal access

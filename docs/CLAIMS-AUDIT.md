@@ -1,6 +1,7 @@
 # Capability claims audit
 
-**Audited:** 2026-07-22 (roadmap closeout re-verification).
+**Audited:** 2026-07-22 (roadmap closeout re-verification); the migration
+cutover comparison row was added 2026-08-03 with its change.
 **Scope:** every capability claim in `README.md` and `CLAUDE.md`, read against
 the code in `src/constituent_reconciler/`.
 **Method:** each claim below was checked by opening the named module, not by
@@ -34,6 +35,7 @@ Status values: **implemented** (the code does what the sentence says),
 | RFC 3161 trusted timestamps on provenance entries | README.md "What it does" step 7 | `provenance.py` `Rfc3161Authority`; selected by recipe `tsa_url`; response/imprint/nonce tests | implemented and opt-in; local clock remains the default |
 | Consent-gated export: non-consented records withheld, fail-closed | README.md:74, 92-95 | `consent.py` `partition_by_consent`; `pipeline.py` writes `withheld.csv` with ids and reason only | implemented (enforced when the active pack requires consent: dv and hipaa; the default pack does not) |
 | CASS-style address standardization, not USPS-certified | README.md:64-66 (step 3) | `address.py` | implemented |
+| Migration cutover comparison, read-only (`reconcile compare`) | CHANGELOG.md [Unreleased]; docs/NOVEL-USE-CASES-PLAN.md UC-02 | `compare.py`; `cli.py` `_cmd_compare`; `tests/test_compare.py` holds the row-accounting, no-field-values, order-independence, and no-connector invariants | implemented (UC-02 PR 1: model and report; the post-review correction-file export is not built yet) |
 | CLAUDE.md architecture map matches the code | CLAUDE.md:72-108 formerly listed `ingest.py`, `gate.py`, `resolve.py`, `extract/deterministic.py`, a `policy/` package, and `test_consent_blocks_export.py`, none of which exist | as built: `pipeline.py` (ingest lives here), `decisions.py` (banding and the fail-closed gate), `matching.py` (Splink wrapper), `extract/pdf.py`, `policy.py`, `tests/test_consent.py` | corrected 2026-07-02 |
 
 ## Re-running this audit
