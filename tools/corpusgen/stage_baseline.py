@@ -15,18 +15,27 @@ corpus the composed stages must produce the same artifacts ``pipeline.run``
 and ``pipeline.export`` produce, so drift between this harness and the
 pipeline fails CI instead of skewing a committed baseline.
 
-Determinism: the corpus is regenerated from a pinned seed and size, and both
-are recorded in the output together with a digest of the generated input
-files. A pre-existing corpus is reused only when its CSV bytes digest to
-exactly what the pinned generator produces for the parameters in its recipe
-header; a corpus that was modified after generation is refused before any
-measurement, so the recorded parameters always describe the measured bytes.
+``--pdf-share`` above zero measures the mixed CSV+PDF corpus variant
+(the extract half of #78): that share of the incoming rows rides as seeded
+text-layer PDF intake documents, the pipeline's pdfplumber extractor does
+real work during ingest, and the extract row reports the time the ingest walk
+spent in the PDF reader instead of an honest zero.
+
+Determinism: the corpus is regenerated from a pinned seed, size, and PDF
+share, all recorded in the output together with a digest of the generated
+input files. A pre-existing corpus is reused only when its input bytes (CSVs,
+and for the mixed variant everything in the incoming directory plus the PDF
+manifest) digest to exactly what the pinned generator produces for the
+parameters in its recipe header; a corpus modified or added to after
+generation is refused before any measurement, so the recorded parameters
+always describe the measured bytes.
 Timing values vary by machine, so the environment (Python version,
 platform, CPU count) is recorded alongside them, content-free. The output
 carries counts, durations, parameters, and digests only: no field values,
 and no filesystem path beyond the corpus directory's base name.
 
-Run it with ``make perf-baseline``; see eval/README.md.
+Run it with ``make perf-baseline`` (CSV-only, the committed baseline) or
+``make perf-baseline-pdf`` (the mixed variant); see eval/README.md.
 """
 
 from __future__ import annotations
@@ -46,11 +55,11 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from constituent_reconciler import decisions, matching, pipeline
+from constituent_reconciler import decisions, matching, pipeline, stage_cache
 from constituent_reconciler.config import Recipe, load_recipe
 from constituent_reconciler.models import Record, RunResult
 from constituent_reconciler.normalize import normalize_record
-from tools.corpusgen.generate import generate, write_corpus
+from tools.corpusgen.generate import PDF_PAGES_PER_DOC, generate, write_corpus
 from tools.corpusgen.run_large_eval import peak_memory_mb
 
 BASELINE_SCHEMA_VERSION = 1
@@ -59,6 +68,40 @@ STAGE_NAMES = ("ingest", "extract", "normalize", "score", "review_artifact", "wr
 
 _DEFAULT_SEED = 20260707
 _DEFAULT_RECORDS = 50000
+
+
+def pdf_extraction_note(*, candidate_pairs: int, auto_pairs: int, review_pairs: int) -> str:
+    """The mixed variant's extraction note, in the run's own banding counts.
+
+    A PDF-carried row reaches matching with fewer fields than the same row as
+    a CSV cell, because the extractor recovers only what a labeled line gives
+    it. Both artifacts carry that, so nobody reads the mixed variant's
+    different run counts as a matcher regression.
+
+    The note reports what this run banded and stops there. The harness
+    measures one corpus per run and never splits its counts between the
+    PDF-carried rows and the CSV rows, so nothing here shows how either
+    population banded on its own or how the same people would band as CSV
+    cells. A cause stated for the difference would be an interpretation the
+    numbers printed beside it cannot carry.
+    """
+
+    return (
+        "Records read from PDF pages carry only what the extractor recovers from a "
+        "labeled line: name, a numeric date of birth, and email or phone when the "
+        "form has one. Address and consent have no extraction pattern, and a date "
+        'written in prose ("26 November 1942") does not match the numeric date '
+        "pattern, so a PDF-carried person reaches matching with fewer comparison "
+        f"fields than the same person as a CSV row. This run scored {candidate_pairs} "
+        f"candidate pairs, of which {auto_pairs} fell above the auto threshold and "
+        f"{review_pairs} in the review band, the rest below the review threshold. "
+        "Those counts cover the mixed corpus as one population: the run does not "
+        "measure the PDF-carried rows apart from the CSV rows, so it attributes no "
+        "part of them to either side, and they are not comparable to a CSV-only run "
+        "of the same seed. Under a policy pack that requires consent, the missing "
+        "consent value would also withhold these records at the export gate; the "
+        "generated recipe uses the default pack, where that gate is a no-op."
+    )
 
 
 @dataclass(frozen=True)
@@ -74,13 +117,21 @@ class StageTiming:
 
 @dataclass(frozen=True)
 class CorpusParams:
-    """The pinned parameters and observed shape of the measured corpus."""
+    """The pinned parameters and observed shape of the measured corpus.
+
+    ``incoming_rows`` counts the whole incoming side; for the mixed variant
+    that is the CSV rows plus the ``pdf_rows`` carried as PDF pages, spread
+    over ``pdf_documents`` generated documents.
+    """
 
     seed: int
     requested_records: int
     existing_rows: int
     incoming_rows: int
     input_digest: str
+    pdf_share: float = 0.0
+    pdf_documents: int = 0
+    pdf_rows: int = 0
 
 
 @dataclass(frozen=True)
@@ -114,23 +165,93 @@ def measure(recipe: Recipe, *, work_dir: Path) -> Measurement:
     peak_before = peak_memory_mb()
     stages: list[StageTiming] = []
 
+    # Extraction happens inside the pipeline's ingest walk, not as a separate
+    # pass, so the PDF reader is timed in place: the same function does the
+    # same work in the same order, and this harness only accumulates how long
+    # each call took. Ingest's row reports its wall clock with that time
+    # removed, and the extract row carries it, so the two rows partition the
+    # walk instead of double-counting it.
+    pdf_reader_seconds = 0.0
+    pdf_reader_calls = 0
+    real_read_pdf_records = pipeline.read_pdf_records
+
+    def timed_read_pdf_records(
+        path: Path,
+        source: str,
+        *,
+        recipe: Recipe,
+        id_prefix: str,
+        _seen: dict[str, int] | None = None,
+        accounting: pipeline.IngestAccumulator | None = None,
+        active_cache: stage_cache.ActiveCache | None = None,
+    ) -> list[Record]:
+        # The baseline is the pre-cache "before" number, so the walk below
+        # passes no cache; the parameter exists to match the reader the
+        # pipeline calls, and is forwarded rather than dropped.
+        nonlocal pdf_reader_seconds, pdf_reader_calls
+        call_started = time.perf_counter()
+        try:
+            return real_read_pdf_records(
+                path,
+                source,
+                recipe=recipe,
+                id_prefix=id_prefix,
+                _seen=_seen,
+                accounting=accounting,
+                active_cache=active_cache,
+            )
+        finally:
+            pdf_reader_seconds += time.perf_counter() - call_started
+            pdf_reader_calls += 1
+
     started = time.perf_counter()
     accounting = pipeline.IngestAccumulator()
     raw_records: list[Record] = []
-    if recipe.existing is not None:
+    setattr(pipeline, "read_pdf_records", timed_read_pdf_records)  # noqa: B010 - timing swap
+    try:
+        if recipe.existing is not None:
+            raw_records += pipeline._ingest_source(
+                recipe.existing, "existing", recipe=recipe, id_prefix="E", accounting=accounting
+            )
         raw_records += pipeline._ingest_source(
-            recipe.existing, "existing", recipe=recipe, id_prefix="E", accounting=accounting
+            recipe.incoming, "incoming", recipe=recipe, id_prefix="N", accounting=accounting
         )
-    raw_records += pipeline._ingest_source(
-        recipe.incoming, "incoming", recipe=recipe, id_prefix="N", accounting=accounting
-    )
+    finally:
+        setattr(pipeline, "read_pdf_records", real_read_pdf_records)  # noqa: B010 - swap back
     pipeline._check_distinct_ids(raw_records)
-    stages.append(
-        StageTiming("ingest", time.perf_counter() - started, len(raw_records), peak_memory_mb())
-    )
-
+    ingest_wall = time.perf_counter() - started
     stages.append(
         StageTiming(
+            "ingest",
+            ingest_wall - pdf_reader_seconds,
+            len(raw_records),
+            peak_memory_mb(),
+            note=(
+                (
+                    "excludes the time the ingest walk spent in the PDF reader, "
+                    "which the extract row reports; pipeline.run itself runs "
+                    "extraction inside ingest"
+                )
+                if pdf_reader_calls
+                else ""
+            ),
+        )
+    )
+
+    if pdf_reader_calls:
+        extract_stage = StageTiming(
+            "extract",
+            pdf_reader_seconds,
+            accounting.pages_extracted,
+            peak_memory_mb(),
+            note=(
+                "time the ingest walk spent in the PDF reader (sandboxed parse "
+                f"included), over {pdf_reader_calls} PDF documents; the CSV rows "
+                "of the mixed corpus need no extraction"
+            ),
+        )
+    else:
+        extract_stage = StageTiming(
             "extract",
             0.0,
             accounting.pages_extracted,
@@ -141,7 +262,7 @@ def measure(recipe: Recipe, *, work_dir: Path) -> Measurement:
                 "the ingest stage"
             ),
         )
-    )
+    stages.append(extract_stage)
 
     started = time.perf_counter()
     records = {
@@ -240,14 +361,76 @@ def _csv_data_rows(path: Path) -> int:
         return max(sum(1 for _ in csv.reader(handle)) - 1, 0)
 
 
-def _input_digest(out_dir: Path) -> str:
-    """BLAKE2b digest over the generated input files, for exact-corpus diffs."""
+def _input_files(out_dir: Path, *, pdf_variant: bool) -> list[Path]:
+    """The generated input files the digest (and the measurement) covers.
+
+    For the mixed variant this is the existing CSV, everything the
+    ``incoming/`` directory holds, and the PDF manifest the accounting
+    cross-check reads, so none of them can drift unnoticed.
+
+    The incoming side is listed by walking that directory rather than by
+    globbing the names the generator writes. The recipe points the pipeline at
+    the directory, so the pipeline ingests whatever is in it, and a file
+    dropped there after generation would otherwise be outside the digest
+    entirely. A dropped file that yields no records clears the source-row
+    accounting check too, which would leave nothing to catch it.
+    """
+
+    if not pdf_variant:
+        return [out_dir / "existing.csv", out_dir / "incoming.csv"]
+    incoming_dir = out_dir / "incoming"
+    files = [out_dir / "existing.csv"]
+    files += sorted(path for path in incoming_dir.rglob("*") if path.is_file())
+    files.append(out_dir / "pdf_manifest.json")
+    return files
+
+
+def _input_digest(out_dir: Path, *, pdf_variant: bool = False) -> str:
+    """BLAKE2b digest over the generated input files, for exact-corpus diffs.
+
+    The CSV-only digest hashes the same names and bytes it always has, so
+    values stay comparable with the committed baseline's.
+    """
 
     digest = hashlib.blake2b(digest_size=16)
-    for name in ("existing.csv", "incoming.csv"):
-        digest.update(name.encode("utf-8"))
-        digest.update((out_dir / name).read_bytes())
+    for file in _input_files(out_dir, pdf_variant=pdf_variant):
+        digest.update(file.relative_to(out_dir).as_posix().encode("utf-8"))
+        digest.update(file.read_bytes())
     return digest.hexdigest()
+
+
+def _pdf_manifest_counts(out_dir: Path) -> tuple[int, int]:
+    """(documents, rows carried as PDF pages) from the generated manifest."""
+
+    manifest = json.loads((out_dir / "pdf_manifest.json").read_text(encoding="utf-8"))
+    documents = manifest["documents"]
+    return len(documents), sum(len(doc["incoming_ids"]) for doc in documents)
+
+
+def _read_corpus_shape(
+    out_dir: Path, *, seed: int, requested_records: int, pdf_share: float
+) -> CorpusParams:
+    """Count the source rows of the corpus on disk, per layout.
+
+    For the mixed variant the incoming side is the rows left in
+    ``incoming/incoming.csv`` plus the rows the manifest says ride as PDF
+    pages, so ``incoming_rows`` means the same thing in both layouts and the
+    accounting cross-check in ``main`` covers the PDF-carried rows too.
+    """
+
+    pdf_variant = pdf_share > 0.0
+    incoming_csv = out_dir / ("incoming/incoming.csv" if pdf_variant else "incoming.csv")
+    pdf_documents, pdf_rows = _pdf_manifest_counts(out_dir) if pdf_variant else (0, 0)
+    return CorpusParams(
+        seed=seed,
+        requested_records=requested_records,
+        existing_rows=_csv_data_rows(out_dir / "existing.csv"),
+        incoming_rows=_csv_data_rows(incoming_csv) + pdf_rows,
+        input_digest=_input_digest(out_dir, pdf_variant=pdf_variant),
+        pdf_share=pdf_share,
+        pdf_documents=pdf_documents,
+        pdf_rows=pdf_rows,
+    )
 
 
 def build_payload(
@@ -258,7 +441,13 @@ def build_payload(
     corpus_dir_name: str,
     measured_on: str,
 ) -> dict[str, object]:
-    """Assemble the machine-readable companion the cached run diffs against."""
+    """Assemble the machine-readable companion the cached run diffs against.
+
+    The mixed variant adds a ``corpus.pdf`` block and one extra note. A
+    CSV-only payload carries exactly the keys it carried before the variant
+    existed, so the committed 2026-08-03 baseline stays comparable key for key
+    with any later CSV-only run at the same schema version.
+    """
 
     result = measurement.result
     rpm = (
@@ -266,20 +455,28 @@ def build_payload(
         if measurement.stage_wall_seconds_total > 0
         else 0.0
     )
+    corpus_block: dict[str, object] = {
+        "directory_name": corpus_dir_name,
+        "generator": "tools.corpusgen.generate",
+        "seed": corpus.seed,
+        "requested_records": corpus.requested_records,
+        "existing_rows": corpus.existing_rows,
+        "incoming_rows": corpus.incoming_rows,
+        "input_digest_blake2b": corpus.input_digest,
+    }
+    if corpus.pdf_share > 0.0:
+        corpus_block["pdf"] = {
+            "share": corpus.pdf_share,
+            "documents": corpus.pdf_documents,
+            "rows": corpus.pdf_rows,
+            "pages_per_document": PDF_PAGES_PER_DOC,
+        }
     return {
         "baseline_schema_version": BASELINE_SCHEMA_VERSION,
         "kind": "large-corpus-stage-baseline",
         "variant": "pre-cache",
         "measured_on": measured_on,
-        "corpus": {
-            "directory_name": corpus_dir_name,
-            "generator": "tools.corpusgen.generate",
-            "seed": corpus.seed,
-            "requested_records": corpus.requested_records,
-            "existing_rows": corpus.existing_rows,
-            "incoming_rows": corpus.incoming_rows,
-            "input_digest_blake2b": corpus.input_digest,
-        },
+        "corpus": corpus_block,
         "recipe": {
             "policy_pack": recipe.policy_pack,
             "prior": recipe.prior,
@@ -333,6 +530,17 @@ def build_payload(
                 "pipeline.export, so the stage sum can slightly exceed an "
                 "end-to-end run."
             ),
+            *(
+                [
+                    pdf_extraction_note(
+                        candidate_pairs=len(result.pairs),
+                        auto_pairs=len(result.auto_pairs),
+                        review_pairs=len(result.review_pairs),
+                    )
+                ]
+                if corpus.pdf_share > 0.0
+                else []
+            ),
         ],
     }
 
@@ -345,20 +553,28 @@ def render_report(
     measured_on: str,
     json_name: str,
 ) -> str:
-    """Render the dated Markdown report, matching eval/ report conventions."""
+    """Render the dated Markdown report, matching eval/ report conventions.
+
+    A CSV-only run renders exactly the sections it rendered before the mixed
+    variant existed. The mixed variant adds the PDF corpus row, the consent
+    note, and its own reproduction command.
+    """
 
     result = measurement.result
+    pdf_variant = corpus.pdf_share > 0.0
+    make_target = "make perf-baseline-pdf" if pdf_variant else "make perf-baseline"
+    title_suffix = ", mixed CSV and PDF corpus" if pdf_variant else ""
     rpm = (
         len(result.records) / measurement.stage_wall_seconds_total * 60
         if measurement.stage_wall_seconds_total > 0
         else 0.0
     )
     lines = [
-        "# Large-corpus stage baseline (pre-cache)",
+        f"# Large-corpus stage baseline (pre-cache{title_suffix})",
         "",
         f"Measured: {measured_on}. Dataset: `{corpus_dir_name}` (seeded synthetic corpus, "
         f"seed {corpus.seed}, {len(result.records)} records ingested). Written by "
-        "`tools/corpusgen/stage_baseline.py` via `make perf-baseline`, committed alongside "
+        f"`tools/corpusgen/stage_baseline.py` via `{make_target}`, committed alongside "
         f"`large-corpus-report.md`. The JSON companion `{json_name}` carries the same numbers "
         "for machine diffing. There is no real personal data in the corpus.",
         "",
@@ -389,6 +605,24 @@ def render_report(
         f"| {corpus.seed} | {corpus.requested_records} | {corpus.existing_rows} "
         f"| {corpus.incoming_rows} | `{corpus.input_digest}` |",
         "",
+    ]
+    if pdf_variant:
+        lines += [
+            f"Of those {corpus.incoming_rows} incoming rows, {corpus.pdf_rows} ride as text-layer "
+            f"PDF intake documents ({corpus.pdf_documents} files, {PDF_PAGES_PER_DOC} pages each "
+            f"at most, a {corpus.pdf_share:.0%} share) and the rest stay CSV rows. The digest "
+            "covers the existing CSV, the manifest, and everything the incoming directory "
+            "holds, so a file edited or added there after generation is refused before "
+            "any measurement runs.",
+            "",
+            pdf_extraction_note(
+                candidate_pairs=len(result.pairs),
+                auto_pairs=len(result.auto_pairs),
+                review_pairs=len(result.review_pairs),
+            ),
+            "",
+        ]
+    lines += [
         "## Stage timings",
         "",
         "| Stage | Wall clock (s) | Items | Peak RSS after (MiB) |",
@@ -424,7 +658,7 @@ def render_report(
         "## Reproducing",
         "",
         "```sh",
-        "make perf-baseline",
+        make_target,
         "```",
         "",
         "The command regenerates the corpus from the pinned seed, times the six stages, and "
@@ -437,68 +671,89 @@ def render_report(
     return "\n".join(lines)
 
 
-def _generation_params(recipe_path: Path) -> tuple[int, int] | None:
-    """Read the ``--records N --seed S`` pair from a generated recipe header."""
+def _generation_params(recipe_path: Path) -> tuple[int, int, float] | None:
+    """Read ``--records N --seed S [--pdf-share F]`` from a generated recipe header."""
 
     match = re.search(
-        r"--records\s+(\d+)\s+--seed\s+(\d+)", recipe_path.read_text(encoding="utf-8")
+        r"--records\s+(\d+)\s+--seed\s+(\d+)(?:\s+--pdf-share\s+([0-9.]+))?",
+        recipe_path.read_text(encoding="utf-8"),
     )
     if match is None:
         return None
-    return int(match.group(1)), int(match.group(2))
+    share = float(match.group(3)) if match.group(3) else 0.0
+    return int(match.group(1)), int(match.group(2)), share
 
 
-def _expected_input_digest(*, records: int, seed: int) -> str:
+def _expected_input_digest(*, records: int, seed: int, pdf_share: float) -> str:
     """The digest the pinned generator's output has for these parameters.
 
     Computed by regenerating the corpus into a scratch directory through the
     same writer the real corpus went through, so the comparison in
-    ``_ensure_corpus`` is over exact CSV bytes rather than a parsed view.
+    ``_ensure_corpus`` is over exact file bytes rather than a parsed view.
     """
 
     corpus = generate(total_records=records, seed=seed)
     with tempfile.TemporaryDirectory() as scratch:
         scratch_dir = Path(scratch)
-        write_corpus(corpus, scratch_dir, seed=seed, total_records=records)
-        return _input_digest(scratch_dir)
+        write_corpus(corpus, scratch_dir, seed=seed, total_records=records, pdf_share=pdf_share)
+        return _input_digest(scratch_dir, pdf_variant=pdf_share > 0.0)
 
 
-def _ensure_corpus(out_dir: Path, *, records: int, seed: int, regenerate: bool) -> bool:
+def _corpus_files_present(out_dir: Path, *, pdf_share: float) -> str | None:
+    """The name of a missing required corpus file, or None when all exist."""
+
+    required = ["existing.csv"]
+    if pdf_share > 0.0:
+        required += ["incoming/incoming.csv", "pdf_manifest.json"]
+    else:
+        required += ["incoming.csv"]
+    for name in required:
+        if not (out_dir / name).is_file():
+            return name
+    return None
+
+
+def _ensure_corpus(
+    out_dir: Path, *, records: int, seed: int, regenerate: bool, pdf_share: float = 0.0
+) -> bool:
     """Generate the corpus, or verify an existing one matches the parameters.
 
     Returns False (fail closed) when an existing corpus cannot be shown to
-    match the requested seed and size, rather than stamping the baseline with
-    parameters that may not describe the data it measured. The recipe header
-    alone is not trusted: the generator is deterministic, so a reused corpus
-    must also digest to exactly the CSV bytes the pinned parameters produce,
-    and a hand-modified existing.csv or incoming.csv is refused.
+    match the requested seed, size, and PDF share, rather than stamping the
+    baseline with parameters that may not describe the data it measured. The
+    recipe header alone is not trusted: the generator is deterministic, so a
+    reused corpus must also digest to exactly the input bytes the pinned
+    parameters produce. A hand-modified CSV, PDF, or manifest is refused, and
+    so is a file added to the incoming directory after generation, which the
+    pipeline would ingest and the digest covers by walking that directory.
     """
 
     recipe_path = out_dir / "recipe.toml"
     if regenerate or not recipe_path.exists():
         corpus = generate(total_records=records, seed=seed)
-        write_corpus(corpus, out_dir, seed=seed, total_records=records)
+        write_corpus(corpus, out_dir, seed=seed, total_records=records, pdf_share=pdf_share)
         return True
     found = _generation_params(recipe_path)
-    if found != (records, seed):
+    if found != (records, seed, pdf_share):
         print(
             f"error: existing corpus in {out_dir} does not match --records {records} "
-            f"--seed {seed} (found {found}); rerun with --regenerate",
+            f"--seed {seed} --pdf-share {pdf_share} (found {found}); rerun with --regenerate",
             file=sys.stderr,
         )
         return False
-    for name in ("existing.csv", "incoming.csv"):
-        if not (out_dir / name).is_file():
-            print(
-                f"error: existing corpus in {out_dir} is missing {name}; rerun with --regenerate",
-                file=sys.stderr,
-            )
-            return False
-    if _input_digest(out_dir) != _expected_input_digest(records=records, seed=seed):
+    missing = _corpus_files_present(out_dir, pdf_share=pdf_share)
+    if missing is not None:
         print(
-            f"error: the corpus CSVs in {out_dir} are not what the generator produces "
-            f"for --records {records} --seed {seed}; the files were changed after "
-            "generation; rerun with --regenerate",
+            f"error: existing corpus in {out_dir} is missing {missing}; rerun with --regenerate",
+            file=sys.stderr,
+        )
+        return False
+    expected = _expected_input_digest(records=records, seed=seed, pdf_share=pdf_share)
+    if _input_digest(out_dir, pdf_variant=pdf_share > 0.0) != expected:
+        print(
+            f"error: the corpus inputs in {out_dir} are not what the generator produces "
+            f"for --records {records} --seed {seed} --pdf-share {pdf_share}; a file was "
+            "changed, added, or removed after generation; rerun with --regenerate",
             file=sys.stderr,
         )
         return False
@@ -515,6 +770,15 @@ def main(argv: list[str] | None = None) -> int:
         help="corpus size; the default matches the committed large-corpus report",
     )
     parser.add_argument("--seed", type=int, default=_DEFAULT_SEED)
+    parser.add_argument(
+        "--pdf-share",
+        type=float,
+        default=0.0,
+        help=(
+            "fraction of incoming rows carried as text-layer PDF intake documents "
+            "instead of CSV rows (default: 0.0, the CSV-only committed baseline)"
+        ),
+    )
     parser.add_argument(
         "--regenerate",
         action="store_true",
@@ -537,32 +801,34 @@ def main(argv: list[str] | None = None) -> int:
     json_out: Path = args.json_out or report_out.with_suffix(".json")
 
     if not _ensure_corpus(
-        out_dir, records=args.records, seed=args.seed, regenerate=args.regenerate
+        out_dir,
+        records=args.records,
+        seed=args.seed,
+        pdf_share=args.pdf_share,
+        regenerate=args.regenerate,
     ):
         return 1
 
     recipe = load_recipe(out_dir / "recipe.toml")
-    existing_rows = _csv_data_rows(out_dir / "existing.csv")
-    incoming_rows = _csv_data_rows(out_dir / "incoming.csv")
+    corpus_params = _read_corpus_shape(
+        out_dir,
+        seed=args.seed,
+        requested_records=args.records,
+        pdf_share=args.pdf_share,
+    )
 
     measurement = measure(recipe, work_dir=out_dir / "stage-baseline-work")
 
     ingested = len(measurement.result.records)
-    if ingested != existing_rows + incoming_rows:
+    source_rows = corpus_params.existing_rows + corpus_params.incoming_rows
+    if ingested != source_rows:
         print(
-            f"error: {existing_rows + incoming_rows} source rows but {ingested} records "
+            f"error: {source_rows} source rows but {ingested} records "
             "ingested; refusing to write a baseline over unaccounted input",
             file=sys.stderr,
         )
         return 1
 
-    corpus_params = CorpusParams(
-        seed=args.seed,
-        requested_records=args.records,
-        existing_rows=existing_rows,
-        incoming_rows=incoming_rows,
-        input_digest=_input_digest(out_dir),
-    )
     payload = build_payload(
         measurement,
         corpus=corpus_params,
@@ -584,9 +850,15 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"wrote stage-baseline report: {report_out}")
     print(f"wrote stage-baseline JSON:   {json_out}")
+    pdf_summary = ""
+    if corpus_params.pdf_rows:
+        pdf_summary = (
+            f"; {corpus_params.pdf_rows} of them extracted from "
+            f"{corpus_params.pdf_documents} PDF documents"
+        )
     print(
         f"stage wall clock {measurement.stage_wall_seconds_total:.1f}s for {ingested} records; "
-        f"peak RSS {measurement.peak_rss_mib:,.1f} MiB"
+        f"peak RSS {measurement.peak_rss_mib:,.1f} MiB{pdf_summary}"
     )
     return 0
 

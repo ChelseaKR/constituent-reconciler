@@ -16,6 +16,12 @@ pools; addresses are synthetic street/city combinations that do not resolve
 to real locations; phone numbers use the reserved 555 exchange; emails use
 `example.org`/`example.com`.
 
+`generate.py --pdf-share` writes part of the incoming side as digitally
+created text-layer PDF intake documents instead of CSV rows, so a run can
+measure the extraction path rather than skipping it (issue #78). The writer
+in `pdfwrite.py` is stdlib-only and dev tooling: nothing in the package's
+runtime imports it, and the package gains no dependency from it.
+
 The error-model assumptions (which typo shapes are common, which nicknames
 map to which given names, how often a hyphenated surname keeps both parts)
 are the generator author's best approximation, not measured from real intake

@@ -22,8 +22,11 @@ out-dv/
 
 # Generated synthetic corpora (FIX-11): deterministic from the seed baked
 # into tools/corpusgen, so the raw CSVs are reproducible and not committed.
-# Only the derived report (eval/large-corpus-report.md) is committed.
+# Only the derived report (eval/large-corpus-report.md) is committed. The
+# -pdf directory holds the mixed CSV+PDF variant `make perf-baseline-pdf`
+# generates, reproducible from the same seed and equally uncommitted.
 eval/large-corpus/
+eval/large-corpus-pdf/
 
 # Node (accessibility audit tooling only; see docs/adr/0011)
 node_modules/
