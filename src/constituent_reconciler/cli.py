@@ -246,11 +246,19 @@ def _cmd_eval(args: argparse.Namespace) -> int:
         segments=segments,
     )
     calibration = _load_calibration(Path(args.calibration) if args.calibration else None)
+    # resolve() first: a relative --config like "recipe.toml" has an empty parent,
+    # which rendered the report's dataset label as an empty backtick pair.
     markdown = render_eval_markdown(
         report,
-        dataset=Path(args.config).parent.name,
+        dataset=Path(args.config).resolve().parent.name,
         gate_threshold=args.gate,
         calibration=calibration,
+        # A truth file scoring anything other than the committed fixtures declares
+        # so with an explicit "provenance" key. This is deliberately not `note`:
+        # note describes how ground truth was constructed, which is a different
+        # claim from where the scored records came from, and silently promoting
+        # one to the other would rewrite every committed report.
+        provenance=truth.get("provenance"),
     )
     if args.out:
         Path(args.out).write_text(markdown, encoding="utf-8")
