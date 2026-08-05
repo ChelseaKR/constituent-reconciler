@@ -194,9 +194,14 @@ def render_eval_markdown(
     personal data -- printed unconditionally, so pointing `reconcile eval` at a
     real dataset produced a report that stated the opposite of the truth about
     itself. On a tool whose whole discipline is provenance, a generated false
-    provenance claim is the wrong default, so callers now pass what they know
-    (the ground-truth file's own ``note`` is the natural source) and the
-    fixture sentence is only the fallback.
+    provenance claim is the wrong default.
+
+    Callers now pass what they know. `reconcile eval` reads an explicit
+    ``provenance`` key from the ground-truth file, which is deliberately not its
+    ``note``: a note describes how ground truth was constructed, a different
+    claim from where the records came from. Truth files that declare nothing get
+    :data:`DEFAULT_PROVENANCE`, which is why every committed fixture report is
+    unaffected.
     """
     gate_pass = report.false_merge_rate <= gate_threshold
     gate_word = "PASS" if gate_pass else "FAIL"

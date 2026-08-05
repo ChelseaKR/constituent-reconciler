@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from constituent_reconciler.decisions import band_pairs
 from constituent_reconciler.evaluate import CalibrationReport, EvalReport, evaluate
 from constituent_reconciler.report import render_eval_markdown
@@ -54,24 +57,22 @@ def test_eval_markdown_renders_disaggregated_risk_classes() -> None:
 
 
 def test_provenance_defaults_to_the_fixture_sentence() -> None:
-    """With no note supplied, the report still describes the committed fixtures."""
+    """With no provenance declared, the report still describes the committed fixtures."""
     markdown = render_eval_markdown(_eval_report(), dataset="demo")
     assert "seeded synthetic fixtures" in markdown
     assert "no real personal data in the fixtures" in markdown
 
 
-def test_provenance_note_replaces_the_synthetic_claim() -> None:
+def test_declared_provenance_replaces_the_synthetic_claim() -> None:
     """A real dataset must not produce a report asserting it is synthetic.
 
     The sentence was printed unconditionally, so a real-data eval generated a
     report stating there was no real personal data in it -- a false provenance
     claim, produced automatically, on a tool whose discipline is provenance.
     """
-    note = "Ground truth is NCVR ncid across two statewide snapshots; real registration records."
-    markdown = render_eval_markdown(_eval_report(), dataset="ncvr", provenance=note)
-    assert note in markdown
-    # `note` is not promoted to provenance: it describes how truth was built, not
-    # where the records came from, and conflating them rewrites every committed report.
+    declared = "Ground truth is NCVR ncid across two statewide snapshots; real records."
+    markdown = render_eval_markdown(_eval_report(), dataset="ncvr", provenance=declared)
+    assert declared in markdown
     assert "seeded synthetic fixtures" not in markdown
     assert "no real personal data" not in markdown
 
@@ -79,3 +80,26 @@ def test_provenance_note_replaces_the_synthetic_claim() -> None:
 def test_blank_provenance_falls_back_rather_than_leaving_a_gap() -> None:
     markdown = render_eval_markdown(_eval_report(), dataset="demo", provenance="   ")
     assert "seeded synthetic fixtures" in markdown
+
+
+def test_a_truth_note_is_not_promoted_to_provenance(tmp_path: Path) -> None:
+    """`note` must not stand in for `provenance`, or every committed report changes.
+
+    The first version of this fix read the truth file's `note`. Every fixture
+    truth file has one describing how its ground truth was planted, so both
+    committed reports were rewritten and each lost the "no real personal data in
+    the fixtures" assurance. CI caught it. The two keys answer different
+    questions: how truth was built, versus where the records came from.
+    """
+    truth = tmp_path / "ground_truth.json"
+    truth.write_text(
+        json.dumps({"note": "Planted clusters for the demo fixtures.", "clusters": []}),
+        encoding="utf-8",
+    )
+    loaded = json.loads(truth.read_text(encoding="utf-8"))
+
+    markdown = render_eval_markdown(
+        _eval_report(), dataset="demo", provenance=loaded.get("provenance")
+    )
+    assert "seeded synthetic fixtures" in markdown
+    assert "Planted clusters for the demo fixtures." not in markdown
