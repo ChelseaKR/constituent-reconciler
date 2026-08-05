@@ -51,3 +51,29 @@ def test_eval_markdown_renders_disaggregated_risk_classes() -> None:
 
     assert "## Disaggregated error by documented risk class" in markdown
     assert "| transliterated name | 1 | 1 | 0 | 100.0% | 0 |" in markdown
+
+
+def test_provenance_defaults_to_the_fixture_sentence() -> None:
+    """With no note supplied, the report still describes the committed fixtures."""
+    markdown = render_eval_markdown(_eval_report(), dataset="demo")
+    assert "seeded synthetic fixtures" in markdown
+    assert "no real personal data in the fixtures" in markdown
+
+
+def test_provenance_note_replaces_the_synthetic_claim() -> None:
+    """A real dataset must not produce a report asserting it is synthetic.
+
+    The sentence was printed unconditionally, so a real-data eval generated a
+    report stating there was no real personal data in it -- a false provenance
+    claim, produced automatically, on a tool whose discipline is provenance.
+    """
+    note = "Ground truth is NCVR ncid across two statewide snapshots; real registration records."
+    markdown = render_eval_markdown(_eval_report(), dataset="ncvr", provenance=note)
+    assert note in markdown
+    assert "seeded synthetic fixtures" not in markdown
+    assert "no real personal data" not in markdown
+
+
+def test_blank_provenance_falls_back_rather_than_leaving_a_gap() -> None:
+    markdown = render_eval_markdown(_eval_report(), dataset="demo", provenance="   ")
+    assert "seeded synthetic fixtures" in markdown

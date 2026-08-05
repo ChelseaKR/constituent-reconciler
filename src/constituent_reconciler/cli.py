@@ -246,11 +246,16 @@ def _cmd_eval(args: argparse.Namespace) -> int:
         segments=segments,
     )
     calibration = _load_calibration(Path(args.calibration) if args.calibration else None)
+    # resolve() first: a relative --config like "recipe.toml" has an empty parent,
+    # which rendered the report's dataset label as an empty backtick pair.
     markdown = render_eval_markdown(
         report,
-        dataset=Path(args.config).parent.name,
+        dataset=Path(args.config).resolve().parent.name,
         gate_threshold=args.gate,
         calibration=calibration,
+        # The truth file documents what it is; that is the honest provenance for
+        # whatever was actually scored, fixture or real.
+        provenance=truth.get("note"),
     )
     if args.out:
         Path(args.out).write_text(markdown, encoding="utf-8")
