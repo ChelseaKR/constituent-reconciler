@@ -6,6 +6,12 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 ## [Unreleased]
 
+### Fixed
+- **Release authority now starts from reviewed `main`.** A maintainer supplies
+  an existing SSH-signed stable tag; the read-only verifier checks signer,
+  main ancestry, version, changelog, and the full gate before exact artifacts
+  reach a checkout-free publisher that rechecks the tag object.
+
 ### Added
 - **Progress events for `run` and `apply` (UC-01 remainder, #77).**
   `pipeline.run` and `pipeline.export` accept a `ProgressSink` (new
