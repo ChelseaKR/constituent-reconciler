@@ -70,6 +70,8 @@ def test_provenance_note_replaces_the_synthetic_claim() -> None:
     note = "Ground truth is NCVR ncid across two statewide snapshots; real registration records."
     markdown = render_eval_markdown(_eval_report(), dataset="ncvr", provenance=note)
     assert note in markdown
+    # `note` is not promoted to provenance: it describes how truth was built, not
+    # where the records came from, and conflating them rewrites every committed report.
     assert "seeded synthetic fixtures" not in markdown
     assert "no real personal data" not in markdown
 
