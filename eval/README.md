@@ -67,6 +67,63 @@ See `tools/corpusgen/__init__.py` and
 and does not claim, and for the plan to calibrate it against real, consented
 pilot data once one exists (EXP-08 / E8).
 
+## First measurement against real records (2026-08-04)
+
+A first check of the paragraph above: how does the matcher score when the
+variation is real rather than generated? North Carolina publishes its full
+voter file, and `ncid` is a stable per-voter identifier, so two statewide
+snapshots give same-person pairs whose differences are real edits made by
+county staff. Orange County, active and inactive registrations, 2024-01-01
+against 2026-03-03: 176,932 records and 88,466 true pairs. `ncid` was held out
+of the matcher, which saw only name and address.
+
+| | seeded synthetic corpus | real NCVR pairs |
+|---|---:|---:|
+| true pairs | 12,438 | 88,466 |
+| false-merge rate | 0.6% | 2.6% |
+| missed-match rate | 0.0% | 0.7% |
+
+**Read the comparison with care: it moves two variables at once.** NCVR
+publishes birth year rather than full date, so the real run had no `dob`, which
+is both the strongest comparison in `defaults.py` and its first blocking rule.
+Some unknown share of the gap is the missing field rather than real-versus-
+synthetic, and this dataset cannot separate them because it will never carry a
+`dob` column. What the run does establish is a name-and-address-only figure,
+which is a common intake shape: a 2.6% false-merge rate, above this project's
+own 1% gate.
+
+By risk class, the picture is uneven in a way the aggregate hides:
+
+| segment | true pairs | coverage recall |
+|---|---:|---:|
+| unchanged | 79,602 | 100.0% |
+| moved | 6,660 | 99.9% |
+| name changed | 1,642 | 72.5% |
+| name and address changed | 562 | 68.9% |
+
+**Blocking is not the constraint, which was the first guess and it was wrong.**
+Of the 452 missed name-change pairs, only 31 were never scored; the other 421
+were scored and fell below the review threshold. Adding `address` as a fifth
+blocking key was tried directly: it generated 2,341 more candidate pairs,
+pulled 12 pairs out of the blocking-miss column, and moved no segment's recall
+by a single pair. It also left `docs/audits/bias-report.md` byte-identical. The
+change was reverted because it costs comparisons and buys nothing measurable.
+
+The likelier reading is that this is close to the information limit for these
+fields. With name and address alone, a person who changed their surname and
+stayed put is not distinguishable from two people who share an address. That is
+the spouse, roommate, and adult-child case, which this project deliberately
+treats as a separate concern in `household.py` behind reviewed suggestions that
+are off by default. Merging on that evidence is the error the fail-closed band
+exists to prevent, so a 72.5% recall on name changes may be the matcher
+declining correctly rather than failing.
+
+Known limits of this measurement: one county, one state, one 26-month window,
+no `dob`, and a public voter roll rather than nonprofit intake. Voter
+registration records are also cleaner than the intake documents this tool is
+built for. It is one real datapoint against a synthetic error model, not the
+consented pilot calibration EXP-08 describes.
+
 ## The stage-timing baseline
 
 `large-corpus-stage-baseline-2026-08-03.md`, with a JSON companion of the
