@@ -7,6 +7,18 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Fixed
+- **The two-person review gate no longer accepts one reviewer's own name
+  typed twice (#97).** Under the `dv` pack, `require_second_reviewer` is
+  documented as requiring "two different reviewers" to approve the same
+  pair. `record()`'s dedup filter and `approvers()`'s distinctness check both
+  compared raw strings, so `('Jane Doe', 'jane doe')` and `('Jane Doe',
+  'Jane  Doe')` (a doubled internal space) each satisfied the gate as two
+  people. Both now compare through a new `_reviewer_identity_key` (case-fold,
+  collapse internal whitespace), applied only for "is this the same
+  reviewer" decisions, never to the name actually stored: the audit trail
+  still shows exactly what each reviewer typed. `next_undecided`'s own-pair
+  check is fixed the same way, so a reviewer resuming under a different
+  capitalization is not shown their own already-approved pair as open.
 - **The published aggregate total can no longer hand back a suppressed cell by
   subtraction (#94).** Complementary suppression already guaranteed that any
   breakdown with a hidden cell has at least two hidden cells, so the hidden
