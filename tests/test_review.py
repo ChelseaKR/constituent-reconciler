@@ -401,6 +401,76 @@ def test_the_same_reviewer_cannot_supply_both_approvals(tmp_path: Path) -> None:
     assert "different reviewer" in response.body
 
 
+@pytest.mark.parametrize(
+    "second_spelling",
+    ["CASEY", "casey", "Casey ", " Casey"],
+    ids=["all-caps", "all-lower", "trailing-space", "leading-space"],
+)
+def test_a_case_or_spacing_variant_of_one_reviewer_cannot_supply_both_approvals(
+    tmp_path: Path, second_spelling: str
+) -> None:
+    """#97: the two-person gate must not be satisfiable by one person typing
+    their own name differently the second time. Every variant here reads as
+    the same identity as "Casey" under `_reviewer_identity_key` and must
+    overwrite, not add to, the existing entry."""
+    _, _, session = _session(tmp_path, require_second=True)
+    session.record(0, APPROVED, reviewer="Casey")
+    session.record(0, APPROVED, reviewer=second_spelling)
+    assert session.verdict(0) == AWAITING_SECOND
+    assert len(session.audit(0)) == 1
+    assert len(session.approvers(0)) == 1
+
+
+def test_a_doubled_internal_space_is_the_same_reviewer(tmp_path: Path) -> None:
+    """The exact second reproduction from the issue: 'Jane Doe' and
+    'Jane  Doe' (doubled internal space) is one person, not two."""
+    _, _, session = _session(tmp_path, require_second=True)
+    session.record(0, APPROVED, reviewer="Jane Doe")
+    session.record(0, APPROVED, reviewer="Jane  Doe")
+    assert session.verdict(0) == AWAITING_SECOND
+    assert len(session.audit(0)) == 1
+    assert len(session.approvers(0)) == 1
+
+
+def test_a_genuinely_different_reviewer_still_completes_the_approval_across_spellings(
+    tmp_path: Path,
+) -> None:
+    """The fix must not be so aggressive that it merges two different real
+    reviewers. 'Jordan' and 'Casey' share no normalized identity, so the
+    second approval still completes the pair, exactly as before #97."""
+    _, _, session = _session(tmp_path, require_second=True)
+    session.record(0, APPROVED, reviewer="Casey")
+    session.record(0, APPROVED, reviewer="Jordan")
+    assert session.verdict(0) == APPROVED
+    assert len(session.approvers(0)) == 2
+
+
+def test_next_undecided_recognizes_its_own_approval_under_a_different_spelling(
+    tmp_path: Path,
+) -> None:
+    """A reviewer resuming under a different capitalization than they used
+    the first time must not be shown their own already-approved pair as
+    still outstanding (the read-side companion to #97's write-side fix)."""
+    _, _, session = _session(tmp_path, reviewer="Casey", require_second=True)
+    session.record(0, APPROVED, reviewer="Casey")
+    assert session.verdict(0) == AWAITING_SECOND
+    # Before resuming, pair 0 is correctly this same session's own outstanding
+    # slot: it was never open for Casey to "find" again mid-session.
+    assert session.next_undecided(after=-1) != 0
+
+    resumed = ReviewSession(
+        session._result,
+        session._fields,
+        session._decisions_path,
+        reviewer="casey",
+        require_second_reviewer=True,
+    )
+    assert resumed.verdict(0) == AWAITING_SECOND
+    # The bug: raw string comparison would say "casey" != "Casey" and offer
+    # pair 0 back to the same person as if it were still open for them.
+    assert resumed.next_undecided(after=-1) != 0
+
+
 def test_a_rejection_rejects_immediately_in_two_person_mode(tmp_path: Path) -> None:
     # Disagreement never merges: one rejection outweighs any approvals.
     _, _, session = _session(tmp_path, require_second=True)
