@@ -209,9 +209,10 @@ automated remediation pass does not take on this maintainer's behalf."
   policy, force-pushes and deletion blocked, linear history required, and no
   bypass actors. Those three check contexts match the job names in
   `.github/workflows/ci.yml`.
-- `docs/rulesets/README.md` records that no ruleset exists on the live repo
-  (checked read-only on 2026-07-05), gives the apply command, and lists the
-  follow-up edits.
+- `docs/rulesets/README.md` records that a live `protect-main` ruleset has
+  been active since 2026-07-09 (verified read-only 2026-08-07), lists its
+  delta from the committed desired state, and gives the reconciliation
+  command.
 - docs/adr/0008-solo-maintainer-review-waiver.md is the honesty half of the
   ruleset decision: zero required approvals is a named waiver with
   compensating controls, not an oversight.
@@ -219,6 +220,14 @@ automated remediation pass does not take on this maintainer's behalf."
   `version = "0.7.0"` as of this writing. No `v*` tag exists yet.
 
 **Steps, part A: apply the ruleset.**
+
+> **Status (2026-08-07): partially done.** A `protect-main` ruleset
+> (id 18752844) has been active since 2026-07-09. It blocks force-push and
+> deletion and requires nine check contexts, but omits the committed
+> profile's pull-request, linear-history, and strict up-to-date rules. The
+> remaining part A work is the reconciliation described in
+> `docs/rulesets/README.md`; the step 4 recording edits for the applied
+> state were made by the 2026-08-07 conformance pass.
 
 1. Re-read `docs/rulesets/main.json` and confirm the three required check
    contexts still match the job names in `ci.yml`.

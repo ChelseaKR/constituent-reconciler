@@ -188,8 +188,10 @@ engineering deliverables landed in v0.6 and the web review UI in v0.7. The
 supply-chain implementation has also landed: SBOM generation, keyless build
 provenance, SHA-pinned Actions, and security scans. What remains for the 1.0 tag
 is adoption evidence, the demonstrated-stability window, human
-accessibility/i18n evidence, and exercising the release workflow and committed
-ruleset in live repository settings. The tag is deliberately withheld until
+accessibility/i18n evidence, and exercising the release workflow with a first
+`v*` tag; a live `protect-main` ruleset has been active since 2026-07-09,
+with its remaining delta from the committed profile recorded in
+docs/rulesets/README.md. The tag is deliberately withheld until
 those are real: 1.0 means a stability promise, and a promise that depends on
 adoption cannot be made by a release script.
 
@@ -251,9 +253,11 @@ extraction, and disaggregated bias reports and fails on any committed-report
 drift. The branch-coverage gate is the documented 85% target.
 Secret/dependency scans, Semgrep, CodeQL, zizmor, Trivy, and the automated axe
 audit run in CI; the release workflow generates a CycloneDX SBOM and keyless
-build-provenance attestation. The committed repository ruleset still needs the
-matching live-repository settings action, so job presence and required-check
-enforcement are reported separately. Matching/extraction precision and the
+build-provenance attestation. A live `protect-main` ruleset has required the
+CI check contexts on merges to `main` since 2026-07-09; its remaining delta
+from the committed profile (no pull-request or linear-history rule live yet,
+non-strict up-to-date policy) is recorded in docs/rulesets/README.md.
+Matching/extraction precision and the
 risk-class rows remain REVIEW metrics rather than pass/fail gates; the report
 therefore preserves the measured transliterated-name and non-Western-order
 misses instead of tuning the fixture until it is green.

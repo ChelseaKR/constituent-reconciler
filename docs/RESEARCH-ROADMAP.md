@@ -120,7 +120,7 @@ Priority: **P0** now, **P1** next, **P2** soon, **P3** opportunistic. Effort:
 | --- | --- | --- | --- | --- | --- |
 | R1 | **Run the axe audit and screen-reader walkthrough, and add EN/ES review-UI copy** so the 1.0 accessibility gate can close. Automated axe is enforced; the real-assistive-technology walkthrough, reviewed Spanish copy, and ACR remain human gates | A2, A4, D1, C2 | P0 | M | `docs/ROADMAP.md` v0.7; `RESPONSIBLE-TECH-AUDITS.md`; `docs/reviews/SCREEN-READER-WALKTHROUGH.md`. **[corroborates ROADMAP v0.7 / audits]** |
 | R2 | **Wire RFC 3161 trusted timestamping to a real TSA** so provenance timestamps are independently anchored. ✅ Implemented 2026-07-02: `Rfc3161Authority` with fail-closed response verification, selected by `[provenance] tsa_url` or `--tsa-url`; the local clock stays the default, and the DV pack refuses the network authority | E1, C2, C1, F2 | P1 | M | `docs/ROADMAP.md` v0.2; CHANGELOG 0.5 "not yet". **[corroborates ROADMAP v0.2]** |
-| R3 | **Ship the supply-chain hardening**: SBOM, Sigstore-signed releases, SHA-pinned actions, OIDC, secret scanning. ✅ Implementation landed: pinned actions, gitleaks/TruffleHog, Semgrep/CodeQL/zizmor, Trivy, and a release workflow with CycloneDX plus keyless provenance. Operational evidence remains blocked on the first `v*` tag, and the committed ruleset still needs applying to live repository settings | C1, F1, E1 | P1 | M | README Standards; `RESPONSIBLE-TECH-AUDITS.md` security. **[corroborates ROADMAP / DPG note]** |
+| R3 | **Ship the supply-chain hardening**: SBOM, Sigstore-signed releases, SHA-pinned actions, OIDC, secret scanning. ✅ Implementation landed: pinned actions, gitleaks/TruffleHog, Semgrep/CodeQL/zizmor, Trivy, and a release workflow with CycloneDX plus keyless provenance. Operational evidence remains blocked on the first `v*` tag; a live `protect-main` ruleset has been active since 2026-07-09 (parity delta in `docs/rulesets/README.md`) | C1, F1, E1 | P1 | M | README Standards; `RESPONSIBLE-TECH-AUDITS.md` security. **[corroborates ROADMAP / DPG note]** |
 | R4 | **Commit the threat model** for the untrusted-PDF/scan parse path. ✅ Implemented 2026-07-02, see `docs/THREAT-MODEL.md` | C1, F1 | P1 | S | `RESPONSIBLE-TECH-AUDITS.md` security TODO. **[corroborates audits]** |
 | R5 | **Measure and report bias by name class** (transliterated, hyphenated, non-Western order) **and address class** (rural/informal) on the eval fixtures, with mitigations. ✅ Implemented 2026-07-12: explicit segment scoring, seeded `examples/bias-demo/`, CI-regenerated `docs/audits/bias-report.md`, and measured gaps retained in the responsible-tech audit | C2, F1, D2, A2 | P1 | M | `RESPONSIBLE-TECH-AUDITS.md`; `DPG-CONFORMANCE.md` indicator 9 residual risk. **[corroborates audits / DPG note]** |
 | R6 | **Fill the metrics-ledger targets** (false-merge threshold, coverage floors, kappa drift gate). ✅ Implemented; the disaggregated risk-class REVIEW metric was added 2026-07-12 | F2, F1, E1, B1 | P1 | S | `docs/ROADMAP.md` metrics ledger. **[corroborates ROADMAP]** |
@@ -158,8 +158,10 @@ and a defensible 1.0, plus the breadth items that come after.
   for either human review.
 - **R7:** record the live CiviCRM demo. The connector behavior is implemented;
   this evidence requires an authorized running CiviCRM instance.
-- **R3:** exercise the release workflow on the first real `v*` tag and apply the
-  committed ruleset to live repository settings.
+- **R3:** exercise the release workflow on the first real `v*` tag. The live
+  `protect-main` ruleset was applied 2026-07-09; closing its parity delta with
+  the committed profile (docs/rulesets/README.md) is the remaining settings
+  action.
 - **E8:** run the adoption kit with more than one real organization. The kit is
   shipped; adoption is external evidence, not code.
 

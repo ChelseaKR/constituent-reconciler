@@ -64,3 +64,18 @@ gap, that:
 - Enabling the ruleset itself is a live GitHub repository-settings action and
   is out of scope for an automated remediation pass; see the ruleset file's
   header comment for the exact command the maintainer runs to apply it.
+
+## Follow-up note (2026-08-07, append-only)
+
+A live branch ruleset named `protect-main` has been active on the repository
+since 2026-07-09 (verified read-only via
+`gh api repos/ChelseaKR/constituent-reconciler/rulesets`; enforcement
+`active`, no bypass actors). The waiver above is unchanged: the live ruleset
+requires nine status-check contexts and no human review, consistent with
+this ADR. The live shape is not yet identical to `docs/rulesets/main.json`:
+it omits the committed `pull_request` and `required_linear_history` rules
+and the strict up-to-date policy, while requiring six more check contexts
+than the three the committed file names. The parity delta and the
+reconciliation command are recorded in `docs/rulesets/README.md`. This note
+records the applied state per the append-only convention; the Decision text
+above is unedited.
