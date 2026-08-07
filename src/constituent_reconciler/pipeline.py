@@ -18,7 +18,15 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from constituent_reconciler import consent, decisions, household, matching, stage_cache, suppression
+from constituent_reconciler import (
+    consent,
+    decisions,
+    household,
+    matching,
+    quality,
+    stage_cache,
+    suppression,
+)
 from constituent_reconciler.config import Recipe
 from constituent_reconciler.connectors import get_factory
 from constituent_reconciler.connectors.airtable import Transport as AirtableTransport
@@ -44,6 +52,7 @@ from constituent_reconciler.models import (
 from constituent_reconciler.policy import PolicyViolation
 from constituent_reconciler.progress import NULL_SINK, ProgressEvent, ProgressSink
 from constituent_reconciler.provenance import ProvenanceLog, Rfc3161Authority, TimestampAuthority
+from constituent_reconciler.quality import SourceQuality
 from constituent_reconciler.suppression import AggregateSummary, ComparableReport
 
 
@@ -1124,6 +1133,15 @@ class ExportSummary:
     comparable_path: Path | None = None
     household_suggestions: tuple[household.HouseholdSuggestion, ...] = ()
     household_path: Path | None = None
+    # Per-source completeness, normalization failures, consent coverage, and
+    # duplicate density (quality.py). Unlike aggregate/comparable, this is
+    # computed on every run, not gated by recipe.aggregate_export: it answers
+    # "which of my intake channels is bad", a question every operator has,
+    # not only the DV pack's external-sharing posture. Suppression is still
+    # applied under that posture (suppress=recipe.aggregate_export), because
+    # a small source's per-field counts identify the same people an aggregate
+    # summary would (issue #96).
+    data_quality: tuple[SourceQuality, ...] = ()
 
     def counts(self) -> dict[str, int]:
         out: dict[str, int] = {}
@@ -1333,6 +1351,15 @@ def export(
         recipe, exportable, out_dir=out_dir, dry_run=dry_run
     )
 
+    # Computed on every run, unlike aggregate/comparable: "which of my intake
+    # channels is bad" is an operator question independent of the DV pack's
+    # external-sharing posture. Suppressed under that posture (issue #96),
+    # because a small source's per-field counts identify the same people an
+    # aggregate summary would.
+    data_quality = quality.source_quality(
+        result, suppress=recipe.aggregate_export, threshold=recipe.suppression_threshold
+    )
+
     return ExportSummary(
         write_results=tuple(write_results),
         withheld=tuple(withheld),
@@ -1349,6 +1376,7 @@ def export(
         comparable_path=comparable_path,
         household_suggestions=household_suggestions,
         household_path=household_path,
+        data_quality=data_quality,
     )
 
 
