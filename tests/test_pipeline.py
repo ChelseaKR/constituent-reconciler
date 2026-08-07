@@ -8,12 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from constituent_reconciler import matching, pipeline
+from constituent_reconciler import matching, pipeline, quality
 from constituent_reconciler.config import HouseholdConfig, OutputConfig, Recipe, load_recipe
 from constituent_reconciler.consent import partition_by_consent
 from constituent_reconciler.evaluate import evaluate
 from constituent_reconciler.models import Consent, Correction, GoldenRecord, Record
 from constituent_reconciler.provenance import verify_log
+from constituent_reconciler.suppression import SUPPRESSED
 from tests.conftest import FakeAirtableTransport
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "intake-demo"
@@ -144,6 +145,65 @@ def test_export_writes_csv_review_queue_and_provenance(tmp_path: Path) -> None:
         golden = result_by_id[entry["record_id"]]
         assert entry["field_sources"] == golden.field_sources
         assert all(source in entry["members"] for source in entry["field_sources"].values())
+
+
+def test_data_quality_is_wired_into_export_and_the_run_report(tmp_path: Path) -> None:
+    """Issue #96: quality.source_quality() had exactly one caller, its own
+    test, and render_source_quality() had none. This proves the feature is
+    actually reachable from a run: present on ExportSummary, in run_report.json,
+    with one row per intake source and the CLI's own field-completeness renderer
+    able to describe it without raising."""
+    recipe = load_recipe(EXAMPLES / "recipe.toml")
+    result = pipeline.run(recipe)
+    summary = pipeline.export(result, recipe, out_dir=tmp_path)
+
+    assert summary.data_quality
+    sources = {row.source for row in summary.data_quality}
+    assert sources == {"existing", "incoming"}
+    for row in summary.data_quality:
+        assert isinstance(row.records, int) and row.records > 0
+
+    from constituent_reconciler.cli import _write_run_report
+
+    report_path = _write_run_report(result, tmp_path, data_quality=summary.data_quality)
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    assert {row["source"] for row in payload["data_quality"]} == {"existing", "incoming"}
+
+    from constituent_reconciler.report import render_source_quality
+
+    rendered = render_source_quality(summary.data_quality)
+    assert "existing" in rendered and "incoming" in rendered
+
+
+def test_data_quality_is_suppressed_under_the_dv_pack(tmp_path: Path) -> None:
+    """The DV pack's small-cell posture must reach this artifact the same way
+    it reaches the aggregate summary (quality.py's own module docstring
+    describes exactly this, but nothing enforced it before #96)."""
+    recipe = load_recipe(EXAMPLES / "recipe-dv.toml")
+    assert recipe.aggregate_export is True
+    result = pipeline.run(recipe)
+    summary = pipeline.export(result, recipe, out_dir=tmp_path)
+
+    assert summary.data_quality
+    expected = quality.source_quality(
+        result, suppress=recipe.aggregate_export, threshold=recipe.suppression_threshold
+    )
+    assert summary.data_quality == expected
+    # The pack's posture must actually be threaded through, not defaulted:
+    # confirm this differs from what an unsuppressed call would have produced,
+    # or that every measurement was already safe to publish unsuppressed
+    # (both are legitimate depending on the fixture's numbers; what is not
+    # legitimate is passing suppress=False regardless of the pack).
+    unsuppressed = quality.source_quality(result, suppress=False)
+    if unsuppressed != expected:
+        assert any(
+            SUPPRESSED in row.completeness.values()
+            or SUPPRESSED in row.normalization_failures.values()
+            or row.consent_coverage == SUPPRESSED
+            or row.duplicate_density == SUPPRESSED
+            or row.records == SUPPRESSED
+            for row in expected
+        )
 
 
 def test_comparable_export_off_by_default_produces_no_report(tmp_path: Path) -> None:

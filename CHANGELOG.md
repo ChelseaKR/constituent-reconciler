@@ -7,6 +7,19 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Fixed
+- **The per-source data-quality report is now reachable from `reconcile run`
+  (#96).** `quality.py` (field completeness, normalization failure rates,
+  consent coverage, duplicate density, small-cell suppressed under the DV
+  pack) and its renderer in `report.py` were complete and 100% unit-tested,
+  but `source_quality()`'s only caller was its own test and
+  `render_source_quality()` had no caller at all: no command produced this
+  section and no artifact carried it. `ExportSummary` now carries
+  `data_quality`, computed on every run (not gated by `recipe.
+  aggregate_export`, since "which of my intake channels is bad" is an
+  operator question independent of the DV pack's external-sharing posture),
+  with suppression applied under that posture the same way the aggregate
+  summary's is. Printed in the CLI's export summary and written into
+  `run_report.json`'s new `data_quality` array.
 - **Release authority now starts from reviewed `main`.** A maintainer supplies
   an existing SSH-signed stable tag; the read-only verifier checks signer,
   main ancestry, version, changelog, and the full gate before exact artifacts

@@ -18,6 +18,7 @@ argparse only, so the package has no runtime dependency beyond the matcher.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import sys
 from collections.abc import Sequence
@@ -42,10 +43,12 @@ from constituent_reconciler.pipeline import ExportSummary
 from constituent_reconciler.policy import PolicyViolation
 from constituent_reconciler.progress import ConsoleProgressRenderer
 from constituent_reconciler.provenance import ProvenanceLog, verify_log
+from constituent_reconciler.quality import SourceQuality
 from constituent_reconciler.report import (
     render_eval_markdown,
     render_extraction_markdown,
     render_run_summary,
+    render_source_quality,
 )
 from constituent_reconciler.schema import REPORT_SCHEMA_VERSION
 from constituent_reconciler.suppression import render_comparable, render_summary
@@ -150,9 +153,14 @@ def _print_export(recipe: Recipe, summary: ExportSummary, *, dry_run: bool) -> N
             print(f"  comparable:   {summary.comparable_path}")
         print()
         print(render_comparable(summary.comparable))
+    if summary.data_quality:
+        print()
+        print(render_source_quality(summary.data_quality))
 
 
-def _write_run_report(result: RunResult, out_dir: Path) -> Path:
+def _write_run_report(
+    result: RunResult, out_dir: Path, *, data_quality: Sequence[SourceQuality] = ()
+) -> Path:
     ingest = result.ingest
     path = out_dir / "run_report.json"
     payload = {
@@ -166,6 +174,11 @@ def _write_run_report(result: RunResult, out_dir: Path) -> Path:
             "pages_dropped": ingest.pages_dropped,
             "normalization_failures": ingest.normalization_failures,
         },
+        # Per-source completeness, normalization failures, consent coverage,
+        # and duplicate density (quality.py), suppressed under the active
+        # policy's small-cell rules exactly as the aggregate summary is
+        # (issue #96). Empty when the run had no sources to measure.
+        "data_quality": [dataclasses.asdict(source) for source in data_quality],
     }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path
@@ -207,7 +220,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         progress.close()
     _print_export(recipe, summary, dry_run=args.dry_run)
     if not args.dry_run:
-        print(f"  run report:   {_write_run_report(result, out_dir)}")
+        report_path = _write_run_report(result, out_dir, data_quality=summary.data_quality)
+        print(f"  run report:   {report_path}")
     return 0
 
 
