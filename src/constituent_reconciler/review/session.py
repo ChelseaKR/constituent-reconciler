@@ -232,6 +232,23 @@ def _clean_reviewer(name: str) -> str:
     return cleaned
 
 
+def _reviewer_identity_key(name: str) -> str:
+    """A comparison key for "is this the same reviewer", never for display.
+
+    Under the DV pack's two-person gate (#97), a case or internal-spacing
+    variant of one name must not count as a second, different reviewer:
+    ('Jane Doe', 'jane doe') and ('Jane Doe', 'Jane  Doe') are one person
+    resuming a session, not two people concurring. Case-folds and collapses
+    internal whitespace; deliberately not applied to :func:`_clean_reviewer`'s
+    stored value, which keeps a reviewer's name exactly as they entered it
+    for the audit trail. Two different real people who happen to share a
+    legal name are out of scope, same as for any other name-based identity
+    check in this codebase.
+    """
+
+    return " ".join(name.casefold().split())
+
+
 # The reviewer name attached to verdicts resumed from a version-1 decisions
 # file, which carried no attribution. Under two-person mode such an approval
 # counts as one name, so a real second reviewer is still required, fail-closed.
@@ -593,11 +610,26 @@ class ReviewSession:
         return tuple(self._entries.get(index, ()))
 
     def approvers(self, index: int) -> frozenset[str]:
-        """The distinct reviewer names that currently approve the pair."""
+        """The distinct reviewer identities that currently approve the pair.
 
-        return frozenset(
-            entry.reviewer for entry in self._entries.get(index, ()) if entry.verdict == APPROVED
-        )
+        Distinctness is judged by :func:`_reviewer_identity_key`, not raw
+        string equality (#97), so a case or spacing variant of one name never
+        counts as a second reviewer. :meth:`record` already prevents a
+        duplicate identity from being written going forward; this dedup is
+        the same guarantee applied at read time, so a pair decided under the
+        pre-fix code (a stored file that already carries both 'Jane Doe' and
+        'jane doe' as separate entries) is not grandfathered into a false
+        two-person approval. The set returned carries each identity's most
+        recently recorded spelling, which is what a reviewer sees today, not
+        necessarily what they typed the first time.
+        """
+
+        by_identity: dict[str, str] = {}
+        for entry in self._entries.get(index, ()):
+            if entry.verdict != APPROVED:
+                continue
+            by_identity[_reviewer_identity_key(entry.reviewer)] = entry.reviewer
+        return frozenset(by_identity.values())
 
     def counts(self) -> Counts:
         states = [self.verdict(index) for index in range(len(self._pairs))]
@@ -626,15 +658,21 @@ class ReviewSession:
         Wraps once to the start so a reviewer who jumps around still lands on an
         outstanding pair. A pair is open when it has no effective verdict, or
         when it awaits a second reviewer and this session's reviewer is not the
-        one who already approved it. Returns None when nothing is left.
+        one who already approved it, compared by :func:`_reviewer_identity_key`
+        so a name typed with different capitalization than last time still
+        recognizes its own earlier approval (#97). Returns None when nothing
+        is left.
         """
 
         order = list(range(after + 1, len(self._pairs))) + list(range(0, after + 1))
+        own_key = _reviewer_identity_key(self.reviewer)
         for index in order:
             state = self.verdict(index)
             if state is None:
                 return index
-            if state == AWAITING_SECOND and self.reviewer not in self.approvers(index):
+            if state == AWAITING_SECOND and own_key not in {
+                _reviewer_identity_key(name) for name in self.approvers(index)
+            }:
                 return index
         return None
 
@@ -796,9 +834,14 @@ class ReviewSession:
         omitted) with a UTC timestamp. A reviewer who records on a pair they
         already decided overwrites their own entry; a different reviewer's
         entry is appended, which is how the second approval of two-person mode
-        arrives. Writing through on every decision means a reviewer who closes
-        the browser keeps their progress. An unknown verdict or a blank
-        reviewer raises rather than being stored, fail-closed.
+        arrives. "Already decided" is judged by :func:`_reviewer_identity_key`,
+        not raw string equality (#97): a case or spacing variant of a name that
+        already has an entry on this pair overwrites it rather than being
+        appended as a second, distinct approval, so the same person recording
+        twice under a different capitalization cannot satisfy the two-person
+        gate on their own. Writing through on every decision means a reviewer
+        who closes the browser keeps their progress. An unknown verdict or a
+        blank reviewer raises rather than being stored, fail-closed.
         """
 
         if not (0 <= index < len(self._pairs)):
@@ -829,7 +872,10 @@ class ReviewSession:
             verdict=verdict,
             decided_at=datetime.now(UTC).isoformat(timespec="seconds"),
         )
-        entries = [e for e in self._entries.get(index, []) if e.reviewer != name]
+        key = _reviewer_identity_key(name)
+        entries = [
+            e for e in self._entries.get(index, []) if _reviewer_identity_key(e.reviewer) != key
+        ]
         entries.append(entry)
         self._entries[index] = entries
         self.save()
