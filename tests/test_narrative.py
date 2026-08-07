@@ -26,6 +26,7 @@ from constituent_reconciler.models import (
     RunResult,
 )
 from constituent_reconciler.narrative import render_narrative
+from constituent_reconciler.suppression import SUPPRESSED
 
 RESULT_SUMMARY: dict[str, object] = {
     "schema_version": 1,
@@ -91,6 +92,29 @@ def test_suppressed_cells_render_as_labels_not_numbers() -> None:
     es = render_narrative(RESULT_SUMMARY, AGGREGATE, lang="es")
     assert "fusionados suprimido" in es
     assert "registros únicos 18" in es
+
+
+def test_a_suppressed_total_renders_as_a_label_not_zero() -> None:
+    """The producer side (suppression.py) can now emit ``"total_resolved":
+    "suppressed"``. The consumer must render that as a labeled withholding,
+    never fall back to 0 (0 is a claim that no records resolved, which would
+    be false and worse than the leak this closes)."""
+    aggregate = dict(
+        AGGREGATE,
+        total_resolved=SUPPRESSED,
+        breakdowns={
+            "resolution": {"merged": "suppressed", "singleton": 0},
+        },
+    )
+    en = render_narrative(RESULT_SUMMARY, aggregate, lang="en")
+    assert "Resolved records in the aggregate: **suppressed**" in en
+    assert "Resolved records in the aggregate: **0**" not in en
+    assert "recovered by subtraction" in en
+
+    es = render_narrative(RESULT_SUMMARY, aggregate, lang="es")
+    assert "Registros resueltos en el agregado: **suprimido**" in es
+    assert "Registros resueltos en el agregado: **0**" not in es
+    assert "recuperar por resta" in es
 
 
 def test_no_aggregate_omits_the_aggregate_section() -> None:
