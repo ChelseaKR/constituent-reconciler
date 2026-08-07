@@ -13,6 +13,22 @@ are suppressed; when only one cell falls below the threshold, the next-smallest
 positive cell is suppressed as well. This is the standard secondary-suppression
 step. It does not defend against cross-tabulation attacks that correlate several
 breakdowns; that is out of scope and is stated as a limitation in the docs.
+
+**The published total is covered by the same discipline (issue #94).** Every
+breakdown here is an exhaustive partition of the resolved-record set: every
+record lands in exactly one of its categories, so a breakdown's cells always
+sum to the report's total. Complementary suppression protects a breakdown
+*from itself*. It guarantees at least two cells are hidden whenever any are, so
+the hidden ones can't be solved for from the *other cells in that breakdown*.
+It cannot protect against the total published *alongside* the breakdown,
+because `suppress_cells`'s victim search is correctly barred from choosing a
+true zero as the complementary victim (a zero must never be marked hidden; it
+reveals no one, and marking it suppressed would itself be a lie). So when every
+other cell in a breakdown is a true zero, there is no valid second cell to hide,
+and exactly one cell, never two, ends up suppressed. In that specific shape,
+`total - (every visible cell)` equals the one hidden cell exactly. `_safe_total`
+below is what closes that: whenever any breakdown ends up with exactly one
+suppressed cell, the report's total is suppressed too, not just the cell.
 """
 
 from __future__ import annotations
@@ -86,8 +102,42 @@ def suppress_cells(
         if candidates:
             _, victim = min(candidates)
             result[victim] = SUPPRESSED
+        # else: nothing left to hide with (every other cell is a true zero, and a
+        # zero must never be the victim). This breakdown ends with exactly one
+        # suppressed cell, the shape `_safe_total` exists to catch, below.
 
     return result
+
+
+def _exactly_one_cell_suppressed(breakdown: Breakdown) -> bool:
+    """Whether ``breakdown`` ended with a single hidden cell.
+
+    Only possible when every *other* cell was a true zero: :func:`suppress_cells`
+    never chooses one as the complementary victim, on purpose, so it has nothing
+    to pair the lone suppressed cell with. In that shape the hidden cell equals
+    this breakdown's share of the report total minus its own visible cells, so
+    the report's *total*, not this breakdown, is the thing that still needs to
+    be hidden.
+    """
+    return sum(1 for value in breakdown.cells.values() if value == SUPPRESSED) == 1
+
+
+def _safe_total(raw_total: int, breakdowns: Sequence[Breakdown]) -> int | str:
+    """The report total, suppressed if publishing it raw would hand back a
+    breakdown's one hidden cell.
+
+    Every breakdown here partitions the same resolved-record set, so each one's
+    cells sum to ``raw_total``. If any breakdown ends up with exactly one
+    suppressed cell, that cell equals ``raw_total`` minus its visible cells, an
+    exact recovery, not merely a narrowed range, so publishing ``raw_total`` at
+    all would undo that breakdown's own suppression. Two or more suppressed
+    cells in a breakdown are not solvable this way (a single equation, multiple
+    unknowns), which is the existing, documented complementary-suppression
+    guarantee; this only adds the one case that guarantee cannot reach.
+    """
+    if any(_exactly_one_cell_suppressed(breakdown) for breakdown in breakdowns):
+        return SUPPRESSED
+    return raw_total
 
 
 def _consent_counts(records: Iterable[GoldenRecord]) -> dict[str, int]:
@@ -110,12 +160,14 @@ def _resolution_counts(records: Iterable[GoldenRecord]) -> dict[str, int]:
 class AggregateSummary:
     """Non-identifying aggregate over resolved records, suppression applied.
 
-    ``total`` is the count of resolved records. ``breakdowns`` carry the
+    ``total`` is the count of resolved records, or the string ``"suppressed"``
+    when publishing the real count would hand back a breakdown's one hidden
+    cell by subtraction (see :func:`_safe_total`). ``breakdowns`` carry the
     suppressed category counts. No field value, id, or member list appears here;
     the summary is the only artifact the DV pack considers shareable.
     """
 
-    total: int
+    total: int | str
     breakdowns: tuple[Breakdown, ...]
 
 
@@ -133,7 +185,7 @@ def aggregate_summary(
             "resolution", suppress_cells(_resolution_counts(record_list), threshold=threshold)
         ),
     )
-    return AggregateSummary(total=len(record_list), breakdowns=breakdowns)
+    return AggregateSummary(total=_safe_total(len(record_list), breakdowns), breakdowns=breakdowns)
 
 
 def render_summary(summary: AggregateSummary) -> str:
@@ -143,6 +195,11 @@ def render_summary(summary: AggregateSummary) -> str:
         "aggregate summary (non-identifying, small cells suppressed):",
         f"  resolved records: {summary.total}",
     ]
+    if summary.total == SUPPRESSED:
+        lines.append(
+            "    (the total itself is suppressed: publishing it would let one of the "
+            "hidden cells below be recovered by subtraction)"
+        )
     for breakdown in summary.breakdowns:
         cells = ", ".join(f"{k}={v}" for k, v in breakdown.cells.items())
         lines.append(f"  {breakdown.name}: {cells}")
@@ -187,14 +244,16 @@ class ComparableReport:
     victim-service provider (barred from entering client data into a shared
     database such as HMIS) hands its funders instead. It carries only report
     metadata and suppressed category counts — never a record id, a member list,
-    or a field value of any individual.
+    or a field value of any individual. ``total`` is the string
+    ``"suppressed"``, not the raw count, when publishing it would hand back a
+    breakdown's one hidden cell by subtraction (see :func:`_safe_total`).
     """
 
     profile: str
     period: str
     generated_at: str
     threshold: int
-    total: int
+    total: int | str
     breakdowns: tuple[Breakdown, ...]
 
 
@@ -231,13 +290,14 @@ def comparable_summary(
                 suppress_cells(_field_counts(record_list, field_name), threshold=threshold),
             )
         )
+    frozen_breakdowns = tuple(breakdowns)
     return ComparableReport(
         profile=COMPARABLE_PROFILE,
         period=period or "unspecified",
         generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
         threshold=threshold,
-        total=len(record_list),
-        breakdowns=tuple(breakdowns),
+        total=_safe_total(len(record_list), frozen_breakdowns),
+        breakdowns=frozen_breakdowns,
     )
 
 
@@ -265,7 +325,9 @@ def comparable_payload(report: ComparableReport) -> dict[str, object]:
             "Non-identifying aggregate in the comparable-database posture. Small "
             f"cells suppressed (counts 1-{report.threshold - 1}), modeled on the "
             "U.S. CMS Cell Size Suppression Policy; complementary suppression "
-            "applied within every breakdown; true zeros preserved. Not a "
+            "applied within every breakdown; true zeros preserved. total_resolved "
+            'is itself replaced with "suppressed" whenever publishing the real '
+            "count would let a hidden cell be recovered by subtraction. Not a "
             "substitute for review against your own obligations."
         ),
     }
@@ -280,6 +342,11 @@ def render_comparable(report: ComparableReport) -> str:
         f"  period: {report.period}",
         f"  resolved records: {report.total}",
     ]
+    if report.total == SUPPRESSED:
+        lines.append(
+            "    (the total itself is suppressed: publishing it would let one of the "
+            "hidden cells below be recovered by subtraction)"
+        )
     for breakdown in report.breakdowns:
         cells = ", ".join(f"{k}={v}" for k, v in breakdown.cells.items())
         lines.append(f"  {breakdown.name}: {cells}")
