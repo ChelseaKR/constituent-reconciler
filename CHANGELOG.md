@@ -318,6 +318,21 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   `reconcile apply` or a connector.
 
 ### Changed
+- **Docs now record the live branch ruleset and current gates (standards
+  conformance pass, 2026-08-07).** A `protect-main` ruleset has been active
+  on the repository since 2026-07-09, but the README, ROADMAP,
+  RESEARCH-ROADMAP, the external-gates runbook, and `docs/rulesets/README.md`
+  still said no live ruleset existed. They now record the applied state and
+  its remaining delta from the committed desired-state profile (no
+  pull-request or linear-history rule live yet, non-strict up-to-date
+  policy, six more required check contexts), with a dated follow-up note
+  appended to ADR 0008 per its append-only convention. The README Standards
+  Conformance table gains the Incident Response and Data Governance rows the
+  Documentation Standard's thirteen-standard table requires, SECURITY.md's
+  threat surface catches up with shipped PDF/OCR extraction and the
+  sandboxed parse default, and a stale coverage-floor comment in `ci.yml`
+  now matches the enforced 85%. No behavior changes; no test or privacy
+  gate is touched.
 - **Field-level lineage and a named survivorship fill policy (FIX-07)**
   (`models.py`, `decisions.py`, `config.py`, `pipeline.py`, `provenance.py`,
   `schema.py`). Every golden record now carries `field_sources`, mapping each

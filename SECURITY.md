@@ -24,12 +24,13 @@ backport guarantee until 1.0.
 
 ## Threat surface
 
-The tool reads untrusted files (CSVs today; PDFs and scans once extraction
-lands) and writes to a case system. The concerns it takes seriously:
+The tool reads untrusted files (CSVs, intake PDFs and scans, plain-text and
+`.eml` bodies) and writes to a case system. The concerns it takes seriously:
 
 - **Parsing untrusted input.** Malformed CSVs must fail with a clear error, not
-  a crash that leaks a stack trace with data in it. Document parsing, when it
-  arrives, runs in a hardened path.
+  a crash that leaks a stack trace with data in it. PDF parsing runs in a
+  resource-limited child process by default (containment, not a full syscall
+  sandbox; see [`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md)).
 - **Consent enforcement.** Under a consent-required policy, a record without
   granted consent must never appear in an export or in logs. This is enforced by
   tests, not by review alone.
