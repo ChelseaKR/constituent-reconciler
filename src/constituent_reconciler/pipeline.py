@@ -963,7 +963,10 @@ def _write_aggregate_summary(summary: AggregateSummary, out_dir: Path, *, fill_p
         "note": (
             "Non-identifying aggregate. Small cells suppressed (counts 1-10), "
             "modeled on the U.S. CMS Cell Size Suppression Policy; true zeros "
-            "preserved. Not a substitute for review against your own obligations."
+            'preserved. total_resolved is itself replaced with "suppressed" '
+            "whenever publishing the real count would let a hidden cell be "
+            "recovered by subtraction. Not a substitute for review against your "
+            "own obligations."
         ),
     }
     summary_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")

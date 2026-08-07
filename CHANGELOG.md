@@ -19,6 +19,18 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   still shows exactly what each reviewer typed. `next_undecided`'s own-pair
   check is fixed the same way, so a reviewer resuming under a different
   capitalization is not shown their own already-approved pair as open.
+- **The published aggregate total can no longer hand back a suppressed cell by
+  subtraction (#94).** Complementary suppression already guaranteed that any
+  breakdown with a hidden cell has at least two hidden cells, so the hidden
+  ones cannot be solved for from each other. It could not protect against the
+  total published alongside the breakdown: when every other cell in a
+  breakdown is a true zero, there is no valid second cell to suppress (a true
+  zero must never be marked hidden), so exactly one cell stays suppressed, and
+  the total minus every visible cell equals it exactly. `AggregateSummary.total`
+  and `ComparableReport.total` (`aggregate_summary.json`, `comparable_report.json`,
+  the plain-text run summary, and the EN/ES narrative report) are now the
+  string `"suppressed"` in that case, not the raw count. Exhaustive test
+  covers every count from 1 through the threshold against a true-zero sibling.
 - **Release authority now starts from reviewed `main`.** A maintainer supplies
   an existing SSH-signed stable tag; the read-only verifier checks signer,
   main ancestry, version, changelog, and the full gate before exact artifacts

@@ -71,6 +71,11 @@ _STRINGS: dict[str, dict[str, str]] = {
             "reveals no one."
         ),
         "aggregate_total": "- Resolved records in the aggregate: **{n}**",
+        "aggregate_total_suppressed": (
+            "- Resolved records in the aggregate: **{label}** (publishing the "
+            "real count would let a hidden cell below be recovered by "
+            "subtraction)"
+        ),
         "suppressed_label": "suppressed",
         "h_caveat": "## Standing caveat",
         "caveat": (
@@ -140,6 +145,11 @@ _STRINGS: dict[str, dict[str, str]] = {
             "revela a nadie."
         ),
         "aggregate_total": "- Registros resueltos en el agregado: **{n}**",
+        "aggregate_total_suppressed": (
+            "- Registros resueltos en el agregado: **{label}** (publicar el "
+            "conteo real permitiría recuperar por resta una celda oculta a "
+            "continuación)"
+        ),
         "suppressed_label": "suprimido",
         "h_caveat": "## Advertencia permanente",
         "caveat": (
@@ -181,7 +191,17 @@ def _int(summary: Mapping[str, object], key: str) -> int:
 def _render_aggregate(
     aggregate: Mapping[str, object], strings: dict[str, str], labels: dict[str, str]
 ) -> list[str]:
-    lines = [strings["aggregate_total"].format(n=_int(aggregate, "total_resolved"))]
+    total = aggregate.get("total_resolved", 0)
+    if total == SUPPRESSED:
+        # A suppressed total is not "no records": it is a real count the report
+        # is withholding because publishing it would hand back a hidden cell
+        # from one of the breakdowns below. _int's fallback-to-0 exists for a
+        # missing or malformed key, not this, and rendering "0" here would say
+        # something false rather than something withheld.
+        total_line = strings["aggregate_total_suppressed"].format(label=strings["suppressed_label"])
+    else:
+        total_line = strings["aggregate_total"].format(n=_int(aggregate, "total_resolved"))
+    lines = [total_line]
     breakdowns = aggregate.get("breakdowns")
     if not isinstance(breakdowns, Mapping):
         return lines
