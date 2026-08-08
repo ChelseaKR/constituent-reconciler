@@ -550,7 +550,7 @@ change, shipped with this changelog entry.
   on under any pack; nothing may turn off a pack that imposes it. 19 new tests
   (149 total).
 
-## [0.7.0] — 2026-06-29
+## [0.7.0] - 2026-06-29
 
 The WCAG 2.2 AA web review queue and the offline-first CRM export files, two of
 the items the README named as remaining before the 1.0 tag.
@@ -590,7 +590,7 @@ the items the README named as remaining before the 1.0 tag.
 - The review UI's structural WCAG 2.2 AA work is in place; a full axe audit and a
   screen-reader walkthrough remain a REVIEW gate in `docs/ROADMAP.md`.
 
-## [0.6.0] — 2026-06-27
+## [0.6.0] - 2026-06-27
 
 The v1.0 engineering deliverables, shipped without the 1.0 tag (the tag is gated
 on real-organization adoption, per `docs/ROADMAP.md`).
@@ -618,9 +618,7 @@ on real-organization adoption, per `docs/ROADMAP.md`).
 - The Docker image was not built end-to-end in CI in this release (the
   Dockerfile follows standard patterns); `make docker` builds it locally.
 
-## [0.5.0] — 2026-06-27
-
-## [0.5.0] — 2026-06-27
+## [0.5.0] - 2026-06-27
 
 ### Added
 - **DV policy pack** (`src/constituent_reconciler/policy.py`): a declarative
@@ -660,7 +658,7 @@ on real-organization adoption, per `docs/ROADMAP.md`).
   partial (consent plus no cloud seam) and does not claim the DV pack's full
   invariant set. See `docs/ROADMAP.md`.
 
-## [0.4.0] — 2026-06-27
+## [0.4.0] - 2026-06-27
 
 ### Added
 - **Address normalization** (`src/constituent_reconciler/address.py`): a
@@ -691,7 +689,7 @@ on real-organization adoption, per `docs/ROADMAP.md`).
   and RFC 3161 trusted timestamping wired to a TSA. The address standardizer is
   CASS-style and is **not** USPS-certified. See `docs/ROADMAP.md`.
 
-## [0.3.0] — 2026-06-27
+## [0.3.0] - 2026-06-27
 
 ### Added
 - **Extraction seam** (`src/constituent_reconciler/extract/`): an offline
@@ -736,7 +734,7 @@ on real-organization adoption, per `docs/ROADMAP.md`).
   full invariant set. RFC 3161 trusted timestamping is a pluggable authority, not
   yet wired to a TSA. See `docs/ROADMAP.md`.
 
-## [0.2.0] — 2026-06-24
+## [0.2.0] - 2026-06-24
 
 ### Added
 - CiviCRM write-back via API v4, an upsert keyed on an external identifier
@@ -746,7 +744,7 @@ on real-organization adoption, per `docs/ROADMAP.md`).
   with a `reconcile verify` command and a pluggable timestamp authority. An
   `[output]` recipe section that selects the connector.
 
-## [0.1.0] — 2026-06-24
+## [0.1.0] - 2026-06-24
 
 ### Added
 - Resolve and review core. Reads existing and incoming CSVs, normalizes,
