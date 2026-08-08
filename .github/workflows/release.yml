@@ -177,6 +177,7 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.release-tests.outputs.release_tag }}
           TAG_OBJECT_SHA: ${{ needs.release-tests.outputs.tag_object_sha }}
         run: |
@@ -186,5 +187,5 @@ jobs:
           gh release create "${TAG}" \
             --title "${TAG}" \
             --notes-file release-notes.md \
-            --verify-tag \
+            \
             dist/*
