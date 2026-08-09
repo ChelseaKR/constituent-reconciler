@@ -540,11 +540,13 @@ transfer, and install steps are in
 
 ## Standards Conformance
 
-This project is held to the portfolio-wide engineering standards maintained
-alongside this repo's siblings. The dependency-light GenAI telemetry shim is
-vendored at the reviewed STANDARDS commit recorded in
+This project is held to portfolio-wide engineering standards. The
+dependency-light GenAI telemetry runtime is vendored as the reviewed public
+projection named in
 `src/constituent_reconciler/_vendor/genai_telemetry/.standards-version`; the
-full standards set remains a sibling repository rather than a submodule.
+adjacent SHA-256 manifest binds every projected file without publishing a
+private source-control identifier. The full standards set remains external
+rather than a submodule.
 Applies/N/A is declared per
 standard below, not silently omitted; every "Applies — gap" row is tracked
 locally (this table plus the linked doc) pending a filed issue. Last reviewed:

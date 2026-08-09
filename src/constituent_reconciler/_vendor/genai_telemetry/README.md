@@ -1,7 +1,7 @@
 # `genai_telemetry` — vendorable GenAI telemetry + cost + prod-eval shim
 
-Phase 2 of `METRICS-AND-AI-PLAN-2026-07-11`. One small, dependency-light Python
-package so every AI-bearing repo emits **consistent, pinned** OpenTelemetry
+One small, dependency-light Python package so every AI-bearing application
+emits **consistent, pinned** OpenTelemetry
 GenAI telemetry, computes cost the same way, and runs the same minimal
 production-eval loop — instead of each repo re-deriving `gen_ai.*` names and
 "cost per conversation" from scratch.
@@ -66,17 +66,10 @@ system's retention policy. Commit-bound benchmark JSONL is durable: write only
 minimal, deidentified content; never raw prompts, model outputs, user metadata,
 emails, names, or other identifiers. Trace IDs must be opaque and non-PII.
 
-## Vendoring
-Vendor from a committed release tag or reviewed commit; the helper deliberately
-uses `git archive`, so it cannot copy an uncommitted shim:
-
-```sh
-STANDARDS/automation/vendor-genai-telemetry.sh \
-  src/my_package/_vendor/genai_telemetry v1.1.0
-```
-
-Bind: `AI-EVALUATION-STANDARD.md` (online loop), `OBSERVABILITY-STANDARD.md`
-(GenAI semconv), `AI-DEVELOPMENT-MEASUREMENT-STANDARD.md`.
+## Projection integrity
+This public projection carries a version label and an adjacent SHA-256 manifest
+covering every payload file. The consumer test suite verifies both before the
+package ships.
 
 ## Maintenance
 - `pricing.json` carries `last_verified` plus explicit provider/source metadata;
@@ -89,6 +82,6 @@ Bind: `AI-EVALUATION-STANDARD.md` (online loop), `OBSERVABILITY-STANDARD.md`
   no attribute names changed under you.
 
 ## Scope
-Binds the AI-full repos (civic-rag-starter-kit, trans-docs-navigator,
-fare-assistant, sprout, govchat-eval) and the AI-partial repos for their
-token/cost surface. Deterministic repos declare N/A per `AI-EVALUATION-STANDARD.md`.
+Supports applications with full or partial generative-AI surfaces that need
+consistent token and cost telemetry. Deterministic applications can declare
+these controls not applicable.

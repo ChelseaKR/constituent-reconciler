@@ -1,6 +1,6 @@
 name: release
 
-# Trusted-main release (REL-14, RELEASE-AND-VERSIONING-STANDARD.md §4). A
+# Trusted-main release (portfolio release policy §4). A
 # maintainer supplies an existing signed `vX.Y.Z` tag to the reviewed workflow
 # on main, which re-verifies the tagged commit from scratch (this
 # repo's PR green check on `ci.yml` is never trusted for a release — main can
@@ -12,7 +12,7 @@ name: release
 # Not yet published to PyPI (see README) — no `pypa/gh-action-pypi-publish`
 # stage. When this repo does publish, add a `publish` job gated on the
 # `pypi` environment using Trusted Publishing (OIDC), per
-# RELEASE-AND-VERSIONING-STANDARD.md §5.1; do not add a stored PyPI token.
+# the portfolio release policy §5.1; do not add a stored PyPI token.
 #
 # No `v*` tag exists yet — this workflow is prepared ahead of the first
 # release so cutting `v0.1.0` doesn't also require writing release CI from

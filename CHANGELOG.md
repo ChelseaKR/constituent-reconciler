@@ -291,8 +291,9 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   STANDARDS telemetry schema: provider/model identity, input/output tokens,
   duration, finish reason, and estimated cost. Page images, prompts, responses,
   record ids, and extracted values are excluded; regression tests exercise the
-  JSON payload with representative PII. The vendored shim records its immutable
-  STANDARDS commit in `.standards-version`.
+  JSON payload with representative PII. The vendored shim records a public
+  projection label and exact per-file SHA-256 manifest without exposing a
+  private source-control identifier.
 - **Disaggregated matching-risk audit (R5).** `evaluate()` accepts explicit
   planted pairs by risk class, the Markdown report renders per-class surfaced
   and blocking-miss counts, and `examples/bias-demo/` covers transliterated,

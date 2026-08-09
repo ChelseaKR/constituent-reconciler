@@ -1,15 +1,15 @@
 # EU AI Act Classification — constituent-reconciler
 
-> **Status: DRAFT — pending owner sign-off.** Drafted 2026-07-19 by an agent run
-> executing STANDARDS dated obligation CAL-01 (full high-risk application of
-> Reg. (EU) 2024/1689 on 2026-08-02). Per RESPONSIBLE-TECH-FRAMEWORK RTF-12 this
-> is an owner decision artifact behind a REVIEW-GATE: it takes effect when the
+> **Status: DRAFT — pending owner sign-off.** Drafted 2026-07-19 to meet the
+> dated obligation to classify the system before full high-risk application of
+> Reg. (EU) 2024/1689 on 2026-08-02. This is an owner decision artifact behind
+> a review gate: it takes effect when the
 > accountable owner reviews it, replaces this banner with a
 > `Reviewed <date> by <owner>` line, and re-commits.
 
 **Regulation:** (EU) 2024/1689 (the AI Act). Full high-risk application Aug 2, 2026;
 GPAI obligations live since Aug 2025; Annex III conformity deadline Dec 2, 2027.
-Per `STANDARDS/RESPONSIBLE-TECH-FRAMEWORK.md` §Governance, the obligation is the
+Under the portfolio's responsible-technology governance policy, the obligation is the
 **decision artifact**, not certification: silence is non-conformant, a written
 classification is conformant.
 

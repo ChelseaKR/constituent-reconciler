@@ -89,7 +89,7 @@ constituent-reconciler/
 │   ├── config.py                  # recipe.toml loading: sources, connector, thresholds, policy pack
 │   ├── connectors/
 │   │   ├── airtable.py            # Airtable native batched upsert
-│   │   ├── base.py                # connector interface (the jobradar adapter pattern)
+│   │   ├── base.py                # connector interface shared by every adapter
 │   │   ├── civicrm.py             # CiviCRM live write-back (API v4 upsert)
 │   │   ├── crm_csv.py             # import-ready CRM export files (salesforce_csv, civicrm_csv)
 │   │   ├── csv_out.py             # default local CSV output
@@ -148,7 +148,7 @@ Decisions made now so they are not relitigated:
   jargon. Analyst-grade screens are a failure mode.
 * **Connectors are isolated, version-pinned plugins.** Connector API churn is
   the tax that kills solo maintainers; keep each adapter behind the `base.py`
-  interface, the way jobradar isolates its 15 ATS adapters.
+  interface so every integration remains independently replaceable.
 * **Consent is a field, and the write step enforces it.** Not a checkbox
   attribute; a value the write path reads on every field on every emit.
 
