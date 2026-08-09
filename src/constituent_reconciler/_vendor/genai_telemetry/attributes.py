@@ -4,10 +4,9 @@ The OTel GenAI semantic conventions are **pre-stable (Development status)** as o
 July 2026 and live in a dedicated repo with no tagged releases; attribute names
 can still change. This module is the single place the portfolio names them, so
 no repo writes `gen_ai.*` string literals directly — when the spec moves, only
-this file changes and every vendoring repo re-fetches it (metrics plan Phase 2.1).
+this file changes and every consuming application refreshes the projection.
 
 Pin: opentelemetry.io/docs/specs/semconv/gen-ai/ as of SEMCONV_VERSION below.
-Reference: OBSERVABILITY-STANDARD.md (GenAI section).
 """
 
 from __future__ import annotations

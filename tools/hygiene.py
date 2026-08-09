@@ -15,10 +15,11 @@ when a Python file under src/, tests/, or tools/ contains:
 - a ``nosemgrep`` waiver without a rule id, so it names exactly what it
   waives.
 
-The vendored ``_vendor`` tree is excluded: it mirrors the upstream STANDARDS
-distribution byte for byte and is not edited here. The debt-marker tokens are
-assembled by concatenation below, and this docstring avoids spelling any
-directive in its comment form, so the gate does not trip on its own source.
+The vendored ``_vendor`` tree is excluded: its runtime is bound by a reviewed
+public-projection manifest, while its documentation can carry downstream scope
+wording. The debt-marker tokens are assembled by concatenation below, and this
+docstring avoids spelling any directive in its comment form, so the gate does
+not trip on its own source.
 """
 
 from __future__ import annotations
