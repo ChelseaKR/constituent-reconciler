@@ -319,6 +319,25 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   `reconcile apply` or a connector.
 
 ### Changed
+- **A merged identity now takes its most restrictive member's consent, not its
+  survivor's (#83, ADR 0013).** Golden-record consent was the survivor's, so a
+  cluster whose surviving record carried a grant and whose other record carried
+  a revocation exported under the grant. `decisions.golden_records` now derives
+  the merged lifecycle with the new `Consent.most_restrictive`: one revoked
+  member revokes the merge, one absent or unrecognized member makes it absent,
+  the latest `granted_on` and the earliest `expires_on` govern, and scopes
+  intersect (members sharing no destination become
+  `models.NO_COMMON_DESTINATION`, which is out of scope everywhere). The
+  property the regression test asserts over every combination of member
+  lifecycles, dates, and destinations: a merged consent is active only where
+  every member's is, so a merge can narrow what a person granted and can never
+  widen it. The write path and the `compare-apply` correction export change
+  together because both merge through `golden_records`. Single-record clusters
+  are unaffected. Under a consent-requiring pack, organizations whose sources
+  disagree about consent will see more records withheld, each with its reason,
+  which is the intended trade. ADR 0013 records the VAWA, FVPSA, OVW, NNEDV,
+  and HIPAA sources read for the decision, including their silence on record
+  merges.
 - **Docs now record the live branch ruleset and current gates (standards
   conformance pass, 2026-08-07).** A `protect-main` ruleset has been active
   on the repository since 2026-07-09, but the README, ROADMAP,

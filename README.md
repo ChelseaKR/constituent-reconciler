@@ -109,7 +109,11 @@ The pack enforces four invariants, each a merge-blocking test:
 
 * **Consent required.** The export refuses, fail-closed, to emit any record whose
   consent is not granted; withheld records are recorded by id and reason only,
-  never with field values.
+  never with field values. When duplicate records merge, the merged identity
+  takes the most restrictive consent among them, so one person's revoked,
+  expired, or narrowly scoped consent withholds the whole merged record rather
+  than being overridden by another record's grant
+  ([ADR 0013](docs/adr/0013-merged-consent-most-restrictive.md)).
 * **No cloud egress.** The optional cloud extraction seam is fused off at
   construction, so no page or field value can be sent to a remote model.
 * **Local write targets only.** A non-local target (such as CiviCRM over the

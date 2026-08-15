@@ -46,9 +46,12 @@ override lets a run apply the DV posture to any recipe without editing it.
 
 ### The DV pack enforces four things, each at one site
 
-* **Consent required** (consent.py). A resolved record whose survivor does not
-  carry granted consent is withheld and recorded by id and reason only, never
-  with field values.
+* **Consent required** (consent.py). A resolved record that does not carry
+  granted consent is withheld and recorded by id and reason only, never with
+  field values. A merged record's consent is the most restrictive of its
+  members', not the survivor's, so one member's revocation withholds the whole
+  identity (ADR 0013, which superseded the survivor rule this ADR shipped
+  with).
 * **Cloud seam fused off** (extract/seam.py). `make_seam` returns a `NoOpSeam`
   for the dv and hipaa packs regardless of the recipe's backend, enforced at
   construction time so there is no path from a DV recipe to a network call.
