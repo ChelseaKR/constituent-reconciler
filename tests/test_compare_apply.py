@@ -18,6 +18,7 @@ import json
 import os
 import shutil
 import time
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 
@@ -25,6 +26,7 @@ import pytest
 
 from constituent_reconciler import compare, compare_apply
 from constituent_reconciler.cli import main
+from constituent_reconciler.decisions import DEFAULT_FILL_POLICY
 from constituent_reconciler.destruction import PII_ARTIFACTS, inventory
 from constituent_reconciler.manifest import file_digest
 from constituent_reconciler.review.session import APPROVED, REJECTED, ReviewSession
@@ -373,6 +375,106 @@ def test_a_merged_identity_is_withheld_on_its_most_restrictive_member(tmp_path: 
     assert export["withheld"] == {"revoked": 1}
     blob = (out_dir / compare_apply.CORRECTIONS_FILENAME).read_text(encoding="utf-8")
     assert "okonkwo" not in blob.lower()
+
+
+def _write_target_id_fixture(tmp_path: Path) -> tuple[Path, Path]:
+    """A legacy export and a target export whose rows carry the target's own ids."""
+
+    (tmp_path / "left.csv").write_text(
+        "\n".join(
+            [
+                "First,Last,Birth,Mail",
+                "Maria,Lopez,1985-03-02,maria.lopez@example.org",
+                "Alice,Nakamura,1974-11-30,alice.nakamura@example.org",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "right.csv").write_text(
+        "contact_id,given_name,family_name,dob,email_address\n41827,Maria,Lopez,1985-03-02,\n",
+        encoding="utf-8",
+    )
+    left_recipe = tmp_path / "recipe-left.toml"
+    left_recipe.write_text(
+        "\n".join(
+            [
+                "[input]",
+                'incoming = "left.csv"',
+                "",
+                "[mapping]",
+                'first_name = "First"',
+                'last_name = "Last"',
+                'dob = "Birth"',
+                'email = "Mail"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    right_recipe = tmp_path / "recipe-right.toml"
+    right_recipe.write_text(
+        "\n".join(
+            [
+                "[input]",
+                'incoming = "right.csv"',
+                'id_column = "contact_id"',
+                "",
+                "[mapping]",
+                'first_name = "given_name"',
+                'last_name = "family_name"',
+                'dob = "dob"',
+                'email = "email_address"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return left_recipe, right_recipe
+
+
+def test_a_matched_row_carries_the_target_sides_own_ids(tmp_path: Path) -> None:
+    # Issue #84. The external-id column holds an id this tool minted, which the
+    # target has never seen, so an upsert keyed on it would add a second record
+    # for someone the target already has. The target-id column is the key an
+    # operator can actually point the import tool's matching at.
+    left_recipe, right_recipe = _write_target_id_fixture(tmp_path)
+    out_dir = tmp_path / "out"
+    _compare_into(out_dir, left_recipe, right_recipe)
+    assert _apply(out_dir, left=left_recipe, right=right_recipe) == 0
+
+    rows = {row["first_name"].lower(): row for row in _rows(out_dir)}
+    assert set(rows) == {"maria", "alice"}
+    # Maria is in the target already, under the id the target export supplied.
+    assert rows["maria"][compare_apply.TARGET_ID_COLUMN] == "41827"
+    assert rows["maria"][compare_apply.EXTERNAL_ID_COLUMN] != "41827"
+    # Alice is missing from the target, so there is no target id to name.
+    assert rows["alice"][compare_apply.TARGET_ID_COLUMN] == ""
+
+
+def test_the_export_runs_and_records_the_governing_fill_policy(tmp_path: Path) -> None:
+    # Issue #84: compare-apply merged golden values under the package default
+    # while the run pipeline threaded the recipe's setting, so a second fill
+    # policy would have made the two disagree silently. The comparison now
+    # resolves one policy for both sides and the manifest records which.
+    left_recipe, right_recipe = _write_target_id_fixture(tmp_path)
+    out_dir = tmp_path / "out"
+    _compare_into(out_dir, left_recipe, right_recipe)
+    assert _apply(out_dir, left=left_recipe, right=right_recipe) == 0
+    assert _export_section(out_dir)["fill_policy"] == DEFAULT_FILL_POLICY
+
+
+def test_two_recipes_that_disagree_on_the_fill_policy_refuse_to_compare(
+    tmp_path: Path,
+) -> None:
+    left_recipe, right_recipe = _write_target_id_fixture(tmp_path)
+    # "most-recent-wins" is reserved and unimplemented, so a recipe naming it
+    # is refused at load; simulate the disagreement on loaded sides instead.
+    left_side = compare.load_side(left_recipe, label="left")
+    right_side = compare.load_side(right_recipe, label="right")
+    right_side = replace(
+        right_side, recipe=replace(right_side.recipe, fill_policy="most-recent-wins")
+    )
+    with pytest.raises(compare.CompareError, match="fill policy"):
+        compare.run_compare(left_side, right_side)
 
 
 def test_a_reviewer_correction_flows_through_the_export(tmp_path: Path) -> None:

@@ -43,6 +43,13 @@ default.
 Neither claim is a promise that the target org's schema matches the default
 NPSP or CiviCRM install; both CRMs are configurable, and this module does not
 call either API, so the CSV is what the operator inspects and maps by hand.
+
+A caller that knows the destination's own ids for a row may add one more
+column with ``CrmCsvConnector.set_target_id_column``. The external-id column
+holds an id this tool minted, so an upsert keyed on it creates records; the
+target-id column is how a row says "the destination already holds this one,
+under these ids". The cutover correction export (``compare_apply``) is the
+caller that has them.
 """
 
 from __future__ import annotations
@@ -60,6 +67,7 @@ __all__ = [
     "CIVICRM_IMPORT_MAP",
     "SALESFORCE_IMPORT_MAP",
     "DEFAULT_HOUSEHOLD_COLUMN",
+    "DEFAULT_TARGET_ID_COLUMN",
     "CrmCsvConnector",
 ]
 
@@ -67,6 +75,10 @@ __all__ = [
 # this name today; it exists so the two shipped CRM exports use one column
 # name a reader learns once.
 DEFAULT_HOUSEHOLD_COLUMN = "household_external_id"
+
+# Default header for the optional target-side id column (see
+# ``CrmCsvConnector.set_target_id_column``).
+DEFAULT_TARGET_ID_COLUMN = "target_record_ids"
 
 
 class CrmCsvConnector:
@@ -96,6 +108,8 @@ class CrmCsvConnector:
         self.external_id_column = external_id_column
         self._household_map: Mapping[str, str] | None = None
         self._household_column = DEFAULT_HOUSEHOLD_COLUMN
+        self._target_id_map: Mapping[str, str] | None = None
+        self._target_id_column = DEFAULT_TARGET_ID_COLUMN
 
     def set_household_column(
         self,
@@ -117,14 +131,42 @@ class CrmCsvConnector:
         self._household_map = household_map
         self._household_column = column
 
+    def set_target_id_column(
+        self,
+        target_id_map: Mapping[str, str],
+        *,
+        column: str = DEFAULT_TARGET_ID_COLUMN,
+    ) -> None:
+        """Add a column naming the destination's own ids for each row.
+
+        The external-id column carries the cluster id this tool minted, which
+        the destination has never seen; an upsert keyed on it adds a record
+        rather than updating the one the destination already holds. When the
+        caller knows the destination's own ids for a row (the cutover export
+        does, for identities that matched a record in the target export), this
+        column carries them so an operator can point the import tool's matching
+        at an existing record instead of guessing.
+
+        ``target_id_map`` is a cluster-id -> value mapping. A cluster absent
+        from it gets an empty value: no id is written that the destination did
+        not supply. Like ``set_household_column``, calling this is optional and
+        additive.
+        """
+
+        self._target_id_map = target_id_map
+        self._target_id_column = column
+
     def _columns(self, fields: tuple[str, ...]) -> list[str]:
         # Active, mapped fields in canonical order, then the external-id
-        # column, then the optional household column (only when set).
+        # column, then the optional household and target-id columns (each only
+        # when set).
         columns = [self.field_map[f] for f in fields if f in self.field_map] + [
             self.external_id_column
         ]
         if self._household_map is not None:
             columns.append(self._household_column)
+        if self._target_id_map is not None:
+            columns.append(self._target_id_column)
         return columns
 
     def _row(self, record: GoldenRecord, fields: tuple[str, ...]) -> dict[str, str]:
@@ -137,6 +179,8 @@ class CrmCsvConnector:
         row[self.external_id_column] = record.cluster_id
         if self._household_map is not None:
             row[self._household_column] = self._household_map.get(record.cluster_id, "")
+        if self._target_id_map is not None:
+            row[self._target_id_column] = self._target_id_map.get(record.cluster_id, "")
         return row
 
     def write_all(

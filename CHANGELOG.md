@@ -479,6 +479,22 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   which is the intended trade. ADR 0013 records the VAWA, FVPSA, OVW, NNEDV,
   and HIPAA sources read for the decision, including their silence on record
   merges.
+- **The cutover correction file carries the target system's own record ids, and
+  merges under the recipe's fill policy (#84).** `target_corrections.csv` keyed
+  every row on the reconciler's identity id, which the target has never seen, so
+  an upsert on it would add a record rather than update the matching one. Rows
+  now also carry `target_record_ids`, the ids the target export itself supplied
+  (its `input.id_column` values, pipe-separated for a multi-record identity,
+  empty for an identity the target does not hold yet and for an export with no
+  id column). `compare-apply` also merged golden values under the package
+  default fill policy while `pipeline.run` threaded the recipe's setting;
+  `compare.run_compare` now resolves one policy for both sides, refusing two
+  recipes that disagree the way it already refuses mismatched thresholds, and
+  the manifest's `export` section records which policy governed.
+  `CUTOVER_CORRECTIONS_SCHEMA_VERSION` is 2. Migration: both changes are
+  additive, so a consumer reading `target_corrections.csv` by column name finds
+  every column it had; a consumer reading by position must account for the new
+  final column.
 - **Docs now record the live branch ruleset and current gates (standards
   conformance pass, 2026-08-07).** A `protect-main` ruleset has been active
   on the repository since 2026-07-09, but the README, ROADMAP,
