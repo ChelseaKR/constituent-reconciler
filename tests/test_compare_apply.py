@@ -320,6 +320,56 @@ def test_consent_gates_the_export_and_counts_the_withheld(tmp_path: Path) -> Non
         assert value not in withheld_blob
 
 
+def test_a_merged_identity_is_withheld_on_its_most_restrictive_member(tmp_path: Path) -> None:
+    # Issue #83: the legacy export holds the same person twice, once with a
+    # grant and once with a revocation. The two rows resolve to one identity,
+    # and that identity inherits the revocation, so the correction file the
+    # target imports carries neither row. Same rule as the write path, because
+    # both sides call decisions.golden_records.
+    (tmp_path / "left.csv").write_text(
+        "\n".join(
+            [
+                "First,Last,Birth,Consent",
+                "Grace,Okonkwo,1980-01-05,granted",
+                "Grace,Okonkwo,1980-01-05,revoked",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "recipe-left.toml").write_text(
+        "\n".join(
+            [
+                "[input]",
+                'incoming = "left.csv"',
+                "",
+                "[mapping]",
+                'first_name = "First"',
+                'last_name = "Last"',
+                'dob = "Birth"',
+                "",
+                "[consent]",
+                "require = true",
+                'column = "Consent"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "right.csv").write_text(
+        "first_name,last_name,dob\nZed,Quill,1999-07-07\n", encoding="utf-8"
+    )
+    out_dir = tmp_path / "out"
+    _compare_into(out_dir, tmp_path / "recipe-left.toml", tmp_path / "right.csv")
+    assert _apply(out_dir, left=tmp_path / "recipe-left.toml", right=tmp_path / "right.csv") == 0
+
+    assert _rows(out_dir) == []
+    export = _export_section(out_dir)
+    assert export["rows"] == 0
+    assert export["withheld"] == {"revoked": 1}
+    blob = (out_dir / compare_apply.CORRECTIONS_FILENAME).read_text(encoding="utf-8")
+    assert "okonkwo" not in blob.lower()
+
+
 def test_a_reviewer_correction_flows_through_the_export(tmp_path: Path) -> None:
     _compare_into(tmp_path)
     session = _session_for(tmp_path)

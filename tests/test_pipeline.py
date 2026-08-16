@@ -689,6 +689,88 @@ def test_expired_consent_is_withheld_end_to_end(tmp_path: Path) -> None:
     assert "X1" not in resolved_text
 
 
+def _write_mixed_consent_merge_fixture(tmp_path: Path) -> Path:
+    """The same person in both sources: granted on file, revoked on intake."""
+
+    (tmp_path / "existing.csv").write_text(
+        "id,first,last,dob,consent\nE1,Alice,Marchetti,1980-01-01,granted\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "incoming.csv").write_text(
+        "id,first,last,dob,consent\nX1,Alice,Marchetti,1980-01-01,revoked\n",
+        encoding="utf-8",
+    )
+    recipe_path = tmp_path / "recipe.toml"
+    recipe_path.write_text(
+        "[input]\n"
+        'existing = "existing.csv"\n'
+        'incoming = "incoming.csv"\n'
+        'id_column = "id"\n'
+        "\n"
+        "[mapping]\n"
+        'first_name = "first"\n'
+        'last_name = "last"\n'
+        'dob = "dob"\n'
+        "\n"
+        "[consent]\n"
+        'column = "consent"\n'
+        "require = true\n",
+        encoding="utf-8",
+    )
+    return recipe_path
+
+
+def test_a_merge_never_exports_on_consent_the_other_member_revoked(tmp_path: Path) -> None:
+    """Issue #83: the merged identity takes its most restrictive member's consent.
+
+    The survivor here is the existing record, whose consent is granted, and the
+    record it merges with carries an explicit revocation. Exporting under the
+    survivor's grant would write out an identity built partly from a person who
+    said no, so the whole merged identity is withheld and the reason names the
+    revocation. The cost is a follow-up on a record the organization may be
+    entitled to write; the cost of the other choice is a disclosure nobody
+    authorized.
+    """
+
+    recipe = load_recipe(_write_mixed_consent_merge_fixture(tmp_path))
+    result = pipeline.run(recipe, force_auto=[frozenset(("existing:E1", "incoming:X1"))])
+    assert [set(cluster.members) for cluster in result.clusters] == [{"existing:E1", "incoming:X1"}]
+    assert result.golden[0].primary == "existing:E1"
+
+    summary = pipeline.export(result, recipe, out_dir=tmp_path / "out")
+    assert summary.withheld_path is not None
+    withheld_text = summary.withheld_path.read_text(encoding="utf-8")
+    assert "revoked" in withheld_text
+    resolved_text = (tmp_path / "out" / "resolved.csv").read_text(encoding="utf-8")
+    assert "Marchetti" not in resolved_text
+    assert "E1" not in resolved_text
+
+
+def test_splitting_a_merge_restores_each_member_own_consent(tmp_path: Path) -> None:
+    """The merge is not a write: unmerging returns every original consent state.
+
+    ``golden_records`` derives the merged lifecycle; it never edits the member
+    records. So the correction and repair paths, which re-read those records
+    from the source batch, see exactly the consent each person gave, and a
+    cluster that is split back apart exports under the original states rather
+    than under the narrowed one the merge used.
+    """
+
+    recipe = load_recipe(_write_mixed_consent_merge_fixture(tmp_path))
+    merged = pipeline.run(recipe, force_auto=[frozenset(("existing:E1", "incoming:X1"))])
+    assert merged.golden[0].consent.reason(as_of=date.today()) == "revoked"
+
+    split = pipeline.run(recipe, force_drop=[frozenset(("existing:E1", "incoming:X1"))])
+    by_cluster = {golden.cluster_id: golden for golden in split.golden}
+    assert set(by_cluster) == {"existing:E1", "incoming:X1"}
+    assert by_cluster["existing:E1"].consent.reason(as_of=date.today()) is None
+    assert by_cluster["incoming:X1"].consent.reason(as_of=date.today()) == "revoked"
+    # The member records themselves were never rewritten by either run.
+    for run in (merged, split):
+        assert run.records["existing:E1"].consent.status == "granted"
+        assert run.records["incoming:X1"].consent.status == "revoked"
+
+
 # -- record identity ----------------------------------------------------------
 
 _ID_MAPPING = {"first_name": "First Name", "last_name": "Last Name"}

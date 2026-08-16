@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 
 from constituent_reconciler import defaults
-from constituent_reconciler.models import Band, Cluster, GoldenRecord, Pair, Record
+from constituent_reconciler.models import Band, Cluster, Consent, GoldenRecord, Pair, Record
 
 # Survivorship fill policies golden_records() understands. The policy names how
 # empty survivor fields are completed from the rest of the cluster. Only one is
@@ -179,9 +179,16 @@ def golden_records(
     date) blanks are filled deterministically from the other members in
     ascending id order. An unknown policy name raises ValueError, fail-closed.
     Each non-empty merged field records the member that supplied its value in
-    ``field_sources``. Consent on the merged record is the survivor's
-    ``Consent`` lifecycle, carried through unevaluated -- the export gate decides
-    granted-or-withheld later, once it knows the write destination and run date.
+    ``field_sources``.
+
+    Consent on the merged record is the most restrictive of its members'
+    (``Consent.most_restrictive``), not the survivor's: a merge may narrow what
+    a person granted and may never widen it. One revoked or unconsented member
+    withholds the whole merged identity, because the tool cannot tell which
+    member's fields a downstream export would carry. The lifecycle is carried
+    through unevaluated -- the export gate decides granted-or-withheld later,
+    once it knows the write destination and run date. See
+    docs/adr/0013-merged-consent-most-restrictive.md.
     """
 
     if fill_policy not in FILL_POLICIES:
@@ -215,7 +222,9 @@ def golden_records(
                 fields=merged,
                 field_sources=field_sources,
                 primary=primary,
-                consent=records[primary].consent,
+                consent=Consent.most_restrictive(
+                    records[member].consent for member in cluster.members
+                ),
             )
         )
     return out

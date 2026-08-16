@@ -168,6 +168,30 @@ def test_field_sources_name_members_that_carry_the_merged_value() -> None:
             assert records[source].normalized[field_name] == value
 
 
+def test_merged_consent_is_the_most_restrictive_member_not_the_survivors() -> None:
+    # Issue #83. The survivor is the existing, consented record, and it still
+    # supplies the identity and the field values. It does not get to supply the
+    # consent state, because the merged record also carries the other person's
+    # data, and they revoked.
+    records = {
+        "E1": _record("E1", "existing", {"first_name": "robert"}, "granted"),
+        "N1": _record("N1", "incoming", {"first_name": "bob"}, "revoked"),
+    }
+    [golden] = golden_records([Cluster("E1", ("E1", "N1"))], records, FIELDS)
+    assert golden.primary == "E1"
+    assert golden.consent.reason(as_of=date.today()) == "revoked"
+    # Merging derives a new lifecycle; it never edits the member records, so
+    # the same batch re-resolved without this merge exports as it always did.
+    assert records["E1"].consent.status == "granted"
+    assert records["N1"].consent.status == "revoked"
+
+
+def test_a_singleton_cluster_keeps_its_own_consent() -> None:
+    records = {"N9": _record("N9", "incoming", {"first_name": "omar"}, "granted")}
+    [golden] = golden_records([Cluster("N9", ("N9",))], records, FIELDS)
+    assert golden.consent is records["N9"].consent
+
+
 def test_unknown_fill_policy_raises() -> None:
     records = {"E1": _record("E1", "existing", {}, "granted")}
     clusters = [Cluster("E1", ("E1",))]

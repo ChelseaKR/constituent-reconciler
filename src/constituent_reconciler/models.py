@@ -7,6 +7,7 @@ clusters without importing Splink or pandas.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
@@ -80,6 +81,14 @@ WITHHOLD_REASONS: frozenset[str] = frozenset(
     {"absent", "revoked", "future-dated", "expired", "out-of-scope"}
 )
 
+# The scope ``Consent.most_restrictive`` uses when the members it combines share
+# no destination at all (one covers ``csv``, another covers only ``civicrm``).
+# An empty scope already means "every destination", so it cannot also mean "no
+# destination"; this token can never equal a connector name, so a merged consent
+# carrying it is out of scope everywhere, which is the honest answer when no
+# single destination was covered by every member.
+NO_COMMON_DESTINATION = "<no destination covered by every member>"
+
 
 @dataclass(frozen=True)
 class Consent:
@@ -132,6 +141,72 @@ class Consent:
 
     def is_active(self, *, as_of: date, destination: str | None = None) -> bool:
         return self.reason(as_of=as_of, destination=destination) is None
+
+    @classmethod
+    def most_restrictive(cls, consents: Iterable[Consent]) -> Consent:
+        """Combine member consents into the narrowest one all of them support.
+
+        This is what a merged identity inherits (``decisions.golden_records``).
+        The rule it enforces, which ``tests/test_consent.py`` states as a
+        property over every combination: the result is active only where every
+        input is active. A merge can therefore narrow what a person granted and
+        can never widen it, so no export can rest on consent nobody gave.
+
+        Each dimension takes its most restrictive value. One revoked member
+        revokes the merge, and one member whose status is absent or
+        unrecognized makes the merge absent, because a grant on another record
+        is not evidence about this one. The latest ``granted_on`` wins, so the
+        merge is not effective before every member's grant was; the earliest
+        ``expires_on`` wins, so the first ceiling to fall ends the merge. A
+        recorded date is a constraint and ``None`` is the absence of one, so
+        ``None`` never overrides a date in either direction. Scopes intersect,
+        with an empty scope reading as "every destination" the way
+        ``reason()`` reads it; members with no destination in common produce
+        ``NO_COMMON_DESTINATION``, which is out of scope everywhere.
+
+        A single-member cluster returns that member's own ``Consent``
+        unchanged, so the overwhelmingly common case (a record that matched
+        nothing) is untouched, raw status token included. An empty input
+        returns the default absent consent, fail-closed.
+        """
+
+        members = list(consents)
+        if len(members) == 1:
+            return members[0]
+        if not members:
+            return cls()
+
+        statuses = [member.status.strip().lower() for member in members]
+        if any(status in REVOKED_STATUSES for status in statuses):
+            status = "revoked"
+        elif all(status in GRANTED_STATUSES for status in statuses):
+            status = "granted"
+        else:
+            status = ""
+
+        granted_dates = [m.granted_on for m in members if m.granted_on is not None]
+        expiry_dates = [m.expires_on for m in members if m.expires_on is not None]
+
+        common: frozenset[str] | None = None
+        for member in members:
+            if not member.scope:
+                # An unscoped member covers every destination, so it removes
+                # nothing from the intersection.
+                continue
+            common = member.scope if common is None else common & member.scope
+        if common is None:
+            scope = frozenset[str]()
+        elif common:
+            scope = common
+        else:
+            scope = frozenset({NO_COMMON_DESTINATION})
+
+        return cls(
+            status=status,
+            granted_on=max(granted_dates) if granted_dates else None,
+            expires_on=min(expiry_dates) if expiry_dates else None,
+            scope=scope,
+        )
 
     def label(self, *, as_of: date, destination: str | None = None) -> str:
         """A short, informational label: ``"granted"`` or the withhold reason."""
@@ -231,8 +306,11 @@ class GoldenRecord:
     field-level lineage: for each non-empty merged field, the id of the member
     record that supplied its value (fields that merged to empty have no entry).
     ``primary`` is the record id chosen as the survivor, and ``consent`` is the
-    survivor's ``Consent`` lifecycle, carried through unevaluated. The export
-    gate (``consent.partition_by_consent``) is what turns this into a granted or
+    most restrictive of the members' ``Consent`` lifecycles
+    (``Consent.most_restrictive``), carried through unevaluated: the survivor
+    supplies the identity, but it does not get to speak for what the other
+    people in the cluster agreed to. The export gate
+    (``consent.partition_by_consent``) is what turns this into a granted or
     withheld decision, because only it knows the actual write destination and
     the run's ``as_of`` date; a golden record on its own does not decide.
     """
