@@ -27,6 +27,16 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   `approvers()` already applies. A pack requiring two reviewers refuses any
   approved pair the audit trail cannot show two distinct people for,
   including a file with no audit trail, and names the pairs.
+- **`make install` can now fail on a stale lockfile.** The target ran
+  `uv sync --frozen`, and the Makefile header claimed that "refuses to run
+  (and exits non-zero) if uv.lock is stale relative to pyproject.toml". It
+  does not: `--frozen` skips the up-to-date check by design and exits 0
+  against a drifted lock, so CQ-09's reproducible-install gate passed
+  identically whether the lock matched pyproject.toml or not. Switched to
+  `uv sync --locked`, which asserts the lock is current and exits 1 when it
+  is not, in `make install` and in the release workflow's sync step (whose
+  environment the published SBOM describes). README and CONTRIBUTING updated
+  to match.
 - **The per-source data-quality report is now reachable from `reconcile run`
   (#96).** `quality.py` (field completeness, normalization failure rates,
   consent coverage, duplicate density, small-cell suppressed under the DV

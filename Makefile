@@ -1,11 +1,15 @@
 .PHONY: install verify format-check lint type test security axe-fixtures axe eval eval-extraction eval-bias eval-large perf-baseline perf-baseline-pdf run docker bundle clean
 
 # Reproduce the full local toolchain. CI mirrors `make verify` byte for byte.
-# `uv sync --frozen` refuses to run (and exits non-zero) if uv.lock is stale
-# relative to pyproject.toml, so local and CI installs are always the exact
-# locked dependency set (CQ-09).
+# `--locked`, not `--frozen`: both install exactly what uv.lock pins and
+# neither re-locks, but `--frozen` skips the up-to-date check entirely and
+# exits 0 against a lock that no longer matches pyproject.toml, which made
+# CQ-09 a gate that could not fail. `--locked` asserts the lock is current
+# and exits 1 when it is not, so a dependency edit that was never locked is
+# caught here instead of drifting silently. Run `uv lock` after editing
+# pyproject.toml and commit the result.
 install:
-	uv sync --frozen --python 3.12 --group dev --extra extract
+	uv sync --locked --python 3.12 --group dev --extra extract
 
 format-check:
 	.venv/bin/ruff format --check src tests tools

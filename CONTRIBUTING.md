@@ -6,7 +6,7 @@ to small nonprofits, so correctness and honesty matter more than feature count.
 ## Setup
 
 ```sh
-make install      # creates .venv (Python 3.12) via `uv sync --frozen`, dev+extract
+make install      # creates .venv (Python 3.12) via `uv sync --locked`, dev+extract
 make verify       # ruff, mypy --strict, pytest: the full local gate
 ```
 
