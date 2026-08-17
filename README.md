@@ -575,7 +575,7 @@ standard below, not silently omitted; every "Applies — gap" row is tracked
 locally (this table plus the linked doc) pending a filed issue. Last reviewed:
 2026-08-07.
 
-| Standard | Applies? | Status | Details |
+| Standard | State | Status | Details |
 |---|---|---|---|
 | Quality & Metrics | Applies | Enforced — full suite and ≥85% branch coverage are merge-blocking; aggregate, extraction, large-corpus, and disaggregated bias reports are committed | [docs/ROADMAP.md](docs/ROADMAP.md) metrics ledger |
 | Code Quality | Applies | Enforced — `ruff` (incl. `S`, `C90`), `ruff format`, `mypy --strict`, `pytest --strict-markers`, `uv.lock` committed, `uv sync --locked` | `pyproject.toml`, `Makefile` |
@@ -589,6 +589,8 @@ locally (this table plus the linked doc) pending a filed issue. Last reviewed:
 | Documentation | Applies | Enforced — this table, canonical ADR log and template, CITATION.cff, CHANGELOG, model/data cards, and the pinned telemetry shim are present | [docs/adr/](docs/adr/) |
 | Responsible-Tech Framework | Applies (core to this repo's identity) | Partial — DV/VAWA/FVPSA invariants, threat model, ethics failure modes, and dated bias evidence are committed; the human accessibility/adoption gates remain | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) |
 | Incident Response | Applies | Adopted; no incident has been recorded for this repo to date, so `docs/incidents/` does not exist yet. The vulnerability-reporting channel and acknowledgement SLA are in SECURITY.md; an incident would follow the portfolio severity ladder and `incident` label convention with a committed postmortem | [SECURITY.md](SECURITY.md) |
+| Performance | Applies — operator-local CLI plus a locally served review UI; no hosted service, so there is no availability or latency SLO to publish | Measured, not gated — dated per-stage baselines over a large synthetic corpus are committed under `eval/` (`make perf-baseline`, and `make perf-baseline-pdf` for the mixed CSV+PDF intake path). Both are local commands rather than CI jobs, so no performance budget is merge-blocking | `Makefile`, [eval/](eval/) |
+| AI Development Measurement | Applies | Outcome-side only — the metrics ledger and the solo-scale DORA review are the committed, dated artifact; activity counters (sessions, tokens, lines changed, percent AI-generated) are deliberately not tracked or gated here, and the DORA review first falls due with the first tagged release | [docs/ROADMAP.md](docs/ROADMAP.md) metrics ledger and § DORA, at solo scale |
 | Data Governance | Applies (constituent PII, including DV-survivor records: highest sensitivity) | Partial: the data-flow map, per-pack retention and destruction model, and `reconcile destroy` destruction certificates are committed; constituent data stays operator-local and is never stored in this repo (fixtures are synthetic); recipes are schema-validated fail-closed at load. Gap: no per-source data-card directory beyond the extraction seam's model and data cards, and backup remains the operator's responsibility (documented, not tested here) | [docs/DATA-FLOW-AND-RETENTION.md](docs/DATA-FLOW-AND-RETENTION.md), [docs/DATA-CARD.md](docs/DATA-CARD.md) |
 
 Project-specific target values are recorded in
