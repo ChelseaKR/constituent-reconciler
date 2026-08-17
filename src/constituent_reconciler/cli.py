@@ -50,6 +50,7 @@ from constituent_reconciler.report import (
     render_run_summary,
     render_source_quality,
 )
+from constituent_reconciler.review import session as review_session
 from constituent_reconciler.schema import REPORT_SCHEMA_VERSION
 from constituent_reconciler.suppression import render_comparable, render_summary
 
@@ -119,6 +120,12 @@ def _pairs_awaiting_second_review(data: dict[str, object]) -> list[str]:
     section. A pair present there but absent from both top-level lists carries
     a single approval under two-person review; applying such a file must fail,
     naming the pairs, rather than silently skipping them.
+
+    This check is derived from the file's shape and only sees approvals the
+    writing session chose to hold back, which it does only when that session
+    was itself in two-person mode. It is therefore a complement to, never a
+    substitute for, ``review.session.approved_without_second_approval``, which
+    the caller applies under a pack that requires two reviewers.
     """
 
     audit = data.get("audit")
@@ -357,18 +364,28 @@ def _cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_apply(args: argparse.Namespace) -> int:
-    try:
-        recipe = load_recipe(args.config, policy_pack=args.policy_pack, tsa_url=args.tsa_url)
-    except PolicyViolation as error:
-        print(f"policy error: {error}", file=sys.stderr)
-        return 2
-    decisions_path = Path(args.decisions)
-    decisions_data = json.loads(decisions_path.read_text(encoding="utf-8"))
-    if not isinstance(decisions_data, dict):
-        print(f"error: {decisions_path} is not a decisions JSON object", file=sys.stderr)
-        return 2
-    awaiting = _pairs_awaiting_second_review(decisions_data)
+def _refuse_incomplete_review(
+    recipe: Recipe, decisions_path: Path, data: dict[str, object]
+) -> bool:
+    """Whether the review behind this decisions file is too thin to apply.
+
+    Two checks, both fail-closed, both printing what has to happen next.
+
+    The first is derived from the file's shape: a pair recorded in ``audit``
+    but in neither top-level list is a single approval a two-person session
+    held back, and applying it would drop the verdict silently.
+
+    The second runs only under a pack that requires two reviewers, and is a
+    positive count of distinct approvers on the pairs that did reach
+    ``approved``. It is not redundant with the first: a session held nothing
+    back unless it was itself in two-person mode, so a decisions file reviewed
+    under a permissive pack (or written by hand, or carried over from
+    schema version 1) lists every single approval as fully approved and gives
+    the first check nothing to notice. Without this count, ``reconcile apply
+    --policy-pack dv`` would merge pairs one person approved.
+    """
+
+    awaiting = _pairs_awaiting_second_review(data)
     if awaiting:
         print(
             f"error: {decisions_path} holds {len(awaiting)} pair(s) still awaiting "
@@ -382,6 +399,42 @@ def _cmd_apply(args: argparse.Namespace) -> int:
             "(reconcile review --reviewer <other-name>), or reject the pairs.",
             file=sys.stderr,
         )
+        return True
+    if not recipe.require_second_reviewer:
+        return False
+    unconfirmed = review_session.approved_without_second_approval(data)
+    if not unconfirmed:
+        return False
+    print(
+        f"error: policy pack {recipe.policy_pack!r} requires two reviewers, but "
+        f"{decisions_path} cannot show two distinct approvers for "
+        f"{len(unconfirmed)} approved pair(s):",
+        file=sys.stderr,
+    )
+    for key in unconfirmed:
+        print(f"  {key.replace('|', ' and ')}", file=sys.stderr)
+    print(
+        "Have a second reviewer review these pairs under this pack "
+        "(reconcile review --config <this recipe> --reviewer <other-name>). "
+        "A decisions file that records no reviewer attribution cannot be "
+        "applied under this pack at all.",
+        file=sys.stderr,
+    )
+    return True
+
+
+def _cmd_apply(args: argparse.Namespace) -> int:
+    try:
+        recipe = load_recipe(args.config, policy_pack=args.policy_pack, tsa_url=args.tsa_url)
+    except PolicyViolation as error:
+        print(f"policy error: {error}", file=sys.stderr)
+        return 2
+    decisions_path = Path(args.decisions)
+    decisions_data = json.loads(decisions_path.read_text(encoding="utf-8"))
+    if not isinstance(decisions_data, dict):
+        print(f"error: {decisions_path} is not a decisions JSON object", file=sys.stderr)
+        return 2
+    if _refuse_incomplete_review(recipe, decisions_path, decisions_data):
         return 2
     force_auto = _load_pairs(decisions_data, ["approved"])
     force_drop = _load_pairs(decisions_data, ["rejected"])
@@ -589,7 +642,13 @@ def _cmd_compare_apply(args: argparse.Namespace) -> int:
         right = compare.load_side(args.right, label="right")
         result = compare.run_compare(left, right, corrections=corrections)
         stored_manifest = compare_apply.verify_compare_manifest(out_dir, left, right, result)
-        approved, rejected = compare_apply.read_decisions(decisions_path, result)
+        approved, rejected = compare_apply.read_decisions(
+            decisions_path,
+            result,
+            # The stricter side governs, the same rule compare-review applies
+            # when it decides whether to hold a lone approval back.
+            require_second_reviewer=compare_apply.requires_second_reviewer(left, right),
+        )
         orphan = next(
             (correction.pair for correction in corrections if correction.pair not in approved),
             None,

@@ -7,6 +7,26 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Fixed
+- **The two-person review gate is now enforced where the merge happens, not
+  only where the decisions file is written.** Under the `dv` pack
+  `require_second_reviewer` is on, and the documented behavior is that a merge
+  takes effect only after two distinct reviewers approve the same pair. That
+  flag was read in exactly one place, the review session, which decides
+  whether to hold a lone approval out of the file's `approved` list. Neither
+  `reconcile apply` nor `reconcile compare-apply` read it. Their only check
+  was derived from the file's shape: a pair recorded in `audit` but absent
+  from `approved` is awaiting a second reviewer. A file reviewed under a
+  permissive pack holds nothing back, so every single approval sits in
+  `approved` and that check found nothing to flag, and the merge was applied
+  under the strict pack anyway. The same check also returned an empty list
+  outright when the `audit` section was missing or not an object, so a file
+  carrying no reviewer attribution at all read as "nothing awaiting".
+  Both commands now positively count distinct approvers, through the new
+  `review.session.approved_without_second_approval`, on every pair they are
+  about to merge, using the same case-and-spacing-insensitive identity rule
+  `approvers()` already applies. A pack requiring two reviewers refuses any
+  approved pair the audit trail cannot show two distinct people for,
+  including a file with no audit trail, and names the pairs.
 - **The per-source data-quality report is now reachable from `reconcile run`
   (#96).** `quality.py` (field completeness, normalization failure rates,
   consent coverage, duplicate density, small-cell suppressed under the DV

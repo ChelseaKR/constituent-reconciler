@@ -255,6 +255,70 @@ def _reviewer_identity_key(name: str) -> str:
 UNRECORDED_REVIEWER = "unrecorded"
 
 
+def _approvers_in_audit_entries(entries: object) -> frozenset[str]:
+    """Distinct reviewer identities that approved, from one audit entry list.
+
+    The same rule :meth:`ReviewSession.approvers` applies in memory, applied
+    to the raw JSON a decisions file carries: only ``approved`` verdicts
+    count, a blank name counts for nobody, and distinctness is judged by
+    :func:`_reviewer_identity_key` so a case or spacing variant of one name is
+    not a second person. Anything that is not a list of objects contributes
+    no approvers rather than raising: the caller's gate refuses on a count
+    below two, so an unreadable trail fails closed on its own.
+    """
+
+    if not isinstance(entries, list):
+        return frozenset()
+    identities: set[str] = set()
+    for raw in entries:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("reviewer", "")).strip()
+        if name and str(raw.get("verdict", "")) == APPROVED:
+            identities.add(_reviewer_identity_key(name))
+    return frozenset(identities)
+
+
+def approved_without_second_approval(data: Mapping[str, object]) -> list[str]:
+    """Approved pairs the audit trail cannot show two distinct reviewers for.
+
+    Under a pack that requires two-person review, this is what the apply step
+    checks before honoring a decisions file. It is deliberately a positive
+    test of the ``approved`` list rather than a search for held approvals:
+    :func:`ReviewSession.to_decisions` only withholds a pair from ``approved``
+    when the session itself was running in two-person mode, so a file written
+    under single-reviewer mode has nothing held back to notice. Counting the
+    approvers on the pairs that did land in ``approved`` is the check that
+    still means something when the file was produced somewhere else, under a
+    different pack, or by hand.
+
+    A missing, non-object, or unparseable ``audit`` section yields no
+    approvers and therefore fails every approved pair: two-person approval
+    that was never recorded cannot be demonstrated after the fact, and
+    absence of the trail is not evidence that the review happened. Pairs are
+    returned as the ``left|right`` audit key, sorted.
+    """
+
+    audit = data.get("audit")
+    entries_by_pair: dict[frozenset[str], object] = {}
+    if isinstance(audit, dict):
+        for key, entries in audit.items():
+            ids = str(key).split("|")
+            if len(ids) == 2:
+                entries_by_pair[frozenset(ids)] = entries
+
+    approved = data.get("approved", [])
+    short: set[str] = set()
+    if isinstance(approved, list):
+        for entry in approved:
+            if not isinstance(entry, list) or len(entry) != 2:
+                continue
+            pair = (str(entry[0]), str(entry[1]))
+            if len(_approvers_in_audit_entries(entries_by_pair.get(frozenset(pair)))) < 2:
+                short.add("|".join(sorted(pair)))
+    return sorted(short)
+
+
 def _interleave_pairs(
     real: Sequence[Pair], planted: Sequence[PlantedPair]
 ) -> tuple[tuple[Pair, ...], frozenset[int]]:

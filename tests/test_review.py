@@ -41,6 +41,7 @@ from constituent_reconciler.review.session import (
     FieldCell,
     PairView,
     ReviewSession,
+    approved_without_second_approval,
     rationale_for,
 )
 
@@ -797,6 +798,151 @@ def test_apply_accepts_the_file_once_the_second_reviewer_approves(
         ]
     )
     assert code == 0
+
+
+# -- the two-person gate is a policy, so apply re-checks it ------------------
+#
+# The audit-trail check above is derived: it flags a pair recorded in ``audit``
+# but absent from ``approved``, which is the shape a session in two-person mode
+# writes for a held single approval. That shape only exists when the review ran
+# under two-person mode. A decisions file produced under single-reviewer mode
+# puts every approved pair straight into ``approved`` with one approver, so the
+# derived check finds nothing to flag, and before this gate ``apply`` merged it
+# even under a pack that requires two people.
+
+
+def test_apply_under_a_two_person_pack_refuses_a_single_reviewer_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from constituent_reconciler.cli import main
+
+    # The review ran under the default pack, so the session never held the
+    # approval back; the file is exactly what the tool writes there.
+    _, _, session = _session(tmp_path, require_second=False)
+    view = session.views()[0]
+    session.record(view.index, APPROVED, reviewer="casey")
+    payload = json.loads((tmp_path / "decisions.json").read_text(encoding="utf-8"))
+    assert payload["approved"] == [[view.left_id, view.right_id]]
+
+    # Applying it under the DV pack, which requires two reviewers, must refuse.
+    code = main(
+        [
+            "apply",
+            "--config",
+            str(EXAMPLES / "recipe-dv.toml"),
+            "--decisions",
+            str(tmp_path / "decisions.json"),
+            "--out",
+            str(tmp_path / "out"),
+        ]
+    )
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "second reviewer" in err
+    assert view.left_id in err and view.right_id in err
+    # Nothing was written: the refusal happens before the pipeline runs.
+    assert not (tmp_path / "out" / "resolved.csv").exists()
+
+
+def test_apply_under_a_two_person_pack_accepts_two_distinct_approvers(
+    tmp_path: Path,
+) -> None:
+    from constituent_reconciler.cli import main
+
+    _, _, session = _session(tmp_path, require_second=True)
+    for view in session.views():
+        session.record(view.index, APPROVED, reviewer="casey")
+        session.record(view.index, APPROVED, reviewer="jordan")
+    code = main(
+        [
+            "apply",
+            "--config",
+            str(EXAMPLES / "recipe-dv.toml"),
+            "--decisions",
+            str(tmp_path / "decisions.json"),
+            "--out",
+            str(tmp_path / "out"),
+        ]
+    )
+    assert code == 0
+
+
+def test_apply_under_a_two_person_pack_refuses_a_file_with_no_audit_trail(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from constituent_reconciler.cli import main
+
+    # A version-1 file, or a hand-edited one, records no attribution at all.
+    # Two-person approval cannot be shown from it, so it is refused rather
+    # than read as "nothing is awaiting a second reviewer".
+    decisions_path = tmp_path / "decisions.json"
+    decisions_path.write_text(
+        json.dumps({"approved": [["existing:E002", "incoming:N004"]], "rejected": []}),
+        encoding="utf-8",
+    )
+    code = main(
+        [
+            "apply",
+            "--config",
+            str(EXAMPLES / "recipe-dv.toml"),
+            "--decisions",
+            str(decisions_path),
+            "--out",
+            str(tmp_path / "out"),
+        ]
+    )
+    assert code == 2
+    assert "second reviewer" in capsys.readouterr().err
+
+
+def test_apply_without_a_two_person_pack_still_accepts_one_approver(
+    tmp_path: Path,
+) -> None:
+    from constituent_reconciler.cli import main
+
+    # The gate is the pack's, not a new blanket requirement: a single-reviewer
+    # file applied under the default pack keeps working.
+    _, _, session = _session(tmp_path, require_second=False)
+    session.record(0, APPROVED, reviewer="casey")
+    code = main(
+        [
+            "apply",
+            "--config",
+            str(EXAMPLES / "recipe.toml"),
+            "--decisions",
+            str(tmp_path / "decisions.json"),
+            "--out",
+            str(tmp_path / "out"),
+        ]
+    )
+    assert code == 0
+
+
+def test_approved_without_second_approval_counts_distinct_identities() -> None:
+    def entry(reviewer: str, verdict: str = APPROVED) -> dict[str, str]:
+        return {"reviewer": reviewer, "verdict": verdict, "decided_at": "2026-01-01T00:00:00+00:00"}
+
+    # Two distinct people: satisfied.
+    assert not approved_without_second_approval(
+        {"approved": [["a", "b"]], "audit": {"a|b": [entry("casey"), entry("jordan")]}}
+    )
+    # One person recording twice under a spelling variant is still one person.
+    assert approved_without_second_approval(
+        {"approved": [["a", "b"]], "audit": {"a|b": [entry("Casey Ng"), entry("casey  ng")]}}
+    ) == ["a|b"]
+    # A rejection is not an approval, so it does not count toward the two.
+    assert approved_without_second_approval(
+        {"approved": [["a", "b"]], "audit": {"a|b": [entry("casey"), entry("jordan", REJECTED)]}}
+    ) == ["a|b"]
+    # An audit key written in the other order still matches its approved pair.
+    assert not approved_without_second_approval(
+        {"approved": [["b", "a"]], "audit": {"a|b": [entry("casey"), entry("jordan")]}}
+    )
+    # A missing or unusable audit section proves nothing, so it is not a pass.
+    assert approved_without_second_approval({"approved": [["a", "b"]]}) == ["a|b"]
+    assert approved_without_second_approval({"approved": [["a", "b"]], "audit": "nope"}) == ["a|b"]
+    # Nothing approved, nothing to confirm.
+    assert not approved_without_second_approval({"approved": [], "audit": {}})
 
 
 def test_server_refuses_a_post_with_no_token_over_a_real_socket(tmp_path: Path) -> None:

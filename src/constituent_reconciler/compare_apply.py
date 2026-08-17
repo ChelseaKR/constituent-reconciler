@@ -72,6 +72,7 @@ from constituent_reconciler.consent import Withheld, partition_by_consent
 from constituent_reconciler.manifest import file_digest
 from constituent_reconciler.models import Band, Cluster, GoldenRecord, Pair
 from constituent_reconciler.pipeline import _apply_overrides
+from constituent_reconciler.review.session import approved_without_second_approval
 from constituent_reconciler.schema import CUTOVER_CORRECTIONS_SCHEMA_VERSION
 
 CORRECTIONS_FILENAME = "target_corrections.csv"
@@ -195,7 +196,13 @@ def _decision_pairs(data: Mapping[str, object], key: str) -> list[frozenset[str]
 
 
 def _awaiting_second(data: Mapping[str, object]) -> list[str]:
-    """Audit-trail pairs neither approved nor rejected: held single approvals."""
+    """Audit-trail pairs neither approved nor rejected: held single approvals.
+
+    Derived from the file's shape, so it only sees approvals a two-person
+    review session chose to hold back. ``read_decisions`` pairs it with
+    ``review.session.approved_without_second_approval``, which positively
+    counts approvers on the pairs that did land in ``approved``.
+    """
 
     audit = data.get("audit")
     if not isinstance(audit, dict):
@@ -204,8 +211,21 @@ def _awaiting_second(data: Mapping[str, object]) -> list[str]:
     return sorted(key for key in audit if frozenset(str(key).split("|")) not in decided)
 
 
+def requires_second_reviewer(left: Side, right: Side) -> bool:
+    """Two-person review gates the export when either side's recipe requires it.
+
+    Public because the CLI passes the answer into :func:`read_decisions`,
+    which needs the policy but never sees the recipes.
+    """
+
+    return left.recipe.require_second_reviewer or right.recipe.require_second_reviewer
+
+
 def read_decisions(
-    decisions_path: Path, result: CompareResult
+    decisions_path: Path,
+    result: CompareResult,
+    *,
+    require_second_reviewer: bool = False,
 ) -> tuple[frozenset[frozenset[str]], frozenset[frozenset[str]]]:
     """Read the review decisions for this comparison, fail-closed.
 
@@ -213,6 +233,13 @@ def read_decisions(
     absent while review pairs exist, when a pair is still awaiting a second
     reviewer, or when a decision names a pair this comparison never scored,
     which means the file describes a different comparison.
+
+    With ``require_second_reviewer`` (either side's pack, see
+    ``requires_second_reviewer``) it also refuses any approved pair whose
+    audit trail does not show two distinct approvers, including a file that
+    records no attribution at all. The held-approval check alone cannot cover
+    this: a file reviewed under a single-reviewer pack holds nothing back, so
+    there is no held approval to notice.
     """
 
     if not decisions_path.is_file():
@@ -238,6 +265,18 @@ def read_decisions(
             f"second reviewer ({named}); have a second reviewer finish "
             "(reconcile compare-review --reviewer <other-name>), or reject the pairs"
         )
+    if require_second_reviewer:
+        unconfirmed = approved_without_second_approval(data)
+        if unconfirmed:
+            named = ", ".join(key.replace("|", " and ") for key in unconfirmed)
+            raise CompareError(
+                f"{decisions_path} cannot show two distinct approvers for "
+                f"{len(unconfirmed)} approved pair(s) ({named}), and a policy pack on "
+                "one of these sides requires two-person review. Have a second "
+                "reviewer review these pairs (reconcile compare-review --reviewer "
+                "<other-name>); a decisions file that records no reviewer "
+                "attribution cannot be applied under this pack at all"
+            )
     approved = frozenset(_decision_pairs(data, "approved"))
     rejected = frozenset(_decision_pairs(data, "rejected"))
     scored = {pair.key() for pair in result.pairs}
