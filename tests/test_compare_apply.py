@@ -41,7 +41,11 @@ def _compare_into(out_dir: Path, left: Path = LEFT_RECIPE, right: Path = RIGHT_R
 
 
 def _session_for(
-    out_dir: Path, left: Path = LEFT_RECIPE, right: Path = RIGHT_RECIPE
+    out_dir: Path,
+    left: Path = LEFT_RECIPE,
+    right: Path = RIGHT_RECIPE,
+    *,
+    require_second_reviewer: bool = False,
 ) -> ReviewSession:
     """The same session surface reconcile compare-review serves, headless."""
 
@@ -53,6 +57,7 @@ def _session_for(
         result.fields,
         out_dir / compare_apply.COMPARE_DECISIONS_FILENAME,
         reviewer="Ana",
+        require_second_reviewer=require_second_reviewer,
     )
 
 
@@ -534,3 +539,104 @@ def test_compare_review_reports_a_bad_side_and_exits_2(
     )
     assert code == 2
     assert "compare error" in capsys.readouterr().err
+
+
+# -- the two-person gate is a policy, so the export re-checks it -------------
+
+
+def _two_person_left_recipe(tmp_path: Path) -> Path:
+    """The left recipe with two-person review switched on, inputs absolute.
+
+    The same file is handed to both ``compare`` and ``compare-apply`` so the
+    manifest binding still matches; only the review policy differs from the
+    shared fixture.
+    """
+
+    path = tmp_path / "recipe-left-two-person.toml"
+    path.write_text(
+        LEFT_RECIPE.read_text(encoding="utf-8").replace(
+            'incoming = "left.csv"', f'incoming = "{FIXTURES / "left.csv"}"'
+        )
+        + "\n[review]\nrequire_second_reviewer = true\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _single_approval_into(out_dir: Path, left: Path) -> tuple[str, str]:
+    """Approve the comparison's one review pair with a single reviewer.
+
+    Uses the real session, in the single-reviewer mode a recipe without the
+    two-person policy selects, so the decisions file is exactly what the tool
+    writes there: the pair listed in ``approved`` with one audit entry, and
+    nothing held back.
+    """
+
+    session = _session_for(out_dir, left=left)
+    assert session.require_second_reviewer is False
+    view = session.views()[0]
+    session.record(view.index, APPROVED, reviewer="Ana")
+    payload = json.loads(
+        (out_dir / compare_apply.COMPARE_DECISIONS_FILENAME).read_text(encoding="utf-8")
+    )
+    assert payload["approved"] == [[view.left_id, view.right_id]]
+    return view.left_id, view.right_id
+
+
+def test_compare_apply_under_a_two_person_pack_refuses_a_single_approver(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Nothing is held back in this file, so the awaiting-a-second check has
+    # nothing to notice; the export must still refuse, because a side's recipe
+    # requires two people to stand behind a merge.
+    left = _two_person_left_recipe(tmp_path)
+    _compare_into(tmp_path, left=left)
+    left_id, right_id = _single_approval_into(tmp_path, left)
+    assert _apply(tmp_path, left=left) == 2
+    err = capsys.readouterr().err
+    assert "two distinct approvers" in err
+    assert left_id in err and right_id in err
+    assert not (tmp_path / compare_apply.CORRECTIONS_FILENAME).exists()
+
+
+def test_compare_apply_without_the_pack_still_accepts_a_single_approver(
+    tmp_path: Path,
+) -> None:
+    # The gate is the pack's, not a new blanket requirement.
+    _compare_into(tmp_path)
+    _single_approval_into(tmp_path, LEFT_RECIPE)
+    assert _apply(tmp_path) == 0
+    assert (tmp_path / compare_apply.CORRECTIONS_FILENAME).exists()
+
+
+def test_compare_apply_under_a_two_person_pack_refuses_a_file_with_no_audit(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    left = _two_person_left_recipe(tmp_path)
+    _compare_into(tmp_path, left=left)
+    left_id, right_id = _single_approval_into(tmp_path, left)
+    # Strip the attribution, as a version-1 or hand-written file has none.
+    (tmp_path / compare_apply.COMPARE_DECISIONS_FILENAME).write_text(
+        json.dumps({"approved": [[left_id, right_id]], "rejected": []}), encoding="utf-8"
+    )
+    assert _apply(tmp_path, left=left) == 2
+    assert "two distinct approvers" in capsys.readouterr().err
+    assert not (tmp_path / compare_apply.CORRECTIONS_FILENAME).exists()
+
+
+def test_read_decisions_accepts_two_distinct_approvers_under_the_gate(tmp_path: Path) -> None:
+    # The gate is satisfiable: two people, and read_decisions returns the pair.
+    _compare_into(tmp_path)
+    session = _session_for(tmp_path)
+    view = session.views()[0]
+    session.record(view.index, APPROVED, reviewer="Ana")
+    session.record(view.index, APPROVED, reviewer="Bo")
+    left_side = compare.load_side(LEFT_RECIPE, label="left")
+    right_side = compare.load_side(RIGHT_RECIPE, label="right")
+    result = compare.run_compare(left_side, right_side)
+    approved, _ = compare_apply.read_decisions(
+        tmp_path / compare_apply.COMPARE_DECISIONS_FILENAME,
+        result,
+        require_second_reviewer=True,
+    )
+    assert frozenset((view.left_id, view.right_id)) in approved

@@ -231,7 +231,12 @@ merge takes effect only after two different reviewers approve the same pair: the
 first approval is held as awaiting a second reviewer, a second reviewer resumes
 the same decisions file under their own `--reviewer` name to confirm or reject,
 and `reconcile apply` refuses a file that still holds half-approved pairs. Any
-rejection keeps the records separate immediately.
+rejection keeps the records separate immediately. The requirement belongs to the
+pack, not to the file: under a pack that requires two reviewers, `reconcile apply`
+and `reconcile compare-apply` count the distinct approvers recorded for every pair
+they are about to merge, so a decisions file reviewed earlier under a permissive
+pack, or one carrying no reviewer attribution at all, is refused rather than
+applied.
 
 A correction replaces one field value before normalization and approves the
 pair. It is attributed to the correcting reviewer and stored in
@@ -559,7 +564,7 @@ locally (this table plus the linked doc) pending a filed issue. Last reviewed:
 | Standard | Applies? | Status | Details |
 |---|---|---|---|
 | Quality & Metrics | Applies | Enforced — full suite and ≥85% branch coverage are merge-blocking; aggregate, extraction, large-corpus, and disaggregated bias reports are committed | [docs/ROADMAP.md](docs/ROADMAP.md) metrics ledger |
-| Code Quality | Applies | Enforced — `ruff` (incl. `S`, `C90`), `ruff format`, `mypy --strict`, `pytest --strict-markers`, `uv.lock` committed, `uv sync --frozen` | `pyproject.toml`, `Makefile` |
+| Code Quality | Applies | Enforced — `ruff` (incl. `S`, `C90`), `ruff format`, `mypy --strict`, `pytest --strict-markers`, `uv.lock` committed, `uv sync --locked` | `pyproject.toml`, `Makefile` |
 | Security & Supply-Chain | Applies — ASVS L2 (handles DV-survivor PII) | Partial — secret scan, dependency-vuln scan, SAST (Semgrep + CodeQL + zizmor), and a release-time CycloneDX SBOM + keyless build-provenance attestation (`release.yml`) enforced; container scan (Trivy) is enforced in CI; VEX is still a gap | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Security |
 | CI/CD | Applies | Partial — SHA-pinned actions, least-privilege tokens, `make verify` parity, `secrets`+`security` jobs, CODEOWNERS, and a solo-maintainer review waiver (ADR 0008) all in place; a live `protect-main` branch ruleset has been active since 2026-07-09 (force-push and deletion blocked, nine required check contexts, no bypass actors), though it does not yet carry the committed profile's pull-request and linear-history rules (parity delta recorded in [docs/rulesets/README.md](docs/rulesets/README.md)) | `.github/workflows/ci.yml`, [docs/adr/0008-solo-maintainer-review-waiver.md](docs/adr/0008-solo-maintainer-review-waiver.md), [docs/rulesets/](docs/rulesets/) |
 | Release & Versioning | Applies (release-producing: 0.1.0-0.7.0) | Partial — `.github/workflows/release.yml` is tag-triggered (`v*`), re-verifies at the tagged commit, checks tag/`pyproject.toml` version consistency, builds sdist+wheel, generates a CycloneDX SBOM, attests build provenance (keyless OIDC), and publishes a GitHub Release with the matching CHANGELOG section; gap — no `v*` tag has been cut yet, so the workflow is unexercised, and there is no PyPI publish stage (not yet published to PyPI) | [.github/workflows/release.yml](.github/workflows/release.yml), [CHANGELOG.md](CHANGELOG.md) |
