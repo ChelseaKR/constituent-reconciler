@@ -19,8 +19,10 @@ A false merge joins two different people and can corrupt a record irreversibly. 
 | Missed-match rate | 40.0% (2/5) | [11.8%, 76.9%] |
 | Precision, auto | 100.0% | |
 | Recall, auto | 60.0% | |
+| F1, auto | 75.0% | |
 | Precision, auto+review coverage | 100.0% | |
 | Recall, auto+review coverage | 60.0% | |
+| F1, auto+review coverage | 75.0% | |
 | Blocking misses (true pairs never scored) | 0 | |
 
 ## Gate
@@ -28,6 +30,8 @@ A false merge joins two different people and can corrupt a record irreversibly. 
 False-merge gate at threshold 0.0%: **PASS** (observed 0.0%).
 
 Recall at the auto level is intentionally below 100%: pairs the matcher is unsure about are not auto-merged, they are sent to review. The auto+review coverage recall is the share of true duplicates the system surfaces to a human one way or another.
+
+F1 is reported for comparability with published record-linkage results and is not a gate. It weighs a false merge and a missed match equally, which this pipeline does not.
 
 ## Disaggregated error by documented risk class
 

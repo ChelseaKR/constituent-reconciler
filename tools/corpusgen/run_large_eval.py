@@ -146,7 +146,15 @@ def run(
     class_rows = _class_breakdown(labels, coverage_pairs, auto_pairs, group_key="name_class")
     channel_rows = _class_breakdown(labels, coverage_pairs, auto_pairs, group_key="channel")
 
-    markdown = render_eval_markdown(report, dataset=out_dir.name, gate_threshold=gate)
+    markdown = render_eval_markdown(
+        report,
+        dataset=out_dir.name,
+        gate_threshold=gate,
+        generator="make eval-large",
+        # Same reason as the FEBRL4 benchmark: this corpus is generated CSV, so
+        # no extraction seam and no field judge is ever in the path here.
+        field_judge_ran=False,
+    )
     perf_lines = [
         "",
         "## Performance",

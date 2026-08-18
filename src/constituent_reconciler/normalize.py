@@ -63,6 +63,18 @@ _DATE_FORMATS: tuple[str, ...] = (
     "%d %b %Y",
 )
 
+# ISO 8601 *basic* format (YYYYMMDD, no separators). It is kept out of
+# _DATE_FORMATS and gated on an explicit year range because a bare run of eight
+# digits is the one date shape that can silently mis-parse: strptime("%Y%m%d")
+# happily reads "04121990" as year 412, and a registry that exports DDMMYYYY
+# would land a wrong date rather than an empty one. Requiring the leading four
+# digits to be a plausible birth year rejects those orderings instead of
+# guessing at them, which is the same fail-closed choice the ambiguous-date
+# note above records. The bound is deliberately wide: it excludes reordered
+# numerics, not unusual ages.
+_COMPACT_DATE_FORMAT = "%Y%m%d"
+_COMPACT_DATE_YEAR_RANGE = (1900, 2100)
+
 
 def _strip_accents(value: str) -> str:
     decomposed = unicodedata.normalize("NFKD", value)
@@ -170,6 +182,13 @@ def normalize_dob(value: str) -> str:
             return datetime.strptime(text, fmt).strftime("%Y-%m-%d")
         except ValueError:
             continue
+    if len(text) == 8 and text.isdigit():
+        low, high = _COMPACT_DATE_YEAR_RANGE
+        if low <= int(text[:4]) <= high:
+            try:
+                return datetime.strptime(text, _COMPACT_DATE_FORMAT).strftime("%Y-%m-%d")
+            except ValueError:
+                return ""
     return ""
 
 

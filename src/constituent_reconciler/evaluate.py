@@ -53,6 +53,22 @@ def wilson_interval(successes: int, trials: int, z: float = 1.96) -> tuple[float
     return (max(0.0, center - margin), min(1.0, center + margin))
 
 
+def f1_score(precision: float, recall: float) -> float:
+    """Harmonic mean of precision and recall; 0.0 when both are 0.
+
+    Reported alongside, never instead of, the false-merge rate. F1 weighs a
+    false merge and a missed match equally, and this pipeline does not: a false
+    merge can corrupt a record irreversibly while a missed match leaves a
+    duplicate a later pass can still catch. F1 is here because it is the
+    comparable number the record-linkage literature quotes, so an external
+    benchmark result can be read against published ones.
+    """
+
+    if precision <= 0.0 and recall <= 0.0:
+        return 0.0
+    return 2.0 * precision * recall / (precision + recall)
+
+
 def truth_pairs(clusters: Iterable[Iterable[str]]) -> set[frozenset[str]]:
     """Expand ground-truth clusters into the set of true-duplicate pairs."""
 
@@ -98,6 +114,8 @@ class EvalReport:
     recall_auto: float
     precision_coverage: float
     recall_coverage: float
+    f1_auto: float
+    f1_coverage: float
 
     blocking_misses: int
     segments: tuple[SegmentScore, ...] = ()
@@ -247,6 +265,11 @@ def evaluate(
                 )
             )
 
+    precision_auto = (caught_auto / len(auto)) if auto else 1.0
+    recall_auto = (caught_auto / len(truth)) if truth else 1.0
+    precision_coverage = (caught_cov / len(coverage)) if coverage else 1.0
+    recall_coverage = (caught_cov / len(truth)) if truth else 1.0
+
     return EvalReport(
         n_records=n_records,
         n_true_pairs=len(truth),
@@ -259,10 +282,12 @@ def evaluate(
         missed=len(missed),
         missed_match_rate=missed_rate,
         missed_match_ci=wilson_interval(len(missed), len(truth)),
-        precision_auto=(caught_auto / len(auto)) if auto else 1.0,
-        recall_auto=(caught_auto / len(truth)) if truth else 1.0,
-        precision_coverage=(caught_cov / len(coverage)) if coverage else 1.0,
-        recall_coverage=(caught_cov / len(truth)) if truth else 1.0,
+        precision_auto=precision_auto,
+        recall_auto=recall_auto,
+        precision_coverage=precision_coverage,
+        recall_coverage=recall_coverage,
+        f1_auto=f1_score(precision_auto, recall_auto),
+        f1_coverage=f1_score(precision_coverage, recall_coverage),
         blocking_misses=len(truth - candidate),
         segments=tuple(segment_scores),
     )
