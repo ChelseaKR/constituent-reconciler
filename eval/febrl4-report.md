@@ -12,18 +12,20 @@ A false merge joins two different people and can corrupt a record irreversibly. 
 |--------|-------|--------|
 | Records | 10000 | |
 | True duplicate pairs (ground truth) | 5000 | |
-| Candidate pairs after blocking | 21295 | |
-| Auto-merged pairs | 3365 | |
-| Pairs sent to review | 520 | |
-| **False-merge rate (gated)** | **0.0%** (0/3365) | [0.0%, 0.1%] |
-| Missed-match rate | 22.9% (1144/5000) | [21.7%, 24.1%] |
+| Scored pairs kept (above the reporting floor) | 41136 | |
+| Auto-merged pairs | 3714 | |
+| Pairs sent to review | 712 | |
+| **False-merge rate (gated)** | **0.0%** (0/3714) | [0.0%, 0.1%] |
+| Missed-match rate | 12.1% (603/5000) | [11.2%, 13.0%] |
 | Precision, auto | 100.0% | |
-| Recall, auto | 67.3% | |
-| F1, auto | 80.5% | |
+| Recall, auto | 74.3% | |
+| F1, auto | 85.2% | |
 | Precision, auto+review coverage | 99.3% | |
-| Recall, auto+review coverage | 77.1% | |
-| F1, auto+review coverage | 86.8% | |
-| Blocking misses (true pairs never scored) | 344 | |
+| Recall, auto+review coverage | 87.9% | |
+| F1, auto+review coverage | 93.3% | |
+| True pairs never scored | 61 | |
+
+A true pair goes unscored two ways, and this row counts both: blocking never generated it, or blocking generated it and the matcher scored it below the 0.001 floor that keeps near-zero pairs out of the result. The row was labelled a blocking count until v0.8, which read as though only the blocking rules could reach these pairs. They are separate causes with separate fixes, and on the external benchmark the second was by far the larger of the two.
 
 ## Gate
 

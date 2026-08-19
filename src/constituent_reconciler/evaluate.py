@@ -117,6 +117,13 @@ class EvalReport:
     f1_auto: float
     f1_coverage: float
 
+    #: True pairs that never reached the scorer's output at all. The name is
+    #: historical and reads narrower than the number is: a pair lands here
+    #: either because blocking never generated it, or because blocking did and
+    #: the matcher scored it below the floor that keeps near-zero pairs out of
+    #: the result. Only the first is a blocking problem. Reports render this as
+    #: "true pairs never scored" and say so, because reading it as a blocking
+    #: count points a fix at the wrong module.
     blocking_misses: int
     segments: tuple[SegmentScore, ...] = ()
 

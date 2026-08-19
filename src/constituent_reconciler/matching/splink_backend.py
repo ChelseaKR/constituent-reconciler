@@ -35,6 +35,14 @@ _DERIVED_COLUMNS: dict[str, tuple[str, ...]] = {
     "last_name": ("last_name_soundex", "last_name_surname1", "last_name_surname2"),
 }
 
+# Derived columns computed from more than one canonical field, keyed by the set
+# of fields they need. ``name_pair_key`` backs the transposed-name blocking rule
+# and reads both name fields, so it cannot ride along with a single base field
+# the way the columns above do.
+_CROSS_FIELD_COLUMNS: dict[frozenset[str], tuple[str, ...]] = {
+    frozenset({"first_name", "last_name"}): ("name_pair_key",),
+}
+
 
 def _records_to_frame(records: Iterable[Record], fields: tuple[str, ...]) -> pd.DataFrame:
     rows: list[dict[str, str | None]] = []
@@ -51,6 +59,10 @@ def _records_to_frame(records: Iterable[Record], fields: tuple[str, ...]) -> pd.
                 # value can make pandas infer a non-string type; the comparison
                 # conditions already treat "" as no evidence.
                 row[derived_column] = record.normalized.get(derived_column, "")
+        for needed, columns in _CROSS_FIELD_COLUMNS.items():
+            if needed <= set(fields):
+                for column in columns:
+                    row[column] = record.normalized.get(column, "")
         rows.append(row)
     return pd.DataFrame(rows)
 

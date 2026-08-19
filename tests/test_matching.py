@@ -139,3 +139,138 @@ def test_term_frequency_adjustment_favors_the_rarer_surname() -> None:
         for left, right, prob in score_pairs(records, FIELDS, floor=0.0)
     }
     assert scores[frozenset(("R1", "R2"))] > scores[frozenset(("C1", "C2"))]
+
+
+def test_transposed_given_and_family_name_reaches_auto() -> None:
+    """A duplicate filed with the two names in the opposite boxes still merges.
+
+    Before the transposition comparison level, this pair was scored as two
+    separate name disagreements, one on each field, for a single mistake made
+    once. Two "different" levels firing together is a veto no amount of
+    corroborating evidence recovers from, so the pair scored near zero however
+    well the other fields agreed.
+    """
+
+    records = [
+        _record("E30", "existing", "Wei", "Li", "1984-09-02", email="wl@example.org"),
+        _record("N30", "incoming", "Li", "Wei", "1984-09-02", email="wl@example.org"),
+    ]
+    assert _scores(records)[frozenset(("E30", "N30"))] >= 0.97
+
+
+def test_transposed_name_is_recognised_through_a_typo() -> None:
+    """The level is Jaro-Winkler on each side, not equality.
+
+    A transposition and an ordinary typo happen together often enough that an
+    equality-only level would miss a large share of them, so the crossed pair
+    is recognised on the same similarity that counts as close when the names
+    are not crossed.
+    """
+
+    records = [
+        _record("E31", "existing", "Joshua", "Wiechec", "1960-11-11", phone="530-555-0177"),
+        _record("N31", "incoming", "Wiechec", "Joshzua", "1960-11-11", phone="530-555-0177"),
+    ]
+    assert _scores(records)[frozenset(("E31", "N31"))] >= 0.97
+
+
+def test_transposition_blocking_surfaces_a_pair_no_other_rule_generates() -> None:
+    """A crossed-name duplicate agreeing on nothing else is still scored.
+
+    Every other blocking rule compares one column against itself, so a record
+    whose names were entered in the opposite boxes agrees with its duplicate
+    on none of them: not first name, not last name, not the surname Soundex,
+    and here not date of birth or email either. Only ``name_pair_key``
+    generates this pair. As with the phonetic-blocking test above, this does
+    not assert the pair should merge or even reach review; it asserts the pair
+    is scored at all, which is what a blocking miss silently prevents.
+    """
+
+    records = [
+        _record("E32", "existing", "Tschirn", "Kale", "1955-02-14"),
+        _record("N32", "incoming", "Kale", "Tschirn", ""),
+    ]
+    scores = {
+        frozenset((left, right)): prob
+        for left, right, prob in score_pairs(records, FIELDS, floor=0.0)
+    }
+    assert frozenset(("E32", "N32")) in scores
+
+
+def test_crossed_names_alone_do_not_auto_merge_two_different_people() -> None:
+    """Transposition is evidence, not a verdict.
+
+    Some people genuinely carry another person's name reversed, because many
+    surnames are also common given names. Two records that cross into each
+    other but disagree on date of birth are two people, and the level's weight
+    is deliberately set well below an exact given-name agreement so that the
+    disagreeing fields still decide.
+    """
+
+    records = [
+        _record("E33", "existing", "Thomas", "Campbell", "1961-07-10"),
+        _record("N33", "incoming", "Campbell", "Thomas", "1964-01-29"),
+    ]
+    scores = {
+        frozenset((left, right)): prob
+        for left, right, prob in score_pairs(records, FIELDS, floor=0.0)
+    }
+    assert scores[frozenset(("E33", "N33"))] < 0.97
+
+
+ADDRESS_FIELDS = ("first_name", "last_name", "dob", "address")
+
+
+def _household_record(
+    uid: str, source: str, first: str, last: str, dob: str, address: str
+) -> Record:
+    raw = {"first_name": first, "last_name": last, "dob": dob, "address": address}
+    return normalize_record(Record(unique_id=uid, source=source, raw=raw), ADDRESS_FIELDS)
+
+
+def test_household_members_sharing_an_address_do_not_auto_merge() -> None:
+    """Two people in one household are not one person, at any name weight.
+
+    This guards ``defaults._NAME_DIFFERENT_M``. Raising a name disagreement's
+    m_probability lets the other fields be heard, which is the point of it,
+    but the field it most obviously lets through is a shared address, and
+    families and shelter residents share addresses. A wrong merge here would
+    join two people's records, which under the DV policy pack is a safety
+    failure and not only a quality one.
+
+    Two siblings at one address, same surname, different given names and
+    different dates of birth, must stay apart. The assertion is on the
+    auto-merge band specifically: the pair may reasonably be shown to a
+    reviewer, but it must never be merged without one.
+    """
+
+    records = [
+        _household_record("E40", "existing", "Ana", "Okafor", "1994-03-08", "12 Alder St, Reno NV"),
+        _household_record(
+            "N40", "incoming", "Chidi", "Okafor", "1998-11-21", "12 Alder St, Reno NV"
+        ),
+    ]
+    scores = {
+        frozenset((left, right)): prob
+        for left, right, prob in score_pairs(records, ADDRESS_FIELDS, floor=0.0)
+    }
+    assert scores[frozenset(("E40", "N40"))] < 0.97
+
+
+def test_household_members_with_no_date_of_birth_do_not_auto_merge() -> None:
+    """The same invariant with the corroborating field missing rather than disagreeing.
+
+    A missing date of birth is the harder case: it is no evidence rather than
+    evidence against, so the pair rests on a shared surname and a shared
+    address alone. That must still not be enough to merge without a human.
+    """
+
+    records = [
+        _household_record("E41", "existing", "Ana", "Okafor", "", "12 Alder St, Reno NV"),
+        _household_record("N41", "incoming", "Chidi", "Okafor", "", "12 Alder St, Reno NV"),
+    ]
+    scores = {
+        frozenset((left, right)): prob
+        for left, right, prob in score_pairs(records, ADDRESS_FIELDS, floor=0.0)
+    }
+    assert scores[frozenset(("E41", "N41"))] < 0.97
