@@ -42,17 +42,30 @@ addresses. The committed R5 audit at
 each of those five documented classes and is regenerated in CI with
 `make eval-bias`.
 
-As of 2026-07-12, all five pairs reach candidate scoring (zero blocking misses),
+As of 2026-08-19, all five pairs reach candidate scoring (none go unscored),
 with 100% auto+review coverage for hyphenated/punctuated surname, rural-route
-address, and informal address description. Transliterated name and non-Western
-name order are both 0% coverage at the current threshold. The small synthetic
-sample is a regression probe, not a demographic performance claim. The current
-mitigation is to keep the false-merge threshold fail-closed, expose the misses
-instead of tuning to this fixture, preserve source spans for human comparison,
-and require an adopting organization to evaluate representative local names
-and addresses before deployment. Expanding these two classes and setting a
-review-coverage gate requires reviewed data from an adopting organization; no
-real constituent data is committed here.
+address, informal address description, and non-Western name order.
+Transliterated name variant remains at 0% coverage at the current threshold.
+
+Non-Western name order moved from 0% to 100% on 2026-08-19, and it is worth
+recording how, because it was not a threshold change. The matcher now carries a
+comparison level for a given name and a family name entered in opposite fields,
+and a `name_pair_key` blocking rule that generates such a pair in the first
+place. Family-name-first is the written convention in Chinese, Korean,
+Japanese, Hungarian and Vietnamese naming, so a form that labels one box "first
+name" collects transposed values from exactly those constituents; before this,
+both name comparisons scored the crossing as a disagreement and the pair was
+penalised twice for one mistake. The change was found and measured on an
+external benchmark ([`../BENCHMARK.md`](../BENCHMARK.md)) rather than on this
+fixture, and this class improving is corroboration rather than the target.
+
+The small synthetic sample is a regression probe, not a demographic performance
+claim. The current mitigation is to keep the false-merge threshold fail-closed,
+expose the misses instead of tuning to this fixture, preserve source spans for
+human comparison, and require an adopting organization to evaluate
+representative local names and addresses before deployment. Closing the
+transliterated-name class and setting a review-coverage gate requires reviewed
+data from an adopting organization; no real constituent data is committed here.
 
 ## Privacy and data minimization (DPIA)
 

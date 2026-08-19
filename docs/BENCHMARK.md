@@ -144,8 +144,18 @@ those plausibly clears one percent on its own. 0.02 leaves the level strong
 evidence against a match at a weight near 1/48. What it stops doing is vetoing
 every other field.
 
-Because that change lets a shared address be heard, the household case is now a
-test rather than an argument. `test_matching.py` asserts that two people at one
+One corroboration is worth naming, because it comes from a fixture this
+benchmark had nothing to do with. `docs/audits/bias-report.md` plants one true
+pair for each of five documented equity risk classes, written long before this
+run. Its **non-Western name order** class had been at 0% coverage recall since
+the audit was first committed. The transposition level takes it to 100%, and
+lifts that report's auto-band recall from 60% to 80%, with precision unchanged
+at 100%. The change was found on an Australian machine-generated corpus and it
+moved a hand-written fixture about Chinese, Korean and Hungarian name order,
+which is the kind of transfer a corpus-specific fix does not make.
+
+Because the weight change lets a shared address be heard, the household case is
+now a test rather than an argument. `test_matching.py` asserts that two people at one
 address with the same surname and different given names do not auto-merge, both
 when their dates of birth disagree and when neither has one. Families and shelter
 residents share addresses, and under the DV pack a wrong merge there is a safety

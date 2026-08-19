@@ -23,7 +23,12 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   Vietnamese naming, so an intake form that assumes given-name-first collects
   transposed values from exactly those constituents. On the external benchmark
   the change lifted auto-band recall from 67.3% to 72.2% and coverage recall
-  from 77.1% to 82.0% with zero false merges.
+  from 77.1% to 82.0% with zero false merges. It also closes a standing gap in
+  the committed bias audit: the **non-Western name order** risk class in
+  `docs/audits/bias-report.md` had been at 0% coverage recall since that audit
+  was first written and is now at 100%, which is corroboration from a fixture
+  the benchmark had nothing to do with. The transliterated-name class is still
+  at 0% and is reported as such.
 
 - **The matcher is now scored against an outside benchmark.** Every eval in
   this repository scored fixtures this repository also wrote, so a good number
