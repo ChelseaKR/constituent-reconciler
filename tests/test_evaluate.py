@@ -12,11 +12,13 @@ from constituent_reconciler.evaluate import (
     cohen_kappa,
     evaluate,
     extraction_metrics,
+    f1_score,
     normalize_extracted_value,
     truth_pairs,
     wilson_interval,
 )
 from constituent_reconciler.extract.base import ExtractedField
+from constituent_reconciler.models import Band, Pair
 
 
 def _labels(pairs: list[tuple[bool, bool]]) -> list[dict[str, object]]:
@@ -312,3 +314,31 @@ def test_eval_extraction_cli_writes_report(tmp_path: Path) -> None:
     assert "# Extraction eval report" in content
     assert "Per-field breakdown" in content
     assert "**MET**" in content
+
+
+def test_f1_is_the_harmonic_mean() -> None:
+    assert f1_score(1.0, 1.0) == pytest.approx(1.0)
+    assert f1_score(0.5, 1.0) == pytest.approx(2 / 3)
+    assert f1_score(0.993, 0.771) == pytest.approx(0.868, abs=5e-4)
+
+
+def test_f1_of_zero_precision_and_recall_is_zero_not_a_division_error() -> None:
+    assert f1_score(0.0, 0.0) == 0.0
+
+
+def test_evaluate_reports_f1_consistent_with_its_precision_and_recall() -> None:
+    pairs = [
+        Pair("a", "b", 12.0, Band.AUTO),
+        Pair("c", "d", 9.0, Band.REVIEW),
+        Pair("e", "f", 9.0, Band.REVIEW),
+    ]
+    report = evaluate(pairs, [["a", "b"], ["c", "d"], ["g", "h"]], n_records=8)
+
+    assert report.f1_auto == pytest.approx(f1_score(report.precision_auto, report.recall_auto))
+    assert report.f1_coverage == pytest.approx(
+        f1_score(report.precision_coverage, report.recall_coverage)
+    )
+    # One of two auto/review pairs is a true duplicate at the auto band, and the
+    # third true pair was never surfaced, so neither F1 is degenerate.
+    assert 0.0 < report.f1_auto < 1.0
+    assert 0.0 < report.f1_coverage < 1.0

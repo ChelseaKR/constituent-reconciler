@@ -289,6 +289,20 @@ human at the auto or review level. The gated metric is the false-merge rate
 because a wrong merge is the expensive, sometimes irreversible error; a missed
 match only leaves a duplicate.
 
+### Scored against an outside benchmark
+
+The numbers above come from fixtures this project also wrote, which is a weak
+form of evidence. `make eval-benchmark` runs the same pipeline against
+[FEBRL4](docs/BENCHMARK.md), a published record-linkage benchmark whose corpus,
+corruptions, and ground truth all come from someone else. On its 10,000 records
+and 5,000 known pairs the result is **100% precision and 67.3% recall at the
+auto-merge band, and 99.3% precision, 77.1% recall, F1 86.8% counting the review
+queue**. Nothing was merged that should not have been, and close to a quarter of
+the true duplicates never reached a reviewer. Tuned academic systems score higher
+on this benchmark. The corpus is downloaded on demand, verified against pinned
+digests, and never committed; [eval/febrl4-report.md](eval/febrl4-report.md) is
+the committed result.
+
 ### A one-page summary for a board or funder
 
 `reconcile report` renders the artifacts of a completed run as a one-page,

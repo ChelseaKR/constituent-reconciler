@@ -31,6 +31,21 @@ queue exists for exactly the pairs a confidence threshold should not decide
 on its own. Auto-level recall is below 100% on purpose, while coverage recall
 (auto plus review) captures every true duplicate.
 
+## The external benchmark report
+
+`febrl4-report.md` is the one eval here that does not score fixtures this
+project wrote. FEBRL4 is a published record-linkage benchmark: the corpus, the
+corruptions, and the ground truth are all third-party, so the difficulty cannot
+be tuned to flatter the result. Regenerate it with `make eval-benchmark`. The
+corpus is downloaded on demand into gitignored `benchmarks/`, verified against
+pinned SHA-256 digests, and never committed.
+
+Measured on 10,000 records and 5,000 known pairs: 100% precision and 67.3%
+recall at the auto band, 99.3% precision and 77.1% recall (F1 86.8%) counting
+the review queue. See [../docs/BENCHMARK.md](../docs/BENCHMARK.md) for what the
+benchmark is, why a real-person corpus was declined, and the normalizer gap the
+benchmark exposed that no fixture here could.
+
 ## The large-corpus report
 
 27 records and 7 true pairs give a real gate, but a weak one: the demo's

@@ -28,6 +28,11 @@ out-dv/
 eval/large-corpus/
 eval/large-corpus-pdf/
 
+# External benchmark corpora (docs/BENCHMARK.md): downloaded at run time
+# from a pinned upstream and verified by digest, never committed. Only the
+# derived report (eval/febrl4-report.md) is.
+benchmarks/
+
 # Node (accessibility audit tooling only; see docs/adr/0011)
 node_modules/
 .axe-fixtures/

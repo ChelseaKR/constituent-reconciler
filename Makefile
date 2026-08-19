@@ -1,4 +1,4 @@
-.PHONY: install verify format-check lint type test security axe-fixtures axe eval eval-extraction eval-bias eval-large perf-baseline perf-baseline-pdf run docker bundle clean
+.PHONY: install verify format-check lint type test security axe-fixtures axe eval eval-extraction eval-bias eval-large eval-benchmark perf-baseline perf-baseline-pdf run docker bundle clean
 
 # Reproduce the full local toolchain. CI mirrors `make verify` byte for byte.
 # `--locked`, not `--frozen`: both install exactly what uv.lock pins and
@@ -91,6 +91,18 @@ eval-large:
 		--out-dir eval/large-corpus \
 		--report-out eval/large-corpus-report.md \
 		--regenerate
+
+# Score the matcher against FEBRL4, an external record-linkage benchmark whose
+# corpus, corruptions, and ground truth are all third-party (docs/BENCHMARK.md).
+# Every other eval here scores fixtures this repo also wrote; this one does not.
+# Not part of `verify` or CI: it downloads its corpus, and a gate that needs the
+# network is a gate that fails for reasons unrelated to the code. Run it on
+# release, and after any change to matching or normalization. The corpus lands
+# in gitignored benchmarks/; only the report is committed.
+eval-benchmark:
+	.venv/bin/python -m tools.benchmark.run_eval \
+		--out-dir benchmarks/febrl4 \
+		--report-out eval/febrl4-report.md
 
 # Stage-timing baseline over the large synthetic corpus (UC-01 "before"
 # numbers): per-stage wall clock and peak memory for ingest, extract,

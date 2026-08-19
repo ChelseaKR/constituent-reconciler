@@ -30,6 +30,36 @@ def test_dob_unparseable_becomes_empty() -> None:
     assert normalize_dob("") == ""
 
 
+def test_dob_accepts_iso_basic_yyyymmdd() -> None:
+    """The compact ISO form, which the FEBRL4 benchmark exports (docs/BENCHMARK.md).
+
+    Before this was handled, every date in that corpus normalized to "" and the
+    matcher scored 10,000 records with no date of birth at all.
+    """
+
+    assert normalize_dob("19151111") == "1915-11-11"
+    assert normalize_dob("20040229") == "2004-02-29"
+
+
+def test_dob_rejects_eight_digits_that_are_not_a_plausible_year_first_date() -> None:
+    """DDMMYYYY and MMDDYYYY must not be silently read as YYYYMMDD.
+
+    Guessing here would write a confidently wrong date rather than an empty one,
+    which is the failure mode the ambiguous-date rule exists to prevent.
+    """
+
+    assert normalize_dob("12041990") == ""
+    assert normalize_dob("04121990") == ""
+
+
+def test_dob_rejects_impossible_calendar_dates() -> None:
+    """Corrupted dates stay empty instead of rolling over into a valid date."""
+
+    assert normalize_dob("19960094") == ""
+    assert normalize_dob("19450493") == ""
+    assert normalize_dob("20230229") == ""
+
+
 def test_phone_reduces_to_last_ten_digits() -> None:
     assert normalize_phone("(530) 555-0143") == "5305550143"
     assert normalize_phone("1-530-555-0143") == "5305550143"

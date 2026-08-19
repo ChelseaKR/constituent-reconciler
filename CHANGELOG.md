@@ -6,7 +6,63 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 ## [Unreleased]
 
+### Added
+- **The matcher is now scored against an outside benchmark.** Every eval in
+  this repository scored fixtures this repository also wrote, so a good number
+  partly measured the fixture author's imagination. `make eval-benchmark`
+  runs the same `pipeline.run` entry point the CLI uses against FEBRL4, a
+  published record-linkage benchmark whose corpus, corruptions, and ground
+  truth are all third-party. Measured on its 10,000 records and 5,000 known
+  pairs: 100% precision and 67.3% recall at the auto-merge band, and 99.3%
+  precision, 77.1% recall, F1 86.8% counting the review queue, with 344 true
+  pairs never scored at all because blocking never generated them. Precision
+  is the strong half and recall is not; tuned academic systems score higher on
+  this benchmark, and the numbers are published as measured. The corpus is
+  fetched on demand from a pinned upstream commit, verified against recorded
+  SHA-256 digests, and written to gitignored `benchmarks/`; only the report is
+  committed. A real-person corpus (the North Carolina voter registry, the
+  standard choice) was considered and declined: a public voter file is a
+  locating vector for exactly the people the DV pack protects.
+  `docs/BENCHMARK.md` records the decision, the licensing, and the gaps.
+- **Eval reports carry F1.** Reported at both the auto and the auto+review
+  bands, alongside the existing precision and recall, so results here can be
+  read against published record-linkage numbers. It is explicitly not a gate:
+  F1 weighs a false merge and a missed match equally and this pipeline does
+  not. The false-merge rate remains the gated metric.
+- **The benchmark report proves its own input.** A harness can produce entirely
+  plausible metrics while the corpus it claims to have scored never reached the
+  resolver, and that failure is invisible in the metrics. The report now
+  records the SHA-256 of the exact input bytes, the record counts ingested,
+  per-field population before and after normalization, and named example pairs.
+  The run aborts outright if the converter and the scorer disagree on how many
+  ground-truth pairs exist, which is what a stale truth file looks like.
+
 ### Fixed
+- **`normalize_dob` silently discarded every date in ISO 8601 basic format.**
+  `19151111` is the compact form of `1915-11-11`. The normalizer handled the
+  extended form and eight other layouts but not that one, so a source exporting
+  compact dates had its entire date-of-birth column normalize to the empty
+  string with nothing logged and nothing raised. It went unnoticed because
+  every fixture in this repository writes dates in a format the normalizer
+  already knew; the FEBRL4 benchmark writes them compactly, and there all 9,707
+  populated dates were dropped. Measured effect of the fix on that corpus:
+  coverage F1 from 69.2% to 86.8%, coverage recall from 58.5% to 77.1%,
+  missed-match rate from 41.5% to 22.9%, and blocking misses from 676 to 344.
+  The compact form is accepted only when its leading four digits are a
+  plausible year, so `12041990` and `04121990` still normalize to empty rather
+  than being guessed at, and impossible dates such as `19960094` stay empty
+  instead of rolling over into a valid one.
+- **Eval reports credited a command that had not been run.** The generator line
+  was hard-coded to `reconcile eval`, so the reports written by `make
+  eval-large` and `make eval-benchmark` named a command that would not
+  reproduce them. Callers now pass the generator; the default is unchanged.
+- **A kappa failure was reported for a field judge that never ran.** The
+  calibration section is fail-closed by design, but the large-corpus and
+  benchmark runs take structured CSV with no extraction seam anywhere in the
+  path, so there are no confidence verdicts for labels to agree with. Those
+  reports now say the section is not applicable and why. This waives no gate:
+  `reconcile eval` still fails closed on absent labels wherever the judge is
+  actually in the path.
 - **The two-person review gate is now enforced where the merge happens, not
   only where the decisions file is written.** Under the `dv` pack
   `require_second_reviewer` is on, and the documented behavior is that a merge
