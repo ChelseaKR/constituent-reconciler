@@ -64,6 +64,28 @@ def _name_close_level(column: str) -> dict[str, Any]:
     }
 
 
+#: ``m_probability`` for a name comparison's "different" level: given two records
+#: are the same person, how often do their given names, or their surnames, fail to
+#: agree, fail to be a known nickname pair, and fail even to be Jaro-Winkler close.
+#:
+#: It was 0.01 through v0.7. One percent is not a defensible reading of constituent
+#: intake data. A name outright changes between two records of the same person for
+#: reasons that are ordinary rather than exotic: a legal name against a chosen or
+#: preferred one, an anglicized given name on one form and the name as written at
+#: home on another, a marriage or divorce, a name changed after leaving an abusive
+#: partner (the population the DV pack exists for), a transliteration from a
+#: non-Latin script, a nickname the vendored table does not carry (it maps under a
+#: twentieth of the given names in the external benchmark), or a typo worse than one
+#: character. Any single one of those plausibly clears one percent on its own.
+#:
+#: 0.02 is still conservative, and it is a correction rather than a loosening: the
+#: level stays strong evidence against a match, at a weight near 1/48. What it stops
+#: doing is vetoing every other field. See docs/BENCHMARK.md for what the change
+#: measured, including the household case it is checked against in
+#: ``test_matching.py``.
+_NAME_DIFFERENT_M: float = 0.02
+
+
 def _name_else_level() -> dict[str, Any]:
     return {
         "sql_condition": "ELSE",
@@ -71,17 +93,60 @@ def _name_else_level() -> dict[str, Any]:
     }
 
 
+def _transposed_condition(given: str, family: str) -> str:
+    """SQL that fires when the given and family names are crossed over.
+
+    Reads all four name values rather than one column's own pair, which is the
+    only way to see a transposition at all: to either comparison on its own,
+    the two values it can see simply disagree. Both name comparisons build the
+    condition from the same two column names, so they always agree on which
+    pairs are crossed.
+
+    Jaro-Winkler rather than equality on each side, so that a transposition
+    carrying an ordinary typo ("Wiechec Joshzua" against "Joshua Wiechec") is
+    still recognised as one. The threshold is the same ``_NAME_CLOSE`` the
+    same-field close level uses: a name pair counts as crossed on exactly the
+    similarity that counts as close when it is not crossed.
+
+    Both level lists place this after their exact level, so a pair that
+    plainly agrees on a column takes agreement first and never reaches here.
+    """
+
+    return (
+        f'"{given}_l" IS NOT NULL AND "{given}_r" IS NOT NULL '
+        f'AND "{family}_l" IS NOT NULL AND "{family}_r" IS NOT NULL '
+        f'AND jaro_winkler_similarity("{given}_l", "{family}_r") >= {_NAME_CLOSE} '
+        f'AND jaro_winkler_similarity("{family}_l", "{given}_r") >= {_NAME_CLOSE}'
+    )
+
+
 def _first_name_comparison(column: str = "first_name") -> dict[str, Any]:
-    """Four-level given-name comparison: exact, nickname, close, else.
+    """Five-level given-name comparison: exact, transposed, nickname, close, else.
 
     The nickname level sits between exact and Jaro-Winkler "close" because a
     nickname pair (Bill/William, Peggy/Margaret) is not a character-similarity
     match at all; it needs the vendored table in :mod:`nicknames`, looked up
     through the ``first_name_nickname_key`` column normalize.py derives
-    alongside ``first_name``. The four m_probabilities sum to 1.0 (the
+    alongside ``first_name``. The m_probabilities sum to 1.0 (the
     convention this module uses throughout, see docs/adr/0001), moved
     down slightly from the three-level version's 0.92/0.07/0.01 split to make
-    room for the new level without changing the overall shape of the prior.
+    room for the added levels without changing the overall shape of the prior.
+
+    The transposition level carries the whole of the evidence for a crossed
+    name pair; the surname comparison abstains on the same condition rather
+    than counting it a second time (see ``_last_name_comparison``). Its
+    m_probability of 0.02 says that among records that are the same person,
+    about one in fifty pairs has the given and family values swapped on one
+    side: uncommon, but a structural intake error rather than a typo, so not
+    negligible either. Its u_probability of 0.001 is an order of magnitude
+    below the same-field exact level's 0.01 rather than the two orders the
+    product of two independent agreements would imply, because the surnames
+    that collide this way are precisely the ones that are also common given
+    names (Thomas, Ryan, James, Campbell), so two different people crossing
+    into each other is rarer than agreement but not vanishingly so. The
+    resulting weight, 20, is well below the 85 an exact given-name agreement
+    earns: a transposition alone does not carry a pair, it lets the other
+    fields be heard instead of being vetoed.
     """
 
     return {
@@ -91,8 +156,14 @@ def _first_name_comparison(column: str = "first_name") -> dict[str, Any]:
             {
                 "sql_condition": f'"{column}_l" = "{column}_r"',
                 "label_for_charts": "exact",
-                "m_probability": 0.88,
+                "m_probability": 0.85,
                 "u_probability": 0.01,
+            },
+            {
+                "sql_condition": _transposed_condition(column, "last_name"),
+                "label_for_charts": "given and family name transposed",
+                "m_probability": 0.02,
+                "u_probability": 0.001,
             },
             {
                 "sql_condition": f'"{column}_nickname_key_l" = "{column}_nickname_key_r" '
@@ -102,13 +173,17 @@ def _first_name_comparison(column: str = "first_name") -> dict[str, Any]:
                 "u_probability": 0.01,
             },
             {**_name_close_level(column), "m_probability": 0.05, "u_probability": 0.03},
-            {**_name_else_level(), "m_probability": 0.01, "u_probability": 0.95},
+            {
+                **_name_else_level(),
+                "m_probability": _NAME_DIFFERENT_M,
+                "u_probability": 0.95,
+            },
         ],
     }
 
 
 def _last_name_comparison(column: str = "last_name") -> dict[str, Any]:
-    """Four-level surname comparison: exact, compound-surname, close, else.
+    """Five-level surname comparison: exact, transposed, compound, close, else.
 
     The exact level carries a Splink term-frequency adjustment: agreement on
     a common surname ("Smith") is weaker evidence of a true match than
@@ -142,6 +217,18 @@ def _last_name_comparison(column: str = "last_name") -> dict[str, Any]:
     than agreeing on the whole string, and it is evidence a Jaro-Winkler
     similarity on the full string would usually miss (the two full strings
     can be quite different in length and character order).
+
+    The transposition level abstains on purpose: ``m_probability`` and
+    ``u_probability`` are equal, so the level contributes a weight of exactly
+    1 and moves the score neither way. A crossed name pair is one event, and
+    ``_first_name_comparison`` already carries it. What this level is really
+    for is stopping the "different" level from firing on that same event: two
+    values that are crossed rather than wrong would otherwise be scored as a
+    surname disagreement, which carries a weight near 1/48. That is the whole
+    reason a transposed duplicate used to be unreachable. It was not merely
+    unsupported, it was penalised twice, once by each name field, for a single
+    mistake made once, and before ``_NAME_DIFFERENT_M`` was corrected each of
+    those penalties was near 1/95.
     """
 
     surname1_l, surname1_r = f'"{column}_surname1_l"', f'"{column}_surname1_r"'
@@ -158,10 +245,16 @@ def _last_name_comparison(column: str = "last_name") -> dict[str, Any]:
             {
                 "sql_condition": f'"{column}_l" = "{column}_r"',
                 "label_for_charts": "exact",
-                "m_probability": 0.90,
+                "m_probability": 0.87,
                 "u_probability": 0.01,
                 "tf_adjustment_column": column,
                 "tf_adjustment_weight": 0.05,
+            },
+            {
+                "sql_condition": _transposed_condition("first_name", column),
+                "label_for_charts": "given and family name transposed",
+                "m_probability": 0.02,
+                "u_probability": 0.02,
             },
             {
                 "sql_condition": compound_condition,
@@ -170,7 +263,11 @@ def _last_name_comparison(column: str = "last_name") -> dict[str, Any]:
                 "u_probability": 0.02,
             },
             {**_name_close_level(column), "m_probability": 0.03, "u_probability": 0.02},
-            {**_name_else_level(), "m_probability": 0.01, "u_probability": 0.95},
+            {
+                **_name_else_level(),
+                "m_probability": _NAME_DIFFERENT_M,
+                "u_probability": 0.95,
+            },
         ],
     }
 
@@ -278,14 +375,31 @@ def blocking_rules_for(fields: tuple[str, ...]) -> list[str]:
     ``last_name``) is added on top of the exact-match rule. Exact-string
     blocking on last_name misses a transliteration variant of a surname
     (a name typed with different but phonetically equivalent spelling); the
-    Soundex rule generates candidate pairs for those too, at the cost of a few
-    more comparisons the scorer then rejects. It is additive, not a
-    replacement: both rules run, and Splink unions the candidate pairs they
-    produce.
+    Soundex rule generates candidate pairs for those too, at the cost of more
+    comparisons the scorer then rejects. It is additive, not a replacement:
+    both rules run, and Splink unions the candidate pairs they produce. That
+    cost is the largest in this list rather than a rounding error, measured:
+    on the external benchmark the Soundex rule alone generates 229,324 of the
+    384,499 candidate pairs. It stays because it is still cheap in wall clock
+    and it reaches 3,846 true pairs, but docs/BENCHMARK.md records the number
+    rather than leaving "a few more comparisons" to stand.
+
+    When both name fields are active, ``name_pair_key`` is added for the same
+    reason: it is a rule no per-field rule can stand in for. Every other rule
+    here compares one column against itself, so a record whose given and
+    family values were entered in the opposite boxes agrees with its own
+    duplicate on none of them, and the pair is only ever generated by
+    coincidence on date of birth. The key is the two normalized names sorted
+    and joined (normalize.py), so a crossed pair lands in the same bucket. It
+    is also the cheapest rule in this list by a wide margin: two records share
+    a name-pair key only when they carry the same two names, where the
+    surname and given-name rules each bucket everyone who shares one name.
     """
 
     candidates = ["dob", "last_name", "email", "first_name"]
     rules = [c for c in candidates if c in fields]
     if "last_name" in fields:
         rules.append("last_name_soundex")
+    if "first_name" in fields and "last_name" in fields:
+        rules.append("name_pair_key")
     return rules

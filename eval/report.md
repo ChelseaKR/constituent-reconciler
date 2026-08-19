@@ -12,7 +12,7 @@ A false merge joins two different people and can corrupt a record irreversibly. 
 |--------|-------|--------|
 | Records | 27 | |
 | True duplicate pairs (ground truth) | 7 | |
-| Candidate pairs after blocking | 8 | |
+| Scored pairs kept (above the reporting floor) | 12 | |
 | Auto-merged pairs | 6 | |
 | Pairs sent to review | 2 | |
 | **False-merge rate (gated)** | **0.0%** (0/6) | [0.0%, 39.0%] |
@@ -23,7 +23,9 @@ A false merge joins two different people and can corrupt a record irreversibly. 
 | Precision, auto+review coverage | 87.5% | |
 | Recall, auto+review coverage | 100.0% | |
 | F1, auto+review coverage | 93.3% | |
-| Blocking misses (true pairs never scored) | 0 | |
+| True pairs never scored | 0 | |
+
+A true pair goes unscored two ways, and this row counts both: blocking never generated it, or blocking generated it and the matcher scored it below the 0.001 floor that keeps near-zero pairs out of the result. The row was labelled a blocking count until v0.8, which read as though only the blocking rules could reach these pairs. They are separate causes with separate fixes, and on the external benchmark the second was by far the larger of the two.
 
 ## Gate
 

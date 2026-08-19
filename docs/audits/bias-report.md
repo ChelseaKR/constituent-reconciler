@@ -12,18 +12,20 @@ A false merge joins two different people and can corrupt a record irreversibly. 
 |--------|-------|--------|
 | Records | 10 | |
 | True duplicate pairs (ground truth) | 5 | |
-| Candidate pairs after blocking | 5 | |
-| Auto-merged pairs | 3 | |
+| Scored pairs kept (above the reporting floor) | 5 | |
+| Auto-merged pairs | 4 | |
 | Pairs sent to review | 0 | |
-| **False-merge rate (gated)** | **0.0%** (0/3) | [0.0%, 56.2%] |
-| Missed-match rate | 40.0% (2/5) | [11.8%, 76.9%] |
+| **False-merge rate (gated)** | **0.0%** (0/4) | [0.0%, 49.0%] |
+| Missed-match rate | 20.0% (1/5) | [3.6%, 62.4%] |
 | Precision, auto | 100.0% | |
-| Recall, auto | 60.0% | |
-| F1, auto | 75.0% | |
+| Recall, auto | 80.0% | |
+| F1, auto | 88.9% | |
 | Precision, auto+review coverage | 100.0% | |
-| Recall, auto+review coverage | 60.0% | |
-| F1, auto+review coverage | 75.0% | |
-| Blocking misses (true pairs never scored) | 0 | |
+| Recall, auto+review coverage | 80.0% | |
+| F1, auto+review coverage | 88.9% | |
+| True pairs never scored | 0 | |
+
+A true pair goes unscored two ways, and this row counts both: blocking never generated it, or blocking generated it and the matcher scored it below the 0.001 floor that keeps near-zero pairs out of the result. The row was labelled a blocking count until v0.8, which read as though only the blocking rules could reach these pairs. They are separate causes with separate fixes, and on the external benchmark the second was by far the larger of the two.
 
 ## Gate
 
@@ -35,13 +37,13 @@ F1 is reported for comparability with published record-linkage results and is no
 
 ## Disaggregated error by documented risk class
 
-Each row is a planted true-duplicate pair representing a risk class called out in the model card. `Surfaced` includes both auto and review; blocking misses were never scored.
+Each row is a planted true-duplicate pair representing a risk class called out in the model card. `Surfaced` includes both auto and review; the last column counts pairs that were never scored at all, whether because blocking did not generate them or because they fell below the reporting floor.
 
-| Risk class | True pairs | Surfaced | Missed | Coverage recall | Blocking misses |
+| Risk class | True pairs | Surfaced | Missed | Coverage recall | Never scored |
 |------------|-----------:|----------:|-------:|----------------:|----------------:|
 | hyphenated or punctuated surname | 1 | 1 | 0 | 100.0% | 0 |
 | informal address description | 1 | 1 | 0 | 100.0% | 0 |
-| non-Western name order | 1 | 0 | 1 | 0.0% | 0 |
+| non-Western name order | 1 | 1 | 0 | 100.0% | 0 |
 | rural-route address | 1 | 1 | 0 | 100.0% | 0 |
 | transliterated name variant | 1 | 0 | 1 | 0.0% | 0 |
 

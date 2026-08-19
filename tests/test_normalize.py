@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from constituent_reconciler.models import Record
 from constituent_reconciler.normalize import (
+    name_pair_key,
     normalize_dob,
     normalize_email,
     normalize_name,
     normalize_phone,
     normalize_record,
+    normalized_keys,
     soundex,
     surname_tokens,
 )
@@ -106,3 +108,40 @@ def test_normalize_record_fills_derived_matching_depth_columns() -> None:
     assert record.normalized["last_name_soundex"] == soundex("cruzgomez")
     assert record.normalized["last_name_surname1"] == "cruz"
     assert record.normalized["last_name_surname2"] == "gomez"
+
+
+def test_name_pair_key_is_the_same_whichever_box_each_name_landed_in() -> None:
+    """The key is order-free, which is the whole point of it.
+
+    A constituent whose family name is written first lands the two values in
+    the opposite fields from the intake worker who typed the earlier record.
+    Both records still produce the same key, so blocking offers the pair to
+    the scorer instead of never generating it.
+    """
+
+    assert name_pair_key("wei", "li") == name_pair_key("li", "wei")
+
+
+def test_name_pair_key_needs_both_names() -> None:
+    """One name alone is not a key: it would bucket unrelated records."""
+
+    assert name_pair_key("wei", "") == ""
+    assert name_pair_key("", "li") == ""
+    assert name_pair_key("", "") == ""
+
+
+def test_name_pair_key_is_derived_only_when_both_name_fields_are_active() -> None:
+    record = normalize_record(
+        Record(unique_id="1", source="test", raw={"first_name": "Li", "last_name": "Wei"}),
+        ("first_name", "last_name"),
+    )
+    assert record.normalized["name_pair_key"] == name_pair_key("li", "wei")
+    assert "name_pair_key" in normalized_keys(("first_name", "last_name"))
+
+    first_only = normalize_record(
+        Record(unique_id="2", source="test", raw={"first_name": "Li"}),
+        ("first_name",),
+    )
+    assert "name_pair_key" not in first_only.normalized
+    assert "name_pair_key" not in normalized_keys(("first_name",))
+    assert "name_pair_key" not in normalized_keys(("last_name",))

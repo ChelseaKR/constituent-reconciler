@@ -7,16 +7,39 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **The matcher recognises a transposed name.** A duplicate filed with the
+  given name and the family name in the opposite boxes was not merely
+  unsupported by the model, it was penalised twice: both name comparisons saw
+  values that disagreed and each fired its "different" level, so one mistake
+  made once cost a factor of about 9,000 and vetoed every other field. Two
+  name comparison levels now read all four name values and recognise a crossed
+  pair, tolerant of a typo on either side; the given-name comparison carries
+  the evidence and the surname comparison abstains, so the fact is counted
+  once. A `name_pair_key` blocking rule (the two normalized names sorted and
+  joined) generates the pair in the first place, which no per-field rule can:
+  a crossed record agrees with its own duplicate on none of the existing keys.
+  This is a naming-equity fix as much as a data-entry one. Family-name-first
+  is the written convention in Chinese, Korean, Japanese, Hungarian and
+  Vietnamese naming, so an intake form that assumes given-name-first collects
+  transposed values from exactly those constituents. On the external benchmark
+  the change lifted auto-band recall from 67.3% to 72.2% and coverage recall
+  from 77.1% to 82.0% with zero false merges. It also closes a standing gap in
+  the committed bias audit: the **non-Western name order** risk class in
+  `docs/audits/bias-report.md` had been at 0% coverage recall since that audit
+  was first written and is now at 100%, which is corroboration from a fixture
+  the benchmark had nothing to do with. The transliterated-name class is still
+  at 0% and is reported as such.
+
 - **The matcher is now scored against an outside benchmark.** Every eval in
   this repository scored fixtures this repository also wrote, so a good number
   partly measured the fixture author's imagination. `make eval-benchmark`
   runs the same `pipeline.run` entry point the CLI uses against FEBRL4, a
   published record-linkage benchmark whose corpus, corruptions, and ground
   truth are all third-party. Measured on its 10,000 records and 5,000 known
-  pairs: 100% precision and 67.3% recall at the auto-merge band, and 99.3%
-  precision, 77.1% recall, F1 86.8% counting the review queue, with 344 true
-  pairs never scored at all because blocking never generated them. Precision
-  is the strong half and recall is not; tuned academic systems score higher on
+  pairs: 100% precision and 74.3% recall at the auto-merge band, and 99.3%
+  precision, 87.9% recall, F1 93.3% counting the review queue, with 61 true
+  pairs never scored at all. Precision is the strong half and recall is not;
+  tuned academic systems score higher on
   this benchmark, and the numbers are published as measured. The corpus is
   fetched on demand from a pinned upstream commit, verified against recorded
   SHA-256 digests, and written to gitignored `benchmarks/`; only the report is
@@ -37,7 +60,38 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   The run aborts outright if the converter and the scorer disagree on how many
   ground-truth pairs exist, which is what a stale truth file looks like.
 
+### Changed
+- **A name disagreement no longer vetoes every other field.**
+  `defaults._NAME_DIFFERENT_M`, the m_probability that two records of the same
+  person carry names that neither agree, nor form a known nickname pair, nor
+  are Jaro-Winkler close, moves from 0.01 to 0.02. One percent was not a
+  defensible reading of constituent intake data: a legal name against a chosen
+  one, an anglicized given name, a marriage or divorce, a name changed after
+  leaving an abusive partner, a transliteration, a nickname the vendored table
+  does not carry, or a typo worse than one character each plausibly clear one
+  percent alone. The level remains strong evidence against a match. Combined
+  with the transposition levels, coverage recall on the external benchmark
+  goes 77.1% to 87.9% and F1 86.8% to 93.3%, with auto-band precision
+  unchanged at 100% (0 false merges in 3,714) and coverage precision up from
+  99.25% to 99.34%. The 192 pairs added to the review queue are all true
+  duplicates; the number of non-matches a reviewer sees is unchanged at 29.
+  Because the change lets a shared address be heard, `test_matching.py` now
+  asserts the household invariant directly: two people at one address with the
+  same surname and different given names do not auto-merge, whether their dates
+  of birth disagree or neither has one.
+
 ### Fixed
+- **Two eval-report labels were pointing fixes at the wrong module.** "Candidate
+  pairs after blocking" was counting pairs kept above the 0.001 scoring floor,
+  not pairs blocking generated, understating blocking by a factor of eighteen
+  on the external benchmark (21,295 against 384,499). "Blocking misses" was
+  counting every true pair absent from the scorer's output, whether blocking
+  never generated it or the matcher scored it below the floor. Read as a
+  blocking count it produced a wrong diagnosis: of 344 such pairs, 287 had
+  been blocked and scored all along and only 57 were genuinely unblocked. Both
+  rows are relabelled, the report says what the number combines, and
+  `EvalReport.blocking_misses` carries a comment so the field name stops
+  implying a cause.
 - **`normalize_dob` silently discarded every date in ISO 8601 basic format.**
   `19151111` is the compact form of `1915-11-11`. The normalizer handled the
   extended form and eight other layouts but not that one, so a source exporting
@@ -47,7 +101,8 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   already knew; the FEBRL4 benchmark writes them compactly, and there all 9,707
   populated dates were dropped. Measured effect of the fix on that corpus:
   coverage F1 from 69.2% to 86.8%, coverage recall from 58.5% to 77.1%,
-  missed-match rate from 41.5% to 22.9%, and blocking misses from 676 to 344.
+  missed-match rate from 41.5% to 22.9%, and true pairs never scored from 676
+  to 344.
   The compact form is accepted only when its leading four digits are a
   plausible year, so `12041990` and `04121990` still normalize to empty rather
   than being guessed at, and impossible dates such as `19960094` stay empty

@@ -254,7 +254,7 @@ def render_eval_markdown(
         "|--------|-------|--------|",
         f"| Records | {report.n_records} | |",
         f"| True duplicate pairs (ground truth) | {report.n_true_pairs} | |",
-        f"| Candidate pairs after blocking | {report.n_candidate_pairs} | |",
+        f"| Scored pairs kept (above the reporting floor) | {report.n_candidate_pairs} | |",
         f"| Auto-merged pairs | {report.n_auto} | |",
         f"| Pairs sent to review | {report.n_review} | |",
         f"| **False-merge rate (gated)** | **{_pct(report.false_merge_rate)}** "
@@ -267,7 +267,15 @@ def render_eval_markdown(
         f"| Precision, auto+review coverage | {_pct(report.precision_coverage)} | |",
         f"| Recall, auto+review coverage | {_pct(report.recall_coverage)} | |",
         f"| F1, auto+review coverage | {_pct(report.f1_coverage)} | |",
-        f"| Blocking misses (true pairs never scored) | {report.blocking_misses} | |",
+        f"| True pairs never scored | {report.blocking_misses} | |",
+        "",
+        "A true pair goes unscored two ways, and this row counts both: blocking "
+        "never generated it, or blocking generated it and the matcher scored it "
+        "below the 0.001 floor that keeps near-zero pairs out of the result. The "
+        "row was labelled a blocking count until v0.8, which read as though only "
+        "the blocking rules could reach these pairs. They are separate causes with "
+        "separate fixes, and on the external benchmark the second was by far the "
+        "larger of the two.",
         "",
         "## Gate",
         "",
@@ -290,9 +298,11 @@ def render_eval_markdown(
             "",
             "Each row is a planted true-duplicate pair representing a risk class "
             "called out in the model card. `Surfaced` includes both auto and review; "
-            "blocking misses were never scored.",
+            "the last column counts pairs that were never scored at all, whether "
+            "because blocking did not generate them or because they fell below the "
+            "reporting floor.",
             "",
-            "| Risk class | True pairs | Surfaced | Missed | Coverage recall | Blocking misses |",
+            "| Risk class | True pairs | Surfaced | Missed | Coverage recall | Never scored |",
             "|------------|-----------:|----------:|-------:|----------------:|----------------:|",
         ]
         lines += [
