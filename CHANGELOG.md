@@ -60,6 +60,33 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   The run aborts outright if the converter and the scorer disagree on how many
   ground-truth pairs exist, which is what a stale truth file looks like.
 
+- **`apply_repair` for CiviCRM, behind an unconditional second-reviewer gate
+  (UC-03, ADR 0012).** `reconcile plan-split` produced a local, read-only
+  repair plan; `reconcile approve-repair` and `reconcile apply-repair` are the
+  two new commands that let a reviewed plan actually reach a live CiviCRM
+  instance. CiviCRM is now the repair pilot: `connectors/civicrm.py` declares
+  the exact verified version (6.17.2) and the two operations checked against
+  it, `field-restore` and `split-create`, both marked destructive. Every
+  operation is idempotent by construction -- `field-restore` reads the
+  survivor's current value and writes only when it differs from the plan's
+  `restore_to`, and `split-create` looks a member up by its own record id
+  before ever calling create, because CiviCRM rejects a second create against
+  a live `external_identifier` as a DB uniqueness error rather than a clean
+  "already exists" response. `apply-repair` is dry-run by default (zero
+  network calls, no credential needed) and refuses to construct a connector
+  at all -- not just to write -- with fewer than two distinct reviewers'
+  recorded approval of the exact plan digest; the break-the-gate tests in
+  `tests/test_repair_apply.py` prove this with a connector double that fails
+  the test if any of its methods are ever called. A real apply reads the
+  destination's live version first and refuses unless it is the exact
+  declared one, withholds any `split-create` member whose current consent is
+  not active when the recipe requires consent, and writes a local
+  `repair_receipts.json` (added to `destruction.PII_ARTIFACTS`) alongside one
+  `repair-apply` provenance entry per operation, naming the approvers and a
+  receipt digest, never the raw values. `docs/THREAT-MODEL.md`'s T7 and T8
+  entries, written ahead of implementation, are updated to say what is now
+  mitigated rather than planned.
+
 ### Changed
 - **A name disagreement no longer vetoes every other field.**
   `defaults._NAME_DIFFERENT_M`, the m_probability that two records of the same

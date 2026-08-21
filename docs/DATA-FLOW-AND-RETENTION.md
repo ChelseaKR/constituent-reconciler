@@ -107,6 +107,8 @@ this table is aspirational.
 | `civicrm_import.csv`, `salesforce_import.csv` | `connectors/crm_csv.py` | the `--out` directory | Yes: import-shaped field values | Local files, so permitted under the `dv` pack. Skipped on `--dry-run`. |
 | Live CRM records | `connectors/civicrm.py`, `connectors/salesforce.py` | the remote CRM | Yes | Non-local; refused fail-closed under the `dv` pack (`pipeline.build_connector`). |
 | `repair_plan.json` | `repair.py` via `reconcile plan-split` | the run's `--out` directory, beside the manifest | Yes: proposed split records and restoration values for the members of one written cluster | Local only, never sent anywhere. The provenance log stores its digest, not its content. Regenerable at will from the manifest and sources, so destroying it loses nothing. |
+| `repair_receipts.json` | `repair.py` via `reconcile apply-repair` | the run's `--out` directory, beside the manifest | Yes: the before/after raw values of every operation an apply actually performed | Written only on a real (`--execute`) apply, never on a dry run. Unlike the plan file it is not freely regenerable -- it is the record of what was actually written to a live CiviCRM instance -- so it should follow the destination's own retention window rather than being deleted as soon as the repair looks done. The provenance log stores each operation's receipt digest, not its content. |
+| `repair_approvals.json` | `repair.py` via `reconcile approve-repair` | the run's `--out` directory, beside the manifest | Ids and names only | Reviewer names, verdicts, and timestamps keyed by the plan digest they approved. The same content class as `decisions.json`'s audit section; not in the destruction inventory for the same reason. |
 | `withheld.csv` | `pipeline._write_withheld` | the `--out` directory | Ids only | Cluster id, member record ids, reason. No field values, but ids resolve to people through the organization's own systems. |
 | `decisions.json` | `review/session.py` | the `--out` directory | Ids only | Pair ids and verdicts. No field values, by design. |
 | `stage_cache/` entry files | `stage_cache.py` via `pipeline.run` | `<out>/stage_cache`, or the recipe's explicit `[cache] dir` boundary | Yes: extracted and normalized field values, keyed by content digest | Written only when a recipe opts in. Covered by `reconcile destroy`; an explicit boundary is covered via `--cache-dir`. |
@@ -144,7 +146,11 @@ organization's existing records schedule. The model:
   the output directory once a run's results have been applied. A repair plan
   in particular should be destroyed as soon as the repair is done or
   abandoned: it concentrates the raw values of the people in a bad merge, and
-  it can be regenerated whenever it is needed again.
+  it can be regenerated whenever it is needed again. `repair_receipts.json`,
+  written only when a repair is actually applied, is not freely regenerable
+  the same way: it is the local evidence of a real write to CiviCRM, so
+  retain it on the destination's own records schedule rather than deleting it
+  as soon as the repair looks done.
 * `provenance.jsonl`, `decisions.json`, and `withheld.csv` hold ids and hashes
   rather than field values and may outlive the record artifacts, which is what
   lets the audit trail survive routine cleanup.
@@ -166,7 +172,14 @@ them once their purpose is served: the resolved records have landed in the
 organization's comparable database, the review decisions have been applied,
 and the repair is done or abandoned. The repair plan deserves the shortest
 life of the three, because it concentrates the raw values of the survivors
-caught in one bad merge and can be regenerated on demand. A migration
+caught in one bad merge and can be regenerated on demand. `repair_receipts.json`
+is not reachable under this pack today: `apply-repair --execute` builds its
+connector through `pipeline.build_connector`, the same gate `write_all` is
+refused under, and the only repair-capable destination (CiviCRM) is
+non-local, so `require_local_targets` refuses the connector before any
+receipt could be written. If a future local repair-capable destination ever
+exists, its receipts belong in this same routine-destroy bucket, for the
+same reason the plan does. A migration
 comparison's record-bearing artifacts (`cutover_report.csv`,
 `cutover_review.csv`, `target_corrections.csv`, and `corrections.json`) follow
 the same schedule once the correction file has been imported. The stage-cache

@@ -48,6 +48,14 @@ RUN_START_ACTION = "run-start"
 # file's own digest; the plan's raw field values never enter the log.
 REPAIR_PLAN_ACTION = "repair-plan"
 
+# Action recorded when one repair operation is applied to a live destination
+# (``reconcile apply-repair`` -> ``connectors.civicrm.CivicrmConnector.apply_repair``).
+# The entry's content hash is the applied operation's own receipt digest,
+# never the before/after values themselves; the entry also carries the
+# operation name and the distinct reviewer identities whose approval gated
+# it (ADR 0012), added via the ``extra`` mapping ``_append`` merges in.
+REPAIR_APPLY_ACTION = "repair-apply"
+
 
 def content_hash(payload: dict[str, str]) -> str:
     """BLAKE2b-256 over a canonical JSON encoding of the written fields."""
@@ -438,6 +446,40 @@ class ProvenanceLog:
             fill_policy="",
         )
 
+    def append_repair_apply(
+        self,
+        *,
+        cluster_id: str,
+        external_id: str,
+        operation: str,
+        approvers: Sequence[str],
+        receipt_digest: str,
+    ) -> dict[str, object]:
+        """Record that one repair operation ran against a live destination.
+
+        The entry carries the receipt digest as its content hash, never the
+        before/after values themselves (docs/adr/0012-connector-repair-capabilities.md);
+        ``operation`` names the verified operation that ran (``field-restore``
+        or ``split-create``), and ``approvers`` are the distinct reviewer
+        identities whose recorded approval let ``repair.apply_repair_plan``
+        reach the connector at all. Consent is null: this entry attests that
+        an operation ran, not that a value was disclosed here for the first
+        time -- ``record_id`` carries the cluster id, matching the
+        ``repair-plan`` entry it follows, so the two can be read together.
+        """
+
+        return self._append(
+            action=REPAIR_APPLY_ACTION,
+            record_id=cluster_id,
+            members=(),
+            consent=None,
+            digest=receipt_digest,
+            external_id=external_id,
+            field_sources=None,
+            fill_policy="",
+            extra={"operation": operation, "approvers": list(approvers)},
+        )
+
     def _append(
         self,
         *,
@@ -449,6 +491,7 @@ class ProvenanceLog:
         external_id: str | None,
         field_sources: Mapping[str, str] | None,
         fill_policy: str,
+        extra: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         entry: dict[str, object] = {
             "seq": self._seq,
@@ -466,6 +509,8 @@ class ProvenanceLog:
             "content_hash": digest,
             "prev_hash": self._prev_hash,
         }
+        if extra:
+            entry.update(extra)
         # An authority may retain the TSA's signed token for the stamp it just
         # issued; record it so the proof travels with the entry. The entry hash
         # covers every key present, so verify_log needs no change.

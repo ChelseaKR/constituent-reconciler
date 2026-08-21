@@ -144,42 +144,64 @@ The boundaries that matter:
 ### Added 2026-08-03: the repair-plan surface (UC-03, ADR 0012)
 
 `reconcile plan-split` writes `repair_plan.json`, a local file that
-concentrates the raw field values of everyone caught in one bad merge, and a
-future pull request will add `apply_repair`, a remote-mutation path. Both are
-modeled here before the first plan is stored, as the ADR requires.
+concentrates the raw field values of everyone caught in one bad merge.
+`reconcile apply-repair` (added 2026-08-21) executes it against the CiviCRM
+pilot behind the second-reviewer gate described below; a real apply also
+writes `repair_receipts.json`, the before/after values each operation
+actually changed.
 
-- **T6, plan-file theft or exposure (information disclosure).** The plan is
-  the one artifact that gathers a bad merge's restoration values into a
-  single small file. Mitigations present: the plan is written only into the
-  operator's `--out` directory and is never transmitted; the provenance log
-  stores its BLAKE2b digest, never its content; `destruction.PII_ARTIFACTS`
-  lists it, so `reconcile destroy` removes it with a certificate
-  (`tests/test_destruction.py`); and because planning is repeatable from the
-  manifest and sources, the file can be destroyed the moment the repair is
-  done without losing anything. The full-disk-encryption caveat from the
-  retention model applies to it as to every other local PII artifact.
-- **T7, a tampered plan applied remotely (tampering).** An edited plan could
-  redirect a restoration or a split at apply time. Mitigation present: the
-  digest recorded at planning time identifies the exact plan bytes.
-  Mitigation that arrives with the apply path, which is not implemented yet:
-  both required approvals bind to that digest, and any destructive remote
-  operation requires two distinct reviewers in every policy pack, so a
-  swapped plan invalidates the approvals rather than riding them.
+- **T6, plan-file (and receipt-file) theft or exposure (information
+  disclosure).** The plan and the receipt are the two artifacts that gather
+  a bad merge's raw values into one small file. Mitigations present: both
+  are written only into the operator's `--out` directory and are never
+  transmitted; the provenance log stores each one's BLAKE2b digest, never
+  its content; `destruction.PII_ARTIFACTS` lists both, so `reconcile
+  destroy` removes them with a certificate (`tests/test_destruction.py`);
+  and because planning is repeatable from the manifest and sources, the
+  plan file can be destroyed the moment the repair is done without losing
+  anything (the receipt, being the record of what was actually written to
+  a live system, is evidence rather than regenerable state, and its
+  retention should follow the same policy-pack window as other output).
+  The full-disk-encryption caveat from the retention model applies to both
+  as to every other local PII artifact.
+- **T7, a tampered plan applied remotely (tampering).** An edited plan
+  could redirect a restoration or a split at apply time. Both mitigations
+  the ADR called for are implemented: `apply_repair_plan` recomputes the
+  plan file's digest and refuses unless it matches the digest the
+  provenance log recorded at planning time (`repair._verified_plan`,
+  `tests/test_repair_apply.py::test_tampered_plan_is_refused_before_the_gate`),
+  and every remote operation this pilot supports (`field-restore`,
+  `split-create`) is declared destructive and therefore requires two
+  distinct reviewers' recorded approval of that exact digest before
+  `apply_repair_plan` will construct a connector at all -- fewer than two
+  approvals refuses before any credential is read or any network call is
+  reachable
+  (`tests/test_repair_apply.py::test_single_approval_never_reaches_the_connector`
+  proves this with a connector double that fails the test if any of its
+  methods are called). A swapped plan therefore invalidates the approvals
+  recorded against the old digest rather than riding them.
 - **T8, credential scope (elevation of privilege).** An API token that can
-  delete or merge destination records is a larger asset than the
-  upsert-scoped token `write_all` needs. No adapter holds such a token today
-  because no adapter declares repair capabilities
-  (`tests/test_connector_conformance.py` asserts the absence). When the
-  CiviCRM pilot lands, its declaration and adoption docs must state the
-  minimum token scope, and operators should issue repair credentials
-  separately from routine write credentials and revoke them after use.
+  create new remote contacts under `apply_repair` is a larger asset than
+  the upsert-scoped token `write_all` needs, even though this pilot's two
+  operations never delete or merge a CiviCRM record. The CiviCRM
+  declaration (`connectors/civicrm.py`) names the exact verified version
+  (6.17.2) and the disposable instance it was checked against; operators
+  should still issue repair credentials separately from routine write
+  credentials and revoke them after use, since the same API key that can
+  create a repair-declared contact can also run routine writes for as long
+  as it is live.
 
 Planning itself stays inside the existing boundaries: it reconstructs the
 cluster offline from the manifest-verified sources and the provenance chain,
-constructs no connector, and opens no network connection. The ADR permits a
-non-mutating `inspect_repair` read of the destination, which the DV pack will
-refuse for non-local destinations through the same policy gate as every other
-egress; that read does not exist yet, and the boundary test lands with it.
+constructs no connector, and opens no network connection. `apply_repair_plan`
+crosses that boundary only past the gate: a dry run (the default) makes no
+network call either, deriving its preview entirely from the plan's own
+bytes; only `--execute`, past two recorded approvals, calls
+`inspect_repair` (a non-mutating read of the live destination version) and
+then `apply_repair`. The DV pack refuses both through the same
+`require_local_targets` policy gate `write_all` is refused under, since
+`pipeline.build_connector` is the single place that gate is enforced and
+`apply_repair_plan` uses it unless a connector is injected for testing.
 
 ### Planned
 
