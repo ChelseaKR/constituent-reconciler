@@ -1,12 +1,15 @@
-# External benchmark: FEBRL4
+# External benchmark: FEBRL
 
 Every other eval in this repository scores the matcher against fixtures this
 repository also wrote. The corpus, the error channels, and the ground truth all
 come from one hand, so a good number partly measures the fixture author's
-imagination rather than the matcher. This page covers the one eval where that is
-not true.
+imagination rather than the matcher. This page covers the evals where that is
+not true: FEBRL4, the original external benchmark this project scored, plus
+FEBRL datasets 1 through 3 (`## Widening to FEBRL datasets 1-3 (#68)` below),
+three more corruption levels from the same third-party corpus and third-party
+ground truth.
 
-Regenerate it with:
+Regenerate the FEBRL4 numbers with:
 
 ```sh
 make eval-benchmark
@@ -18,7 +21,8 @@ result against third-party ground truth, and writes
 [`../eval/febrl4-report.md`](../eval/febrl4-report.md). The corpus lands in
 gitignored `benchmarks/` and is never committed. The run takes a few seconds and
 needs network access on first use; afterwards `--offline` works against the
-cached copy.
+cached copy. `make eval-benchmark-multi DATASET=N` (N in 1, 2, 3) does the same
+for the widened datasets.
 
 ## Headline numbers
 
@@ -237,6 +241,53 @@ each against a recorded SHA-256 digest. A mismatch aborts the run rather than
 scoring whatever arrived, so a changed upstream cannot quietly move the published
 numbers. The digests are in the report as well as the source.
 
+## Widening to FEBRL datasets 1-3 (#68)
+
+FEBRL4 is one corruption level. The same `recordlinkage` package bundles three
+more datasets at the same pinned commit, at three increasing corruption
+levels, and `tools/benchmark/febrl_multi.py` gives them the same treatment:
+fetched at run time, verified against recorded SHA-256 digests, converted,
+scored with the pipeline's own `evaluate()`, gated on the false-merge rate,
+and swept across six auto-merge thresholds. Full reports:
+[`../eval/febrl1-report.md`](../eval/febrl1-report.md),
+[`../eval/febrl2-report.md`](../eval/febrl2-report.md),
+[`../eval/febrl3-report.md`](../eval/febrl3-report.md). Regenerate any of
+them with `make eval-benchmark-multi DATASET=N`.
+
+Unlike dataset4 (two files, exactly one duplicate per original), datasets 1-3
+ship as one file mixing originals and duplicates, and an original can have
+more than one duplicate: dataset1 always exactly one, dataset2 up to five
+(428 of 4,000 originals matched), dataset3 up to five with a much larger
+matched share (1,165 of 2,000). This closes the gap this document's "known
+gaps" section named below: FEBRL4 alone tested nothing about clustering
+across three or more records of the same person, and dataset3 in particular
+exercises exactly that, since every duplicate of one person is itself a true
+pair of every other duplicate under Splink's `dedupe_only` matching, not only
+a pair of the original.
+
+| Dataset | Corruption | Records | Matched persons | True pairs | Precision (auto) | Recall (auto) | F1 (auto) | Precision (coverage) | Recall (coverage) | F1 (coverage) | False merges |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | low | 1,000 | 500 | 500 | 100.0% | 74.4% | 85.3% | 100.0% | 85.4% | 92.1% | 0 |
+| 2 | medium | 5,000 | 428 | 1,934 | 100.0% | 59.7% | 74.8% | 99.5% | 78.7% | 87.9% | 0 |
+| 3 | high | 5,000 | 1,165 | 6,538 | 100.0% | 56.3% | 72.0% | 99.9% | 74.5% | 85.4% | 0 |
+| 4 (already reported above) | highest | 10,000 | 5,000 | 5,000 | 100.0% | 74.3% | 85.2% | 99.3% | 87.9% | 93.3% | 0 |
+
+Read plainly: the false-merge gate holds at zero across every corruption
+level and every dataset size measured, which is the property the fail-closed
+design is built for. Recall falls as corruption rises from dataset1 to
+dataset3, as expected; dataset4 does not continue that curve because it is a
+different, harder corruption profile from `dsgen`, not simply "more of the
+same knob" as 1 through 3, so its position in the table is a sibling
+measurement, not the next point on a line.
+
+Each report's own threshold sweep (`threshold_sweep` in
+`tools/benchmark/febrl_multi.py`) re-bands the same scored candidates at six
+auto-merge thresholds without re-running the matcher, so the precision/recall
+trade-off at a stricter or looser cutoff is measured directly rather than
+guessed. dataset3 at threshold 0.80 (looser than this project's 0.97
+default) shows the trade-off concretely: precision drops to 99.9% (5 false
+merges) in exchange for recall rising from 56.3% to 74.5%.
+
 ## Proving the corpus actually reached the resolver
 
 A benchmark harness can produce entirely plausible metrics while the corpus it
@@ -306,8 +357,11 @@ type it was never given.
 * No email and no phone means two of the strongest matching signals are absent.
   The defaults weight those heavily, so this corpus exercises a weaker feature set
   than a typical intake batch.
-* Duplicates are one-to-one. Nothing here tests clustering across three or more
-  records of the same person.
+* FEBRL4's own duplicates are one-to-one; nothing in this section tests
+  clustering across three or more records of the same person. Datasets 1-3
+  (above) close that gap: dataset3 alone has 1,165 matched persons carrying
+  up to five duplicates apiece, so three-or-more-record clustering is now
+  measured, not merely assumed to work by extension from the pairwise case.
 * **No two distinct people in this corpus share an address**, because `dsgen`
   generates each person independently. That is the single most important thing
   this benchmark cannot measure, since households, roommates, and shelter
