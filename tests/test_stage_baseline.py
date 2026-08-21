@@ -290,6 +290,132 @@ def test_unaccounted_input_is_refused(
     assert not json_out.exists()
 
 
+# --- the cached ("after") run (issue #78) ----------------------------------
+
+
+@pytest.fixture(scope="module")
+def cached_baseline(baseline: dict[str, Path]) -> dict[str, Path]:
+    """Run the harness CLI with --cached over the same corpus the baseline built."""
+
+    base = baseline["base"]
+    report = base / "stage-baseline-cached.md"
+    json_out = base / "stage-baseline-cached.json"
+    rc = stage_baseline.main(
+        [
+            "--out-dir",
+            str(baseline["corpus"]),
+            "--records",
+            str(_RECORDS),
+            "--seed",
+            str(_SEED),
+            "--cached",
+            "--baseline-json",
+            str(baseline["json"]),
+            "--report-out",
+            str(report),
+            "--json-out",
+            str(json_out),
+            "--date",
+            _DATE,
+        ]
+    )
+    assert rc == 0
+    return {"base": base, "corpus": baseline["corpus"], "report": report, "json": json_out}
+
+
+def test_cached_json_reports_variant_and_cache_stats(cached_baseline: dict[str, Path]) -> None:
+    payload = json.loads(cached_baseline["json"].read_text(encoding="utf-8"))
+
+    assert payload["variant"] == "cached"
+    stages = payload["results"]["stages"]
+    assert [stage["name"] for stage in stages] == list(stage_baseline.STAGE_NAMES)
+
+    cache_stats = payload["cache_stats"]
+    assert cache_stats["enabled"] is True
+    # The measured pass reads a cache the harness pre-warmed and discarded,
+    # so normalize must show hits, not misses, on this pass.
+    assert cache_stats["misses"].get("normalize", 0) == 0
+    assert cache_stats["hits"].get("normalize", 0) == payload["results"]["records"]
+
+
+def test_cached_json_compares_against_the_baseline(cached_baseline: dict[str, Path]) -> None:
+    payload = json.loads(cached_baseline["json"].read_text(encoding="utf-8"))
+    compared = payload["compared_to"]
+    assert compared["measured_on"] == _DATE
+    blocks = ("stage_wall_seconds_before", "stage_wall_seconds_after", "stage_wall_seconds_delta")
+    for block in blocks:
+        assert set(compared[block]) == set(stage_baseline.STAGE_NAMES)
+
+
+def test_cached_report_states_the_after_side_and_no_promise(
+    cached_baseline: dict[str, Path],
+) -> None:
+    report = cached_baseline["report"].read_text(encoding="utf-8")
+    assert "cached, after" in report
+    assert "not a performance promise" in report
+    assert "## Cache stats" in report
+    assert "## Comparison to" in report
+    assert "make perf-baseline-cached" in report
+
+
+def test_cached_outputs_are_content_free(cached_baseline: dict[str, Path]) -> None:
+    outputs = cached_baseline["report"].read_text(encoding="utf-8") + cached_baseline[
+        "json"
+    ].read_text(encoding="utf-8")
+    assert str(cached_baseline["base"]) not in outputs
+    assert "/Users/" not in outputs and "/home/" not in outputs
+
+    with (cached_baseline["corpus"] / "existing.csv").open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows
+    for row in rows[:20]:
+        for column in ("First Name", "Last Name"):
+            assert not re.search(rf"\b{re.escape(row[column])}\b", outputs)
+        assert row["Address"] not in outputs
+        if row["Email"]:
+            assert row["Email"] not in outputs
+
+
+def test_cached_run_reaches_the_same_result_as_uncached(
+    baseline: dict[str, Path], cached_baseline: dict[str, Path]
+) -> None:
+    """Caching must change timing only, never what the pipeline computes."""
+
+    before = json.loads(baseline["json"].read_text(encoding="utf-8"))["results"]
+    after = json.loads(cached_baseline["json"].read_text(encoding="utf-8"))["results"]
+    for key in (
+        "records",
+        "candidate_pairs",
+        "auto_pairs",
+        "review_pairs",
+        "golden_records",
+        "written",
+        "withheld",
+    ):
+        assert before[key] == after[key], key
+
+
+def test_cached_run_requires_a_csv_only_corpus(tmp_path: Path) -> None:
+    """--cached folds extraction into ingest, so it refuses a PDF-share corpus."""
+
+    rc = stage_baseline.main(
+        [
+            "--out-dir",
+            str(tmp_path / "corpus"),
+            "--records",
+            "120",
+            "--seed",
+            "7",
+            "--pdf-share",
+            "0.2",
+            "--cached",
+            "--report-out",
+            str(tmp_path / "refused.md"),
+        ]
+    )
+    assert rc == 1
+
+
 # --- the mixed CSV+PDF variant (issue #78) --------------------------------
 
 _PDF_RECORDS = 400

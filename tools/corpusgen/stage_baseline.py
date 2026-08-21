@@ -57,7 +57,7 @@ from pathlib import Path
 
 from constituent_reconciler import decisions, matching, pipeline, stage_cache
 from constituent_reconciler.config import Recipe, load_recipe
-from constituent_reconciler.models import Record, RunResult
+from constituent_reconciler.models import CacheStats, Record, RunResult
 from constituent_reconciler.normalize import normalize_record
 from tools.corpusgen.generate import PDF_PAGES_PER_DOC, generate, write_corpus
 from tools.corpusgen.run_large_eval import peak_memory_mb
@@ -147,7 +147,9 @@ class Measurement:
     peak_rss_mib: float
 
 
-def measure(recipe: Recipe, *, work_dir: Path) -> Measurement:
+def measure(
+    recipe: Recipe, *, work_dir: Path, active_cache: stage_cache.ActiveCache | None = None
+) -> Measurement:
     """Time the six pipeline stages over the recipe's sources.
 
     The stage sequence composes the same calls ``pipeline.run`` and
@@ -155,6 +157,18 @@ def measure(recipe: Recipe, *, work_dir: Path) -> Measurement:
     tests/test_stage_baseline.py asserts the composed output matches the
     pipeline's own. ``work_dir`` is recreated from scratch on every call so a
     leftover provenance log cannot skew the write stage's timing.
+
+    ``active_cache`` is ``None`` for the pre-cache baseline (the default, and
+    the path every existing committed report was measured on): ingest and
+    normalize are timed by the harness's own bespoke composition below,
+    unchanged from before this parameter existed. When a cache is passed
+    (the UC-01 "after" measurement, #78), ingest and normalize are timed
+    through ``pipeline.ingest_normalized_records`` instead -- the same,
+    already-tested production code path ``pipeline.run`` itself uses, rather
+    than a second hand-written cache integration this harness would have to
+    get right on its own. The two paths produce the same stage names and
+    shapes, so everything downstream (score, review_artifact, write) is
+    identical code regardless of which branch ran.
     """
 
     if work_dir.exists():
@@ -204,79 +218,122 @@ def measure(recipe: Recipe, *, work_dir: Path) -> Measurement:
             pdf_reader_seconds += time.perf_counter() - call_started
             pdf_reader_calls += 1
 
-    started = time.perf_counter()
     accounting = pipeline.IngestAccumulator()
-    raw_records: list[Record] = []
-    setattr(pipeline, "read_pdf_records", timed_read_pdf_records)  # noqa: B010 - timing swap
-    try:
-        if recipe.existing is not None:
-            raw_records += pipeline._ingest_source(
-                recipe.existing, "existing", recipe=recipe, id_prefix="E", accounting=accounting
-            )
-        raw_records += pipeline._ingest_source(
-            recipe.incoming, "incoming", recipe=recipe, id_prefix="N", accounting=accounting
-        )
-    finally:
-        setattr(pipeline, "read_pdf_records", real_read_pdf_records)  # noqa: B010 - swap back
-    pipeline._check_distinct_ids(raw_records)
-    ingest_wall = time.perf_counter() - started
-    stages.append(
-        StageTiming(
-            "ingest",
-            ingest_wall - pdf_reader_seconds,
-            len(raw_records),
-            peak_memory_mb(),
-            note=(
-                (
-                    "excludes the time the ingest walk spent in the PDF reader, "
-                    "which the extract row reports; pipeline.run itself runs "
-                    "extraction inside ingest"
+    if active_cache is None:
+        started = time.perf_counter()
+        raw_records: list[Record] = []
+        setattr(pipeline, "read_pdf_records", timed_read_pdf_records)  # noqa: B010 - timing swap
+        try:
+            if recipe.existing is not None:
+                raw_records += pipeline._ingest_source(
+                    recipe.existing,
+                    "existing",
+                    recipe=recipe,
+                    id_prefix="E",
+                    accounting=accounting,
                 )
-                if pdf_reader_calls
-                else ""
-            ),
+            raw_records += pipeline._ingest_source(
+                recipe.incoming, "incoming", recipe=recipe, id_prefix="N", accounting=accounting
+            )
+        finally:
+            setattr(pipeline, "read_pdf_records", real_read_pdf_records)  # noqa: B010 - swap back
+        pipeline._check_distinct_ids(raw_records)
+        ingest_wall = time.perf_counter() - started
+        stages.append(
+            StageTiming(
+                "ingest",
+                ingest_wall - pdf_reader_seconds,
+                len(raw_records),
+                peak_memory_mb(),
+                note=(
+                    (
+                        "excludes the time the ingest walk spent in the PDF reader, "
+                        "which the extract row reports; pipeline.run itself runs "
+                        "extraction inside ingest"
+                    )
+                    if pdf_reader_calls
+                    else ""
+                ),
+            )
         )
-    )
 
-    if pdf_reader_calls:
-        extract_stage = StageTiming(
-            "extract",
-            pdf_reader_seconds,
-            accounting.pages_extracted,
-            peak_memory_mb(),
-            note=(
-                "time the ingest walk spent in the PDF reader (sandboxed parse "
-                f"included), over {pdf_reader_calls} PDF documents; the CSV rows "
-                "of the mixed corpus need no extraction"
-            ),
+        if pdf_reader_calls:
+            extract_stage = StageTiming(
+                "extract",
+                pdf_reader_seconds,
+                accounting.pages_extracted,
+                peak_memory_mb(),
+                note=(
+                    "time the ingest walk spent in the PDF reader (sandboxed parse "
+                    f"included), over {pdf_reader_calls} PDF documents; the CSV rows "
+                    "of the mixed corpus need no extraction"
+                ),
+            )
+        else:
+            extract_stage = StageTiming(
+                "extract",
+                0.0,
+                accounting.pages_extracted,
+                peak_memory_mb(),
+                note=(
+                    "the seeded corpus is CSV-only, so extraction did no work in this "
+                    "baseline; for PDF, text, and .eml sources extraction runs inside "
+                    "the ingest stage"
+                ),
+            )
+        stages.append(extract_stage)
+
+        started = time.perf_counter()
+        records = {
+            r.unique_id: normalize_record(
+                r,
+                recipe.fields,
+                address_backend=recipe.normalize.address_backend,
+                failures=accounting.normalization_failures,
+            )
+            for r in raw_records
+        }
+        stages.append(
+            StageTiming("normalize", time.perf_counter() - started, len(records), peak_memory_mb())
         )
     else:
-        extract_stage = StageTiming(
-            "extract",
-            0.0,
-            accounting.pages_extracted,
-            peak_memory_mb(),
-            note=(
-                "the seeded corpus is CSV-only, so extraction did no work in this "
-                "baseline; for PDF, text, and .eml sources extraction runs inside "
-                "the ingest stage"
-            ),
+        # The cached ("after") path: delegate ingest and normalize to the
+        # same shared, already-tested implementation pipeline.run uses, so
+        # this harness is not re-proving cache correctness a second time.
+        # Extraction is folded into "ingest" here (matching how
+        # ingest_normalized_records itself times it) rather than split out,
+        # which is why this branch is only used for the CSV-only corpus:
+        # a mixed-variant cached comparison would need that split restored.
+        timer = pipeline._StageTimer()
+        records = pipeline.ingest_normalized_records(
+            recipe, accounting=accounting, active_cache=active_cache, timer=timer
         )
-    stages.append(extract_stage)
-
-    started = time.perf_counter()
-    records = {
-        r.unique_id: normalize_record(
-            r,
-            recipe.fields,
-            address_backend=recipe.normalize.address_backend,
-            failures=accounting.normalization_failures,
+        stages.append(
+            StageTiming(
+                "ingest",
+                timer.durations["ingest"],
+                len(records),
+                peak_memory_mb(),
+                note="extraction and normalization ran through the stage cache; see cache_stats",
+            )
         )
-        for r in raw_records
-    }
-    stages.append(
-        StageTiming("normalize", time.perf_counter() - started, len(records), peak_memory_mb())
-    )
+        stages.append(
+            StageTiming(
+                "extract",
+                0.0,
+                accounting.pages_extracted,
+                peak_memory_mb(),
+                note="folded into the ingest row above in the cached path",
+            )
+        )
+        stages.append(
+            StageTiming(
+                "normalize",
+                timer.durations["normalize"],
+                len(records),
+                peak_memory_mb(),
+            )
+        )
 
     started = time.perf_counter()
     scored = matching.score_pairs(records.values(), recipe.fields, prior=recipe.prior)
@@ -671,6 +728,247 @@ def render_report(
     return "\n".join(lines)
 
 
+def build_cached_payload(
+    measurement: Measurement,
+    *,
+    corpus: CorpusParams,
+    recipe: Recipe,
+    corpus_dir_name: str,
+    measured_on: str,
+    cache_stats: CacheStats,
+    baseline: dict[str, object] | None,
+) -> dict[str, object]:
+    """The cached ("after") run's machine-readable companion (UC-01, #78).
+
+    Reuses ``build_payload``'s shape verbatim -- same ``results`` block, same
+    keys -- so a before/after diff is a plain key-for-key comparison, then
+    overwrites ``variant`` and ``notes`` to describe this run honestly and
+    adds ``cache_stats`` (hit/miss counts only, content-free, matching
+    ``models.CacheStats``'s own privacy contract) and, when a pre-cache
+    baseline payload is supplied, a ``compared_to`` block naming it and the
+    stage-by-stage wall-clock delta.
+    """
+
+    payload = build_payload(
+        measurement,
+        corpus=corpus,
+        recipe=recipe,
+        corpus_dir_name=corpus_dir_name,
+        measured_on=measured_on,
+    )
+    payload["variant"] = "cached"
+    payload["cache_stats"] = {
+        "enabled": cache_stats.enabled,
+        "hits": dict(cache_stats.hits),
+        "misses": dict(cache_stats.misses),
+    }
+    payload["notes"] = [
+        "Cached run (the UC-01 'after' side, #78): a stage cache was active, pre-warmed by "
+        "an identical prior pass over the same corpus that this measurement discarded, so "
+        "ingest and normalize read cache hits rather than recomputing extraction and "
+        "normalization. Candidate generation, scoring, banding, and clustering are never "
+        "cached (docs/adr, pipeline.run's own docstring) and are timed identically to the "
+        "pre-cache baseline.",
+        (
+            "Timings come from one run on the machine class named in 'environment' and are "
+            "not a performance promise."
+        ),
+        (
+            "Peak RSS is process-wide and monotonic; per-stage values are the peak observed "
+            "by the end of that stage."
+        ),
+        (
+            "The write stage re-renders the review artifact inside pipeline.export, so the "
+            "stage sum can slightly exceed an end-to-end run."
+        ),
+        (
+            "This report covers the CSV-only corpus. The mixed CSV+PDF variant's extract "
+            "stage is not separately timed in the cached path (see the 'extract' stage's "
+            "note) and needs its own comparison before a PDF-share claim could be made."
+        ),
+    ]
+    if baseline is not None:
+        baseline_results = baseline.get("results")
+        before_stages: dict[str, float] = {}
+        if isinstance(baseline_results, dict):
+            for entry in baseline_results.get("stages", []):
+                if isinstance(entry, dict) and "name" in entry and "wall_seconds" in entry:
+                    before_stages[str(entry["name"])] = float(entry["wall_seconds"])
+        after_stages = {stage.name: stage.wall_seconds for stage in measurement.stages}
+        payload["compared_to"] = {
+            "measured_on": baseline.get("measured_on"),
+            "stage_wall_seconds_before": {
+                name: round(before_stages.get(name, 0.0), 3) for name in STAGE_NAMES
+            },
+            "stage_wall_seconds_after": {
+                name: round(after_stages.get(name, 0.0), 3) for name in STAGE_NAMES
+            },
+            "stage_wall_seconds_delta": {
+                name: round(after_stages.get(name, 0.0) - before_stages.get(name, 0.0), 3)
+                for name in STAGE_NAMES
+            },
+        }
+    return payload
+
+
+def render_cached_report(
+    measurement: Measurement,
+    *,
+    corpus: CorpusParams,
+    corpus_dir_name: str,
+    measured_on: str,
+    json_name: str,
+    cache_stats: CacheStats,
+    baseline: dict[str, object] | None,
+    baseline_report_name: str | None,
+) -> str:
+    """Render the dated Markdown report for the cached ("after") run (#78).
+
+    A standalone renderer rather than a patch over ``render_report``'s
+    output: the framing paragraph, title, and notes differ enough (this is
+    the after side, not the before side) that string surgery on the other
+    function's output would be more fragile than writing this directly.
+    """
+
+    result = measurement.result
+    rpm = (
+        len(result.records) / measurement.stage_wall_seconds_total * 60
+        if measurement.stage_wall_seconds_total > 0
+        else 0.0
+    )
+    lines = [
+        "# Large-corpus stage baseline (cached, after)",
+        "",
+        f"Measured: {measured_on}. Dataset: `{corpus_dir_name}` (seeded synthetic corpus, "
+        f"seed {corpus.seed}, {len(result.records)} records ingested). Written by "
+        "`tools/corpusgen/stage_baseline.py --cached` via `make perf-baseline-cached`. The "
+        f"JSON companion `{json_name}` carries the same numbers for machine diffing. There is "
+        "no real personal data in the corpus.",
+        "",
+        "This is the after side of the UC-01 stage-cache comparison "
+        "(docs/NOVEL-USE-CASES-PLAN.md), completing UC-01's final acceptance criterion "
+        "(issue #78): a stage cache was active and pre-warmed by an identical prior pass "
+        "over the same corpus before this measurement ran, so ingest and normalize hit the "
+        "cache rather than recomputing. Candidate generation, scoring, banding, and "
+        "clustering are never cached, so their timings are expected to match the pre-cache "
+        "baseline within run-to-run noise; only ingest and normalize should move. The "
+        "numbers describe one cached run on the single machine class recorded below. They "
+        "are not a performance promise.",
+        "",
+        "## Environment",
+        "",
+        "| Python | System | Machine | CPU count |",
+        "|---|---|---|---|",
+        f"| {platform.python_version()} ({platform.python_implementation()}) "
+        f"| {platform.system()} {platform.release()} | {platform.machine()} "
+        f"| {os.cpu_count()} |",
+        "",
+        "## Corpus parameters",
+        "",
+        "| Seed | Requested records | Existing rows | Incoming rows | Input digest (BLAKE2b) |",
+        "|---|---|---|---|---|",
+        f"| {corpus.seed} | {corpus.requested_records} | {corpus.existing_rows} "
+        f"| {corpus.incoming_rows} | `{corpus.input_digest}` |",
+        "",
+        "## Cache stats",
+        "",
+        "| Stage | Hits | Misses |",
+        "|---|---|---|",
+    ]
+    for stage_name in ("extract", "normalize"):
+        lines.append(
+            f"| {stage_name} | {cache_stats.hits.get(stage_name, 0)} "
+            f"| {cache_stats.misses.get(stage_name, 0)} |"
+        )
+    lines += [
+        "",
+        "A miss on the pre-warming pass and a hit on this measured pass is the expected "
+        "shape: the cache was populated once, discarded from this run's timing, then read "
+        "fresh for the numbers below.",
+        "",
+        "## Stage timings",
+        "",
+        "| Stage | Wall clock (s) | Items | Peak RSS after (MiB) |",
+        "|---|---|---|---|",
+    ]
+    for stage in measurement.stages:
+        lines.append(
+            f"| {stage.name} | {stage.wall_seconds:.3f} | {stage.items} "
+            f"| {stage.peak_rss_mib_after:,.1f} |"
+        )
+    lines += ["", "Stage notes:", ""]
+    for stage in measurement.stages:
+        if stage.note:
+            lines.append(f"- {stage.name}: {stage.note}.")
+    if baseline is not None:
+        baseline_results = baseline.get("results")
+        before_stages: dict[str, float] = {}
+        if isinstance(baseline_results, dict):
+            for entry in baseline_results.get("stages", []):
+                if isinstance(entry, dict) and "name" in entry and "wall_seconds" in entry:
+                    before_stages[str(entry["name"])] = float(entry["wall_seconds"])
+        after_stages = {stage.name: stage.wall_seconds for stage in measurement.stages}
+        before_total = sum(before_stages.get(name, 0.0) for name in STAGE_NAMES)
+        after_total = sum(after_stages.get(name, 0.0) for name in STAGE_NAMES)
+        source = baseline_report_name or "the pre-cache baseline"
+        lines += [
+            "",
+            f"## Comparison to {source}",
+            "",
+            f"Before measured: {baseline.get('measured_on', 'unknown')}.",
+            "",
+            "| Stage | Before (s) | After (s) | Delta (s) |",
+            "|---|---|---|---|",
+        ]
+        for name in STAGE_NAMES:
+            before_s = before_stages.get(name, 0.0)
+            after_s = after_stages.get(name, 0.0)
+            lines.append(f"| {name} | {before_s:.3f} | {after_s:.3f} | {after_s - before_s:+.3f} |")
+        lines.append(
+            f"| **total** | {before_total:.3f} | {after_total:.3f} "
+            f"| {after_total - before_total:+.3f} |"
+        )
+        lines += [
+            "",
+            "Candidate generation, scoring, banding, and clustering (the 'score' row) are "
+            "never cached, so their delta is run-to-run noise on the same machine, not a "
+            "cache effect; only 'ingest' and 'normalize' are expected to move.",
+        ]
+    lines += [
+        "",
+        "## Run counts",
+        "",
+        "| Records | Candidate pairs | Auto | Review | Golden records | Written | Withheld |",
+        "|---|---|---|---|---|---|---|",
+        f"| {len(result.records)} | {len(result.pairs)} | {len(result.auto_pairs)} "
+        f"| {len(result.review_pairs)} | {len(result.golden)} | {measurement.written} "
+        f"| {measurement.withheld} |",
+        "",
+        "## Totals",
+        "",
+        f"Stage wall clock: {measurement.stage_wall_seconds_total:.1f}s for "
+        f"{len(result.records)} records ({rpm:,.0f} records/minute). Peak resident memory: "
+        f"{measurement.peak_rss_mib:,.1f} MiB, process-wide; "
+        f"{measurement.peak_rss_mib_before:,.1f} MiB was already resident after corpus "
+        "generation, before the first stage ran.",
+        "",
+        "## Reproducing",
+        "",
+        "```sh",
+        "make perf-baseline-cached",
+        "```",
+        "",
+        "The command reuses the corpus the pre-cache baseline generated (refusing to run if "
+        "its bytes have drifted), pre-warms a fresh stage cache with a discarded pass, times "
+        "the six stages against the warm cache, and rewrites this report and its JSON "
+        "companion under the current date. The committed numbers come from the maintainer's "
+        "machine; different hardware produces different absolute values, so regenerate a "
+        "fresh before/after pair on one machine rather than comparing across machines.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def _generation_params(recipe_path: Path) -> tuple[int, int, float] | None:
     """Read ``--records N --seed S [--pdf-share F]`` from a generated recipe header."""
 
@@ -791,13 +1089,43 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="ISO date stamped into the report (default: today)",
     )
+    parser.add_argument(
+        "--cached",
+        action="store_true",
+        help=(
+            "measure the UC-01 'after' side (#78): pre-warm a fresh stage cache with a "
+            "discarded pass, then measure ingest/normalize against the warm cache. "
+            "CSV-only corpora only (--pdf-share must be 0)."
+        ),
+    )
+    parser.add_argument(
+        "--baseline-json",
+        type=Path,
+        default=None,
+        help=(
+            "with --cached: a pre-cache baseline JSON (e.g. "
+            "eval/large-corpus-stage-baseline-2026-08-03.json) to render a stage-by-stage "
+            "before/after comparison against; omitted, the cached report has no comparison"
+        ),
+    )
     args = parser.parse_args(argv)
+
+    if args.cached and args.pdf_share > 0.0:
+        print(
+            "error: --cached does not support --pdf-share > 0 yet; the cached path folds "
+            "extraction into the ingest stage rather than timing it separately",
+            file=sys.stderr,
+        )
+        return 1
 
     measured_on = args.date or date.today().isoformat()
     out_dir: Path = args.out_dir
-    report_out: Path = args.report_out or Path("eval") / (
-        f"large-corpus-stage-baseline-{measured_on}.md"
+    default_name = (
+        f"large-corpus-stage-baseline-cached-{measured_on}.md"
+        if args.cached
+        else f"large-corpus-stage-baseline-{measured_on}.md"
     )
+    report_out: Path = args.report_out or Path("eval") / default_name
     json_out: Path = args.json_out or report_out.with_suffix(".json")
 
     if not _ensure_corpus(
@@ -817,7 +1145,25 @@ def main(argv: list[str] | None = None) -> int:
         pdf_share=args.pdf_share,
     )
 
-    measurement = measure(recipe, work_dir=out_dir / "stage-baseline-work")
+    active_cache = None
+    if args.cached:
+        cache_dir = out_dir / "stage-baseline-cache"
+        if cache_dir.exists():
+            shutil.rmtree(cache_dir)
+        filesystem_cache = stage_cache.FilesystemStageCache(cache_dir)
+        # Pre-warm pass: populates the cache; its own timing is discarded, so
+        # the measured pass below reads only warm-cache hits, not the cost
+        # of writing them.
+        measure(
+            recipe,
+            work_dir=out_dir / "stage-baseline-warm-work",
+            active_cache=stage_cache.ActiveCache(filesystem_cache),
+        )
+        active_cache = stage_cache.ActiveCache(filesystem_cache)
+
+    measurement = measure(
+        recipe, work_dir=out_dir / "stage-baseline-work", active_cache=active_cache
+    )
 
     ingested = len(measurement.result.records)
     source_rows = corpus_params.existing_rows + corpus_params.incoming_rows
@@ -829,20 +1175,45 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    payload = build_payload(
-        measurement,
-        corpus=corpus_params,
-        recipe=recipe,
-        corpus_dir_name=out_dir.name,
-        measured_on=measured_on,
-    )
-    report = render_report(
-        measurement,
-        corpus=corpus_params,
-        corpus_dir_name=out_dir.name,
-        measured_on=measured_on,
-        json_name=json_out.name,
-    )
+    if active_cache is not None:
+        cache_stats = active_cache.stats.freeze(enabled=True)
+        baseline_payload: dict[str, object] | None = None
+        if args.baseline_json is not None:
+            baseline_payload = json.loads(args.baseline_json.read_text(encoding="utf-8"))
+        payload = build_cached_payload(
+            measurement,
+            corpus=corpus_params,
+            recipe=recipe,
+            corpus_dir_name=out_dir.name,
+            measured_on=measured_on,
+            cache_stats=cache_stats,
+            baseline=baseline_payload,
+        )
+        report = render_cached_report(
+            measurement,
+            corpus=corpus_params,
+            corpus_dir_name=out_dir.name,
+            measured_on=measured_on,
+            json_name=json_out.name,
+            cache_stats=cache_stats,
+            baseline=baseline_payload,
+            baseline_report_name=args.baseline_json.name if args.baseline_json else None,
+        )
+    else:
+        payload = build_payload(
+            measurement,
+            corpus=corpus_params,
+            recipe=recipe,
+            corpus_dir_name=out_dir.name,
+            measured_on=measured_on,
+        )
+        report = render_report(
+            measurement,
+            corpus=corpus_params,
+            corpus_dir_name=out_dir.name,
+            measured_on=measured_on,
+            json_name=json_out.name,
+        )
     report_out.parent.mkdir(parents=True, exist_ok=True)
     report_out.write_text(report, encoding="utf-8")
     json_out.parent.mkdir(parents=True, exist_ok=True)

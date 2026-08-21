@@ -101,6 +101,29 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   is the dated pointer note and says plainly what this evidence does and does
   not close.
 
+- **The stage-cache "after" measurement, closing UC-01's last acceptance
+  criterion (#78).** `tools/corpusgen/stage_baseline.py --cached` pre-warms a
+  stage cache with a discarded pass, then measures ingest and normalize
+  against the warm cache through the same `pipeline.ingest_normalized_records`
+  path `pipeline.run` itself uses, rather than a second hand-written cache
+  integration the harness would have to get right on its own; the existing
+  pre-cache path is untouched, so every previously committed baseline stays
+  reproducible byte for byte. `render_cached_report`/`build_cached_payload`
+  add a stage-by-stage before/after table and content-free hit/miss cache
+  stats; `make perf-baseline-cached` runs it. A fresh before/after pair was
+  measured back to back on the maintainer's machine over the full
+  50,066-record seeded corpus (`eval/large-corpus-stage-baseline-2026-08-21.*`,
+  `eval/large-corpus-stage-baseline-cached-2026-08-21.*`). Reported as
+  measured, not reframed: normalize got *slower* under the warm cache
+  (0.986s -> 5.263s) because 50,066 individual cache-file reads cost more
+  than the cheap recompute they replace, and total stage wall clock rose
+  from 58.6s to 62.9s. Score, never cached and the dominant cost at roughly
+  10x normalize's share, moved by 0.2s -- consistent with run-to-run noise,
+  not a cache effect. A single cold-to-warm pass over one unchanging batch
+  is the wrong shape to see the cache's actual benefit, which is avoiding
+  recompute across separate runs of the same records (a corrections re-run,
+  `reconcile apply` after review), not reuse within one pass.
+
 ### Changed
 - **A name disagreement no longer vetoes every other field.**
   `defaults._NAME_DIFFERENT_M`, the m_probability that two records of the same

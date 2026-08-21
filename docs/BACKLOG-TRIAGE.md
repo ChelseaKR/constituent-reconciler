@@ -162,6 +162,22 @@ class, seeded synthetic corpus, not a performance promise). Until then the
 stage-cache row in [CLAIMS-AUDIT.md](./CLAIMS-AUDIT.md) correctly says no
 benchmark evidence exists.
 
+**Update 2026-08-21: done.** `stage_baseline.py --cached` pre-warms a stage
+cache with a discarded pass, then measures ingest/normalize against the warm
+cache through the same `pipeline.ingest_normalized_records` path `pipeline.run`
+itself uses (`render_cached_report` adds the before/after table); the
+pre-cache path is untouched. A fresh before/after pair was measured back to
+back on the maintainer's machine over the full 50,066-record corpus:
+`eval/large-corpus-stage-baseline-2026-08-21.*` and
+`eval/large-corpus-stage-baseline-cached-2026-08-21.*`. The honest result is
+not the win UC-01 hoped for -- normalize got slower under the warm cache
+(0.986s -> 5.263s) because 50,066 individual cache-file reads cost more than
+the recompute they replace, and total stage wall clock rose from 58.6s to
+62.9s. Recorded as measured, not reframed; see the stage-cache row in
+[CLAIMS-AUDIT.md](./CLAIMS-AUDIT.md) for the full accounting including why a
+single cold-to-warm pass is the wrong shape to see the cache's actual benefit
+(reuse across separate runs, not within one).
+
 ## Needs a decision only the maintainer can make
 
 **#79, `apply_repair` for CiviCRM behind the second-reviewer gate (UC-03, PR
