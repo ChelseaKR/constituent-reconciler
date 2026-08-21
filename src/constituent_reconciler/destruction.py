@@ -49,7 +49,14 @@ from constituent_reconciler.stage_cache import CACHE_DIR_NAME, EXTRACT_STAGE, NO
 # pipeline wrote and to the exact entry shape the cache writes.
 # repair_plan.json is the split-repair plan ``reconcile plan-split`` writes:
 # it holds raw field values for the members of one written cluster, so it is
-# destroyed here and the provenance log keeps only its digest.
+# destroyed here and the provenance log keeps only its digest. Its sibling
+# repair_receipts.json, written by ``reconcile apply-repair`` only on a real
+# (non-dry-run) apply, holds the before/after raw values each operation
+# actually changed, so it is listed for the same reason; the provenance log
+# again keeps only each operation's receipt digest. repair_approvals.json is
+# deliberately absent here: it carries reviewer names, verdicts, and
+# timestamps only, the same content class as decisions.json's own audit
+# section, which this list has never covered.
 PII_ARTIFACTS: tuple[str, ...] = (
     "resolved.csv",
     "review_queue.csv",
@@ -62,6 +69,7 @@ PII_ARTIFACTS: tuple[str, ...] = (
     "target_corrections.csv",
     "cutover_withheld.csv",
     "repair_plan.json",
+    "repair_receipts.json",
 )
 
 PROVENANCE_FILENAME = "provenance.jsonl"

@@ -25,6 +25,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
+# The operation vocabulary ADR 0012 anticipated. Both entries mutate the
+# destination -- one restores a field on the surviving contact, the other
+# creates a new one for a member being split away -- so both count as
+# destructive for the second-reviewer gate (repair.apply_repair_plan): a
+# create that lands new PII on a remote system is a consequence this tool
+# cannot recompute away, the same reasoning ADR 0012 applies to delete and
+# merge, even though CiviCRM's own audit log would call it a create.
+OP_FIELD_RESTORE = "field-restore"
+OP_SPLIT_CREATE = "split-create"
+
 # Version tokens must name one exact release. Any of these marks would turn
 # the token into a range, a wildcard, or an alias that drifts over time.
 _RANGE_MARKS: tuple[str, ...] = ("*", "<", ">", "=", "+", "~", ",", " ")
@@ -138,6 +148,32 @@ def repair_declaration(connector_name: str) -> RepairDeclaration | None:
     """The declaration for a connector, or None when the adapter made none."""
 
     return REPAIR_DECLARATIONS.get(connector_name)
+
+
+@dataclass(frozen=True)
+class RepairOperationResult:
+    """One operation ``apply_repair`` attempted, with its receipt.
+
+    ``action`` is the outcome, not the request: ``restored`` or ``created``
+    for a real write, ``unchanged`` or ``already-exists`` when the current
+    destination state already matched the plan so no call was made (the
+    idempotent no-op path a rerun takes), ``withheld-consent`` when the
+    member's current consent blocked a ``split-create`` before any network
+    call, ``would-restore`` or ``would-create`` for the dry-run preview
+    (never a network call), and ``error`` when the destination rejected the
+    call. ``before``/``after`` are the raw field values changed, present only
+    when the operation read or wrote one; they belong to the local receipt
+    file, never to provenance, the same rule ``repair_plan.json`` follows.
+    """
+
+    operation: str
+    record_id: str
+    external_id: str
+    action: str
+    field: str | None = None
+    before: str | None = None
+    after: str | None = None
+    detail: str = ""
 
 
 def supported_operations(

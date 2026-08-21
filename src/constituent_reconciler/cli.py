@@ -8,8 +8,11 @@ for a migration cutover, ``compare-review`` serves the same local web queue
 over a comparison's undecided pairs, ``compare-apply`` exports the local
 correction file once that review is complete, ``plan-split`` writes a
 read-only repair plan for a written cluster a reviewer found to be a bad
-merge, ``review`` serves the local web queue for a run, ``validate`` checks a
-recipe without running anything,
+merge, ``approve-repair`` records one reviewer's approval of a repair plan's
+exact bytes, ``apply-repair`` applies a repair plan's verified operations to
+the live destination (dry-run by default; ``--execute`` requires two distinct
+recorded approvals), ``review`` serves the local web queue for a run,
+``validate`` checks a recipe without running anything,
 ``destroy`` deletes retained artifacts, ``verify`` checks a provenance log's
 hash chain, and ``schema`` prints the declared schema versions. The CLI uses
 argparse only, so the package has no runtime dependency beyond the matcher.
@@ -768,6 +771,117 @@ def _cmd_plan_split(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_approve_repair(args: argparse.Namespace) -> int:
+    """Record one reviewer's approval of the exact bytes of a repair plan.
+
+    Touches no destination and needs no recipe: it binds a reviewer identity
+    and a timestamp to the plan file's digest (ADR 0012). ``apply-repair
+    --execute`` refuses until two distinct identities have approved that
+    exact digest.
+    """
+
+    from constituent_reconciler import repair
+
+    plan_path = Path(args.plan)
+    approvals_path = (
+        Path(args.approvals)
+        if args.approvals
+        else plan_path.parent / repair.REPAIR_APPROVALS_FILENAME
+    )
+    try:
+        digest, approvers = repair.record_repair_approval(
+            plan_path, approvals_path, reviewer=args.reviewer, verdict=args.verdict
+        )
+    except repair.RepairApplyError as error:
+        print(f"approve-repair error: {error}", file=sys.stderr)
+        return 2
+    print(f"recorded: {args.verdict} by {args.reviewer!r} for plan digest {digest}")
+    print(f"  approvals file: {approvals_path}")
+    print(
+        f"  distinct approvers of this exact plan digest: {len(approvers)} "
+        f"({', '.join(sorted(approvers)) or '-'})"
+    )
+    if args.verdict == repair.APPROVED_VERDICT and len(approvers) < repair.MINIMUM_APPLY_APPROVERS:
+        remaining = repair.MINIMUM_APPLY_APPROVERS - len(approvers)
+        print(f"  {remaining} more distinct approver(s) needed before apply-repair --execute runs.")
+    return 0
+
+
+def _cmd_apply_repair(args: argparse.Namespace) -> int:
+    """Apply one repair plan's verified operations, gated by two reviewers.
+
+    Dry-run (the default; omit ``--execute``) makes no network call and
+    needs no credential: it previews what execution would do from the
+    plan's own bytes. ``--execute`` requires two distinct recorded approvals
+    of this exact plan digest and a live repair declaration covering the
+    destination's current version (ADR 0012); either gap refuses before any
+    connector is constructed.
+    """
+
+    from constituent_reconciler import repair
+
+    try:
+        recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+    except (RecipeError, PolicyViolation) as error:
+        print(f"apply-repair error: {error}", file=sys.stderr)
+        return 2
+    manifest_path = Path(args.manifest)
+    out_dir = manifest_path.parent
+    plan_path = Path(args.plan) if args.plan else out_dir / repair.REPAIR_PLAN_FILENAME
+    approvals_path = (
+        Path(args.approvals) if args.approvals else out_dir / repair.REPAIR_APPROVALS_FILENAME
+    )
+    corrections_path = Path(args.corrections) if args.corrections else out_dir / "corrections.json"
+    if args.corrections and not corrections_path.exists():
+        print(
+            f"apply-repair error: corrections file not found: {corrections_path}; "
+            "the consent check cannot replay corrections from a missing file, so fix the "
+            "path or omit --corrections",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        corrections = _load_corrections(corrections_path) if corrections_path.exists() else []
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(
+            f"apply-repair error: invalid corrections file {corrections_path}: {error}",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        applied = repair.apply_repair_plan(
+            recipe,
+            manifest_path=manifest_path,
+            plan_path=plan_path,
+            approvals_path=approvals_path,
+            corrections=corrections,
+            dry_run=not args.execute,
+        )
+    except (repair.RepairApplyError, PolicyViolation, ConnectorError) as error:
+        print(f"apply-repair error: {error}", file=sys.stderr)
+        return 2
+    version = f" {applied.destination_version}" if applied.destination_version else ""
+    print(
+        f"{'dry run' if applied.dry_run else 'applied'}: cluster {applied.cluster_id} "
+        f"-> {applied.destination}{version}"
+    )
+    for result in applied.operations:
+        detail = f" ({result.detail})" if result.detail else ""
+        field = f" {result.field}" if result.field else ""
+        print(f"  {result.operation}{field} {result.record_id}: {result.action}{detail}")
+    if applied.dry_run:
+        print("dry run: no network call was made; nothing was written to the destination.")
+        print(
+            "re-run with --execute once two distinct reviewers have approved this plan "
+            f"digest ({applied.plan_digest}) via `reconcile approve-repair`."
+        )
+    else:
+        print(f"  approvers: {', '.join(applied.approvers)}")
+        if applied.receipts_path is not None:
+            print(f"  receipts:  {applied.receipts_path}")
+    return 0
+
+
 def _cmd_export_comparable(args: argparse.Namespace) -> int:
     """One command: resolve, then emit only the suppressed comparable report.
 
@@ -1236,6 +1350,70 @@ def build_parser() -> argparse.ArgumentParser:
         help="override the recipe's policy pack to match the written run; fail-closed on unknown",
     )
     plan_parser.set_defaults(func=_cmd_plan_split)
+
+    approve_repair_parser = sub.add_parser(
+        "approve-repair",
+        help="record one reviewer's approval of a repair plan's exact bytes (ADR 0012)",
+    )
+    approve_repair_parser.add_argument(
+        "--plan", required=True, help="the repair_plan.json to approve"
+    )
+    approve_repair_parser.add_argument(
+        "--reviewer", required=True, help="name recorded with this approval"
+    )
+    approve_repair_parser.add_argument(
+        "--approvals",
+        default=None,
+        help="approvals JSON to record into (default: repair_approvals.json beside --plan)",
+    )
+    approve_repair_parser.add_argument(
+        "--verdict",
+        choices=("approved", "rejected"),
+        default="approved",
+        help="the reviewer's verdict on this exact plan (default: approved)",
+    )
+    approve_repair_parser.set_defaults(func=_cmd_approve_repair)
+
+    apply_repair_parser = sub.add_parser(
+        "apply-repair",
+        help=(
+            "apply a repair plan's verified operations to the live destination; "
+            "dry-run by default, --execute requires two distinct approvals"
+        ),
+    )
+    apply_repair_parser.add_argument(
+        "--config", required=True, help="path to the recipe.toml the written run used"
+    )
+    apply_repair_parser.add_argument(
+        "--manifest", required=True, help="the written run's run_manifest.json"
+    )
+    apply_repair_parser.add_argument(
+        "--plan",
+        default=None,
+        help="the repair plan to apply (default: repair_plan.json beside --manifest)",
+    )
+    apply_repair_parser.add_argument(
+        "--approvals",
+        default=None,
+        help="approvals JSON to read (default: repair_approvals.json beside --manifest)",
+    )
+    apply_repair_parser.add_argument(
+        "--corrections",
+        default=None,
+        help="corrections JSON the written run applied, replayed for the consent check "
+        "(default corrections.json beside --manifest)",
+    )
+    apply_repair_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="actually contact the destination; omit for a network-free, credential-free dry run",
+    )
+    apply_repair_parser.add_argument(
+        "--policy-pack",
+        default=None,
+        help="override the recipe's policy pack to match the written run; fail-closed on unknown",
+    )
+    apply_repair_parser.set_defaults(func=_cmd_apply_repair)
 
     comparable_parser = sub.add_parser(
         "export-comparable",

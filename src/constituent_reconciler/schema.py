@@ -26,9 +26,12 @@ CONNECTOR_INTERFACE_VERSION = 1
 # boolean; version 3 added field-level lineage (``field_sources``, member ids
 # only) and the named survivorship ``fill_policy``; version 4 added the
 # stage-cache policy and hit/miss counts to the run manifest and cache counts
-# plus stage durations to run_summary.json, all content-free. Version-1 logs
-# still verify unchanged.
-REPORT_SCHEMA_VERSION = 4
+# plus stage durations to run_summary.json, all content-free; version 5 added
+# the "repair-apply" provenance entry (ADR 0012, ``connectors/repair.py``'s
+# ``apply_repair``): the operation name and the distinct approver identities
+# that gated it, alongside a receipt digest in the existing content_hash
+# field. No prior key changed meaning. Version-1 logs still verify unchanged.
+REPORT_SCHEMA_VERSION = 5
 
 # The decisions.json shape: approved/rejected lists of [left, right] record-id
 # pairs, written by the review session and consumed by ``reconcile apply``.
@@ -67,6 +70,21 @@ REPAIR_PLAN_SCHEMA_VERSION = 1
 # vendor evidence fields.
 REPAIR_CAPABILITY_SCHEMA_VERSION = 1
 
+# The repair_approvals.json shape ``reconcile approve-repair`` writes: verdicts
+# keyed by the exact repair-plan digest they approved, reviewer name and
+# timestamp per verdict. Keying by digest, rather than overwriting a single
+# current approval, means a replanned cluster's new digest starts with zero
+# approvers automatically -- stale approval never carries forward -- while
+# still keeping every past digest's history for the audit trail.
+REPAIR_APPROVAL_SCHEMA_VERSION = 1
+
+# The repair_receipts.json shape ``reconcile apply-repair`` writes when it
+# executes (never on a dry run): one entry per operation attempted, with the
+# before/after raw values a restoration or a split-create actually touched.
+# A PII-bearing artifact for the same reason repair_plan.json is: provenance
+# gets each entry's digest, never its content (docs/adr/0012).
+REPAIR_RECEIPT_SCHEMA_VERSION = 1
+
 
 def versions() -> dict[str, int]:
     """Return the declared schema versions as a mapping."""
@@ -80,4 +98,6 @@ def versions() -> dict[str, int]:
         "cutover_corrections": CUTOVER_CORRECTIONS_SCHEMA_VERSION,
         "repair_plan": REPAIR_PLAN_SCHEMA_VERSION,
         "repair_capability": REPAIR_CAPABILITY_SCHEMA_VERSION,
+        "repair_approval": REPAIR_APPROVAL_SCHEMA_VERSION,
+        "repair_receipt": REPAIR_RECEIPT_SCHEMA_VERSION,
     }

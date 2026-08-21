@@ -238,3 +238,178 @@ def test_api_error_status_raises() -> None:
     record = _golden("E1", {"first_name": "jane", "last_name": "doe"})
     with pytest.raises(ConnectorError):
         connector.write_all([record], FIELDS, dry_run=False)
+
+
+# -- apply_repair / inspect_repair (ADR 0012 pilot) ---------------------------
+
+
+def test_inspect_repair_reads_the_live_version_read_only() -> None:
+    transport = _FakeTransport([(200, {"values": [{"id": 1, "version": "6.17.2"}]})])
+    connector = _connector(transport)
+
+    result = connector.inspect_repair()
+
+    assert result == {"destination": "CiviCRM API v4", "destination_version": "6.17.2"}
+    assert transport.entity_calls() == [("Domain", "get", {"select": ["version"], "limit": 1})]
+
+
+def test_apply_repair_field_restore_writes_when_value_differs() -> None:
+    transport = _FakeTransport(
+        [
+            (200, {"values": [{"id": 7}]}),  # find old_external_id -> contact 7
+            (200, {"values": [{"birth_date": "1990-04-12"}]}),  # current dob
+            (200, {"values": [{"id": 7}]}),  # Contact.update
+        ]
+    )
+    connector = _connector(transport)
+    plan = {
+        "survivor": "E1",
+        "old_external_id": "E1",
+        "restore_fields": [
+            {"field": "dob", "written_value": "1990-04-12", "restore_to": "1990-01-01"}
+        ],
+        "split_records": [{"record_id": "E1", "source": "x", "fields": {}}],
+    }
+
+    (result,) = connector.apply_repair(plan, fields=FIELDS, dry_run=False)
+
+    assert result.action == "restored"
+    assert result.before == "1990-04-12"
+    assert result.after == "1990-01-01"
+    calls = transport.entity_calls()
+    assert [(e, a) for e, a, _ in calls] == [
+        ("Contact", "get"),
+        ("Contact", "get"),
+        ("Contact", "update"),
+    ]
+    assert calls[2][2] == {"where": [["id", "=", 7]], "values": {"birth_date": "1990-01-01"}}
+
+
+def test_apply_repair_field_restore_is_idempotent_when_already_correct() -> None:
+    """A rerun that finds the value already restored writes nothing (no third call)."""
+    transport = _FakeTransport(
+        [
+            (200, {"values": [{"id": 7}]}),  # find old_external_id
+            (200, {"values": [{"birth_date": "1990-01-01"}]}),  # already the restore_to value
+        ]
+    )
+    connector = _connector(transport)
+    plan = {
+        "survivor": "E1",
+        "old_external_id": "E1",
+        "restore_fields": [{"field": "dob", "restore_to": "1990-01-01"}],
+        "split_records": [{"record_id": "E1", "source": "x", "fields": {}}],
+    }
+
+    (result,) = connector.apply_repair(plan, fields=FIELDS, dry_run=False)
+
+    assert result.action == "unchanged"
+    assert len(transport.calls) == 2  # no update call issued
+
+
+def test_apply_repair_split_create_creates_a_new_contact() -> None:
+    transport = _FakeTransport(
+        [
+            (200, {"values": [{"id": 7}]}),  # find old_external_id (survivor lookup)
+            (200, {"values": []}),  # find N002: no match
+            (200, {"values": [{"id": 42}]}),  # Contact.create
+        ]
+    )
+    connector = _connector(transport)
+    plan = {
+        "survivor": "E1",
+        "old_external_id": "E1",
+        "restore_fields": [],
+        "split_records": [
+            {"record_id": "E1", "source": "x", "fields": {}},
+            {
+                "record_id": "N002",
+                "source": "y",
+                "fields": {"first_name": "Jon", "last_name": "Reyes", "dob": "1990-04-12"},
+            },
+        ],
+    }
+
+    (result,) = connector.apply_repair(plan, fields=FIELDS, dry_run=False)
+
+    assert result.action == "created"
+    assert result.external_id == "42"
+    calls = transport.entity_calls()
+    assert [(e, a) for e, a, _ in calls] == [
+        ("Contact", "get"),
+        ("Contact", "get"),
+        ("Contact", "create"),
+    ]
+    create_values = calls[2][2]["values"]
+    assert create_values == {
+        "first_name": "Jon",
+        "last_name": "Reyes",
+        "birth_date": "1990-04-12",
+        "external_identifier": "N002",
+    }
+
+
+def test_apply_repair_split_create_is_idempotent_when_contact_already_exists() -> None:
+    """A rerun finds the split-off contact already created and makes no create call."""
+    transport = _FakeTransport(
+        [
+            (200, {"values": [{"id": 7}]}),  # find old_external_id
+            (200, {"values": [{"id": 55}]}),  # find N002: already exists
+        ]
+    )
+    connector = _connector(transport)
+    plan = {
+        "survivor": "E1",
+        "old_external_id": "E1",
+        "restore_fields": [],
+        "split_records": [
+            {"record_id": "E1", "source": "x", "fields": {}},
+            {"record_id": "N002", "source": "y", "fields": {"first_name": "Jon"}},
+        ],
+    }
+
+    (result,) = connector.apply_repair(plan, fields=FIELDS, dry_run=False)
+
+    assert result.action == "already-exists"
+    assert result.external_id == "55"
+    assert len(transport.calls) == 2  # no create call issued
+
+
+def test_apply_repair_withholds_consent_before_any_network_call() -> None:
+    transport = _FakeTransport([(200, {"values": [{"id": 7}]})])  # find old_external_id only
+    connector = _connector(transport)
+    plan = {
+        "survivor": "E1",
+        "old_external_id": "E1",
+        "restore_fields": [],
+        "split_records": [
+            {"record_id": "E1", "source": "x", "fields": {}},
+            {"record_id": "N002", "source": "y", "fields": {"first_name": "Jon"}},
+        ],
+    }
+
+    (result,) = connector.apply_repair(
+        plan, fields=FIELDS, dry_run=False, withhold_record_ids=frozenset({"N002"})
+    )
+
+    assert result.action == "withheld-consent"
+    assert len(transport.calls) == 1  # only the survivor lookup; N002 was never looked up
+
+
+def test_apply_repair_dry_run_makes_zero_network_calls() -> None:
+    transport = _FakeTransport([])
+    connector = _connector(transport)
+    plan = {
+        "survivor": "E1",
+        "old_external_id": "E1",
+        "restore_fields": [{"field": "dob", "restore_to": "1990-01-01"}],
+        "split_records": [
+            {"record_id": "E1", "source": "x", "fields": {}},
+            {"record_id": "N002", "source": "y", "fields": {"first_name": "Jon"}},
+        ],
+    }
+
+    results = connector.apply_repair(plan, fields=FIELDS, dry_run=True)
+
+    assert [r.action for r in results] == ["would-restore", "would-create"]
+    assert transport.calls == []

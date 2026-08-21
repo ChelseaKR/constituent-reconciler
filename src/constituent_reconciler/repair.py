@@ -44,27 +44,49 @@ import hashlib
 import json
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from itertools import combinations
 from pathlib import Path
 
 from constituent_reconciler import decisions, pipeline
 from constituent_reconciler.config import Recipe
-from constituent_reconciler.connectors.base import WRITE_ACTIONS
-from constituent_reconciler.connectors.repair import supported_operations
+from constituent_reconciler.connectors.base import WRITE_ACTIONS, Connector
+from constituent_reconciler.connectors.repair import (
+    RepairOperationResult,
+    repair_declaration,
+    supported_operations,
+)
 from constituent_reconciler.destruction import PROVENANCE_FILENAME
 from constituent_reconciler.manifest import file_digest, input_digests, manifest_hash
 from constituent_reconciler.models import Cluster, Correction, GoldenRecord, Record
 from constituent_reconciler.provenance import (
+    REPAIR_PLAN_ACTION,
     RUN_START_ACTION,
     ProvenanceLog,
+    content_hash,
     verify_log,
 )
-from constituent_reconciler.schema import DECISIONS_SCHEMA_VERSION, REPAIR_PLAN_SCHEMA_VERSION
+from constituent_reconciler.schema import (
+    DECISIONS_SCHEMA_VERSION,
+    REPAIR_APPROVAL_SCHEMA_VERSION,
+    REPAIR_PLAN_SCHEMA_VERSION,
+    REPAIR_RECEIPT_SCHEMA_VERSION,
+)
 
 REPAIR_PLAN_FILENAME = "repair_plan.json"
+REPAIR_APPROVALS_FILENAME = "repair_approvals.json"
+REPAIR_RECEIPTS_FILENAME = "repair_receipts.json"
 
 REJECTED_VERDICT = "rejected"
+
+APPROVED_VERDICT = "approved"
+REJECTED_APPROVAL_VERDICT = "rejected"
+
+# A remote destructive apply is refused below this many distinct approvers,
+# reusing the review session's two-person rule (ADR 0012). Unconditional: the
+# pilot's operations (field-restore, split-create) are both declared
+# destructive, so this applies to every execute call, never only some.
+MINIMUM_APPLY_APPROVERS = 2
 
 
 class RepairPlanError(ValueError):
@@ -72,6 +94,17 @@ class RepairPlanError(ValueError):
 
     Every raise happens before any plan bytes exist: no plan file is written,
     no provenance entry is appended, and no decision is bound on this path.
+    """
+
+
+class RepairApplyError(ValueError):
+    """Applying a repair plan refused, fail-closed.
+
+    Every raise happens before ``Connector.apply_repair`` is called: with
+    fewer than two distinct recorded approvals the gate raises before a
+    connector is even constructed, so no credential is read and no network
+    call is possible on this path (``tests/test_repair_apply.py`` proves it
+    by spying on connector construction and transport calls).
     """
 
 
@@ -553,4 +586,466 @@ def plan_split(
         cannot_links=links,
         decisions_path=resolved_decisions,
         displaced_cluster=displaced,
+    )
+
+
+# -- apply_repair: the reviewed, gated execution path (UC-03 PR 3, ADR 0012) -
+
+
+def _plan_digest(plan_path: Path) -> tuple[str, str]:
+    """The plan file's raw text and its BLAKE2b-256 digest.
+
+    Hashing the bytes exactly as ``plan_split`` wrote them (not a
+    re-serialization) is what lets a hand-edited plan be caught: any change
+    to the file, even one that still parses as valid JSON, changes this
+    digest and therefore the approvals looked up under it in
+    :func:`record_repair_approval` and the binding checked in
+    :func:`apply_repair_plan`.
+    """
+
+    if not plan_path.is_file():
+        raise RepairApplyError(f"repair plan not found: {plan_path}")
+    raw = plan_path.read_text(encoding="utf-8")
+    digest = hashlib.blake2b(raw.encode("utf-8"), digest_size=32).hexdigest()
+    return raw, digest
+
+
+def _reviewer_identity_key(name: str) -> str:
+    """A comparison key for "is this the same reviewer", never for display.
+
+    Mirrors ``review/session.py``'s ``_reviewer_identity_key`` exactly: case
+    and internal whitespace do not make one person into two. Duplicated
+    rather than imported because it is a one-line pure function and the two
+    modules gate different artifacts (match decisions vs. repair approvals);
+    importing a private helper across that boundary would say the two gates
+    are one mechanism, and they are deliberately not.
+    """
+
+    return " ".join(name.casefold().split())
+
+
+def _distinct_approvers(entries: object) -> dict[str, str]:
+    """Distinct reviewer identities with an ``approved`` verdict, from one list.
+
+    Returns identity key -> the first display name recorded for it, so a
+    case or whitespace variant of one name is one entry (counted once) but
+    shown in its own original spelling, never the folded key. Anything that
+    is not a list of objects yields no approvers rather than raising, so an
+    unreadable or missing entry list fails the count-below-two gate on its
+    own, the same fail-closed shape
+    ``review.session.approved_without_second_approval`` uses.
+    """
+
+    if not isinstance(entries, list):
+        return {}
+    identities: dict[str, str] = {}
+    for raw in entries:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("reviewer", "")).strip()
+        if name and str(raw.get("verdict", "")) == APPROVED_VERDICT:
+            identities.setdefault(_reviewer_identity_key(name), name)
+    return identities
+
+
+def _load_approvals(path: Path) -> dict[str, object]:
+    if not path.exists():
+        return {}
+    try:
+        loaded: object = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise RepairApplyError(f"repair approvals file is not valid JSON: {path}") from error
+    if not isinstance(loaded, dict):
+        raise RepairApplyError(f"repair approvals file must be a JSON object: {path}")
+    return {str(key): value for key, value in loaded.items()}
+
+
+def _approvers_for_digest(approvals_path: Path, digest: str) -> dict[str, str]:
+    data = _load_approvals(approvals_path)
+    approvals = data.get("approvals")
+    entries = approvals.get(digest) if isinstance(approvals, dict) else None
+    return _distinct_approvers(entries)
+
+
+def record_repair_approval(
+    plan_path: Path,
+    approvals_path: Path,
+    *,
+    reviewer: str,
+    verdict: str = APPROVED_VERDICT,
+) -> tuple[str, tuple[str, ...]]:
+    """Record one reviewer's verdict on the exact bytes of the current plan.
+
+    Verdicts are keyed by the plan's digest, not overwritten in place: a
+    replanned cluster gets a new digest and therefore starts at zero
+    approvers, so a stale approval of a plan that no longer exists can never
+    count toward a different plan's gate, while the old digest's history
+    stays in the file for the audit trail. Approving the same digest twice
+    under one reviewer identity (case/whitespace folded, matching
+    ``review/session.py``'s rule) is harmless: the entry is appended, but
+    distinctness is judged by identity, so it never becomes a second
+    reviewer.
+
+    Returns the plan digest and the distinct approvers' display names
+    (sorted, one per identity) recorded for it after this call. Refuses,
+    fail-closed, on a blank reviewer, an unrecognized verdict, or a missing
+    plan file; nothing is written to ``approvals_path`` on refusal.
+    """
+
+    reviewer_name = reviewer.strip()
+    if not reviewer_name:
+        raise RepairApplyError("a reviewer identity is required; it may not be blank")
+    if verdict not in (APPROVED_VERDICT, REJECTED_APPROVAL_VERDICT):
+        raise RepairApplyError(
+            f"verdict must be {APPROVED_VERDICT!r} or {REJECTED_APPROVAL_VERDICT!r}, "
+            f"got {verdict!r}"
+        )
+    _, digest = _plan_digest(plan_path)
+    data = _load_approvals(approvals_path)
+    approvals_raw = data.get("approvals")
+    approvals: dict[str, object] = dict(approvals_raw) if isinstance(approvals_raw, dict) else {}
+    entries_raw = approvals.get(digest)
+    entries: list[dict[str, str]] = list(entries_raw) if isinstance(entries_raw, list) else []
+    entries.append(
+        {
+            "reviewer": reviewer_name,
+            "verdict": verdict,
+            "decided_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
+    )
+    approvals[digest] = entries
+    data["approvals"] = approvals
+    data.setdefault("repair_approval_schema", REPAIR_APPROVAL_SCHEMA_VERSION)
+    approvals_path.parent.mkdir(parents=True, exist_ok=True)
+    approvals_path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return digest, tuple(sorted(_distinct_approvers(entries).values()))
+
+
+def _last_repair_plan_entry(provenance_path: Path, cluster_id: str) -> dict[str, object] | None:
+    """The most recent ``repair-plan`` log entry for this cluster, verified intact.
+
+    Raises if the chain itself does not verify; returns ``None`` when no such
+    entry exists (planning was never logged for this cluster, or the log
+    predates this feature), which :func:`apply_repair_plan` turns into a
+    refusal rather than a guess.
+    """
+
+    ok, message = verify_log(provenance_path)
+    if not ok:
+        raise RepairApplyError(
+            f"the provenance log cannot anchor an apply ({provenance_path}): {message}"
+        )
+    found: dict[str, object] | None = None
+    with provenance_path.open(encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line:
+                continue
+            entry = json.loads(line)
+            if entry.get("action") == REPAIR_PLAN_ACTION and entry.get("record_id") == cluster_id:
+                found = entry
+    return found
+
+
+@dataclass(frozen=True)
+class AppliedRepair:
+    """What one call to :func:`apply_repair_plan` did, without repeating PII.
+
+    ``operations`` and ``receipts_path`` are populated only when
+    ``dry_run`` is false and at least one operation ran; a dry run reports
+    the same preview shape with no receipts file and no provenance entries,
+    because it made no destination call at all.
+    """
+
+    plan_path: Path
+    plan_digest: str
+    cluster_id: str
+    destination: str
+    destination_version: str
+    dry_run: bool
+    approvers: tuple[str, ...]
+    operations: tuple[RepairOperationResult, ...]
+    receipts_path: Path | None
+
+
+def _withheld_split_members(
+    recipe: Recipe,
+    plan_data: dict[str, object],
+    *,
+    survivor: str,
+    destination: str,
+    corrections: Iterable[Correction],
+) -> frozenset[str]:
+    """``split-create`` members whose current consent blocks the write.
+
+    A no-op returning an empty set when the recipe does not require consent,
+    matching the main write path's own gate (``consent.partition_by_consent``)
+    exactly: this is the same rule applied to repair-created contacts, not a
+    stricter one. Consent is read fresh here, at apply time, rather than
+    trusted from the plan, in case a future change loosens the source-batch
+    freeze this function currently relies on.
+
+    One honest limit, worth stating plainly rather than implying this check
+    catches a live gap: under today's invariants it cannot actually fire for
+    a plan produced by ``plan_split``. ``_verify_manifest`` refuses apply
+    unless the current source files hash identically to what the original
+    write's manifest recorded, corrections cannot touch the consent column
+    (``pipeline._apply_corrections`` preserves it), and
+    ``Consent.most_restrictive`` means a cluster that was written at all had
+    every member's consent active at that moment. So a member proposed here
+    for split-create cannot have had its consent change between the original
+    write and this apply. This function is a safety net against a future
+    change to that freeze, or against a plan applied with a hand-assembled
+    ``plan_data`` outside the normal plan-split path, not evidence of a gap
+    reachable through today's CLI.
+    """
+
+    if not recipe.require_consent:
+        return frozenset()
+    try:
+        records = pipeline.ingest_normalized_records(recipe, corrections=corrections)
+    except ValueError as error:
+        raise RepairApplyError(
+            f"could not reconstruct the source batch for the consent check: {error}"
+        ) from error
+    today = date.today()
+    withheld: set[str] = set()
+    split_records = plan_data.get("split_records", [])
+    entries = split_records if isinstance(split_records, list) else []
+    for raw_entry in entries:
+        if not isinstance(raw_entry, dict):
+            continue
+        record_id = str(raw_entry.get("record_id", ""))
+        if record_id == survivor:
+            continue
+        member = records.get(record_id)
+        if member is None or not member.consent.is_active(as_of=today, destination=destination):
+            withheld.add(record_id)
+    return frozenset(withheld)
+
+
+def _verified_plan(
+    recipe: Recipe, manifest_path: Path, plan_path: Path
+) -> tuple[dict[str, object], str, str]:
+    """Load the plan, and refuse unless it is bound to this manifest and log.
+
+    Returns ``(plan_data, digest, cluster_id)``. This is ADR 0012's T7
+    mitigation for the apply path: a plan planned under different sources, or
+    a plan file edited since planning (even losslessly, even by hand), is
+    caught here before anything else about the apply request is considered.
+    """
+
+    _, manifest_digest = _verify_manifest(recipe, manifest_path)
+    raw_plan, digest = _plan_digest(plan_path)
+    try:
+        plan_data: object = json.loads(raw_plan)
+    except json.JSONDecodeError as error:
+        raise RepairApplyError(f"repair plan is not valid JSON: {plan_path}") from error
+    if not isinstance(plan_data, dict):
+        raise RepairApplyError(f"repair plan must be a JSON object: {plan_path}")
+    if plan_data.get("manifest_hash") != manifest_digest:
+        raise RepairApplyError(
+            "the repair plan was planned under a different manifest than the one "
+            "given here; regenerate the plan with plan-split against this manifest"
+        )
+    cluster_id = str(plan_data.get("cluster_id", ""))
+    if not cluster_id:
+        raise RepairApplyError(f"repair plan carries no cluster id: {plan_path}")
+
+    provenance_path = manifest_path.parent / PROVENANCE_FILENAME
+    plan_entry = _last_repair_plan_entry(provenance_path, cluster_id)
+    if plan_entry is None:
+        raise RepairApplyError(
+            f"no repair-plan provenance entry is recorded for cluster {cluster_id!r}; "
+            "run plan-split before apply-repair"
+        )
+    if plan_entry.get("content_hash") != digest:
+        raise RepairApplyError(
+            f"the plan file at {plan_path} does not match the digest the provenance "
+            f"log recorded for cluster {cluster_id!r}; it may have been edited or "
+            "replaced since planning -- regenerate it with plan-split before applying"
+        )
+    return plan_data, digest, cluster_id
+
+
+def apply_repair_plan(
+    recipe: Recipe,
+    *,
+    manifest_path: Path,
+    plan_path: Path | None = None,
+    approvals_path: Path | None = None,
+    receipts_path: Path | None = None,
+    corrections: Iterable[Correction] = (),
+    connector: Connector | None = None,
+    dry_run: bool = True,
+) -> AppliedRepair:
+    """Apply one repair plan's verified operations, gated fail-closed.
+
+    Refusal order matters and is deliberate. The manifest and plan are
+    verified first (drifted sources, a plan planned under a different
+    manifest, a plan whose bytes no longer match what the provenance log
+    recorded for this cluster -- ADR 0012's T7). Only then is the
+    second-reviewer gate checked, and only when ``dry_run`` is false: fewer
+    than two distinct recorded approvals of this exact plan digest refuses
+    *before any connector is constructed*, so no credential is read and no
+    network call is reachable. A dry run needs no approvals and makes no
+    connector call either, deriving its preview entirely from the plan's own
+    bytes, matching every connector's ``write_all`` dry-run contract.
+
+    Only past the gate is a connector built (via ``pipeline.build_connector``
+    unless one is injected for testing), and only if it declares both repair
+    capabilities and a verified declaration exists for it at all. Executing
+    then reads the destination's live version (``inspect_repair``) and
+    refuses unless that exact version is in the declaration's verified list
+    -- an operator's word for the version is never trusted over the read.
+    Members proposed for ``split-create`` whose current consent is not
+    active are withheld from the connector call entirely when the recipe
+    requires consent, the same fail-closed rule the main write path applies.
+
+    On a real apply, every attempted operation's receipt (before/after raw
+    values, never included in provenance) is written to ``repair_receipts.json``
+    and each operation appends its own ``repair-apply`` provenance entry
+    naming the operation and the approvers who gated it.
+    """
+
+    out_dir = manifest_path.parent
+    resolved_plan_path = plan_path if plan_path is not None else out_dir / REPAIR_PLAN_FILENAME
+    resolved_approvals_path = (
+        approvals_path if approvals_path is not None else out_dir / REPAIR_APPROVALS_FILENAME
+    )
+    resolved_receipts_path = (
+        receipts_path if receipts_path is not None else out_dir / REPAIR_RECEIPTS_FILENAME
+    )
+
+    plan_data, digest, cluster_id = _verified_plan(recipe, manifest_path, resolved_plan_path)
+    provenance_path = out_dir / PROVENANCE_FILENAME
+    survivor = str(plan_data.get("survivor", ""))
+    destination = str(plan_data.get("destination", ""))
+
+    approvers = _approvers_for_digest(resolved_approvals_path, digest)
+    if not dry_run and len(approvers) < MINIMUM_APPLY_APPROVERS:
+        raise RepairApplyError(
+            f"applying cluster {cluster_id!r} to a remote destination requires "
+            f"{MINIMUM_APPLY_APPROVERS} distinct reviewers' approval of this exact plan "
+            f"(digest {digest}); {len(approvers)} recorded. Record approvals with "
+            "`reconcile approve-repair` before retrying with --execute."
+        )
+
+    if connector is not None:
+        resolved_connector = connector
+    else:
+        resolved_connector = pipeline.build_connector(recipe, out_dir)
+    if destination and destination != resolved_connector.name:
+        raise RepairApplyError(
+            f"the plan was written for destination {destination!r}, but this apply is "
+            f"using connector {resolved_connector.name!r}; use the connector the plan "
+            "names, or regenerate the plan with plan-split against the recipe you mean "
+            "to apply it to"
+        )
+    if not hasattr(resolved_connector, "apply_repair") or not hasattr(
+        resolved_connector, "inspect_repair"
+    ):
+        raise RepairApplyError(
+            f"connector {resolved_connector.name!r} does not implement repair execution; "
+            "follow the plan's manual_instructions instead"
+        )
+    if repair_declaration(resolved_connector.name) is None:
+        raise RepairApplyError(
+            f"no repair capability is declared for connector {resolved_connector.name!r}; "
+            "follow the plan's manual_instructions instead"
+        )
+
+    if dry_run:
+        preview = resolved_connector.apply_repair(plan_data, fields=recipe.fields, dry_run=True)
+        return AppliedRepair(
+            plan_path=resolved_plan_path,
+            plan_digest=digest,
+            cluster_id=cluster_id,
+            destination=destination,
+            destination_version="",
+            dry_run=True,
+            approvers=tuple(sorted(approvers.values())),
+            operations=tuple(preview),
+            receipts_path=None,
+        )
+
+    live = resolved_connector.inspect_repair()
+    live_version = str(live.get("destination_version", ""))
+    if not supported_operations(resolved_connector.name, live_version):
+        raise RepairApplyError(
+            f"the live destination version {live_version!r} is not in "
+            f"{resolved_connector.name!r}'s verified repair-operation list; execution refused"
+        )
+
+    withhold_record_ids = _withheld_split_members(
+        recipe,
+        plan_data,
+        survivor=survivor,
+        destination=resolved_connector.name,
+        corrections=corrections,
+    )
+
+    results = resolved_connector.apply_repair(
+        plan_data,
+        fields=recipe.fields,
+        dry_run=False,
+        withhold_record_ids=withhold_record_ids,
+    )
+
+    approver_list = tuple(sorted(approvers.values()))
+    receipt_payload = {
+        "repair_receipt_schema": REPAIR_RECEIPT_SCHEMA_VERSION,
+        "plan_digest": digest,
+        "cluster_id": cluster_id,
+        "destination": resolved_connector.name,
+        "destination_version": live_version,
+        "approvers": list(approver_list),
+        "applied_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "operations": [
+            {
+                "operation": result.operation,
+                "record_id": result.record_id,
+                "external_id": result.external_id,
+                "action": result.action,
+                "field": result.field,
+                "before": result.before,
+                "after": result.after,
+                "detail": result.detail,
+            }
+            for result in results
+        ],
+    }
+    resolved_receipts_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_receipts_path.write_text(
+        json.dumps(receipt_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+    log = ProvenanceLog(provenance_path)
+    for result in results:
+        op_digest = content_hash(
+            {
+                "action": result.action,
+                "field": result.field or "",
+                "before": result.before or "",
+                "after": result.after or "",
+            }
+        )
+        log.append_repair_apply(
+            cluster_id=cluster_id,
+            external_id=result.external_id,
+            operation=result.operation,
+            approvers=approver_list,
+            receipt_digest=op_digest,
+        )
+
+    return AppliedRepair(
+        plan_path=resolved_plan_path,
+        plan_digest=digest,
+        cluster_id=cluster_id,
+        destination=resolved_connector.name,
+        destination_version=live_version,
+        dry_run=False,
+        approvers=approver_list,
+        operations=tuple(results),
+        receipts_path=resolved_receipts_path,
     )

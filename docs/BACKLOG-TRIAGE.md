@@ -30,6 +30,15 @@ or on organizations that have not adopted the tool yet. That is not a backlog
 failure. It is what a project looks like when the engineering for a milestone
 is finished and the evidence for it is not.
 
+**Update 2026-08-21:** #79's decision below was made -- option 1, do it now
+-- and implemented. The disposable CiviCRM instance it needed is up
+(`civicrm/civicrm-docker`, version 6.17.2), its API v4 delete/create/update
+semantics were read from current vendor documentation and exercised live,
+and `apply_repair` for CiviCRM now exists behind the second-reviewer gate.
+See `docs/CLAIMS-AUDIT.md`'s repair row for what shipped and where the tests
+live. The recurring-maintenance consequence the option named is now real:
+CiviCRM releases after 6.17.2 are unsupported for repair until re-verified.
+
 ## Code, doable now
 
 **#83, a merged identity's consent.** Implemented. Merging took the survivor's

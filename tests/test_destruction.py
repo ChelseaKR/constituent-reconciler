@@ -178,6 +178,34 @@ def test_repair_plan_is_a_listed_artifact_and_is_destroyed(tmp_path: Path) -> No
     assert ok, message
 
 
+def test_repair_receipts_is_a_listed_artifact_and_is_destroyed(tmp_path: Path) -> None:
+    """The applied-repair receipt holds before/after raw values, so destroy must cover it.
+
+    ADR 0012 places the same duty on ``apply_repair``'s receipt file as on
+    the plan file it is written beside: without this entry, `reconcile
+    destroy` would leave behind the one artifact that concentrates the raw
+    values a real repair actually changed.
+    """
+
+    assert "repair_receipts.json" in PII_ARTIFACTS
+    out_dir = _make_out_dir(tmp_path)
+    receipts_path = out_dir / "repair_receipts.json"
+    receipts_path.write_text(
+        json.dumps({"operations": [{"before": SENTINEL, "after": "corrected"}]}),
+        encoding="utf-8",
+    )
+    _age(receipts_path, 2 * DAY_SECONDS)
+
+    log = ProvenanceLog(out_dir / PROVENANCE_FILENAME)
+    summary = destroy(out_dir, timedelta(days=1), policy="1d", log=log, dry_run=False)
+
+    assert not receipts_path.exists()
+    assert "repair_receipts.json" in {artifact.name for artifact in summary.destroyed}
+    assert SENTINEL not in (out_dir / PROVENANCE_FILENAME).read_text(encoding="utf-8")
+    ok, message = verify_log(out_dir / PROVENANCE_FILENAME)
+    assert ok, message
+
+
 def test_no_planted_value_survives_under_out_dir(tmp_path: Path) -> None:
     out_dir = _make_out_dir(tmp_path)
     log = ProvenanceLog(out_dir / PROVENANCE_FILENAME)

@@ -255,19 +255,40 @@ def test_external_id_round_trips(name: str, tmp_path: Path) -> None:
             assert record.cluster_id in content
 
 
-@pytest.mark.parametrize("name", sorted(CONNECTOR_REGISTRY))
+@pytest.mark.parametrize("name", sorted(n for n in CONNECTOR_REGISTRY if n != "civicrm"))
 def test_undeclared_connectors_offer_no_repair_operations(name: str) -> None:
-    """No declaration means no remote repair, for every registered adapter.
+    """No declaration means no remote repair, for every adapter but the pilot.
 
     ADR 0012: repair exists only where an adapter has declared verified
-    destination/version pairs, and no adapter has. When the first (CiviCRM
-    pilot) declaration lands, this test changes deliberately to assert that
-    declaration's contract instead of universal absence.
+    destination/version pairs. CiviCRM is the pilot and is asserted
+    separately below; every other registered adapter has made no declaration
+    at all.
     """
 
     assert repair_declaration(name) is None
     for version in ("", "5.81.0", "latest"):
         assert supported_operations(name, version) == ()
+
+
+def test_civicrm_declares_repair_only_for_its_verified_version() -> None:
+    """The CiviCRM pilot's declaration, asserted narrowly (ADR 0012).
+
+    Repair operations exist only for the exact version the declaration
+    enumerates; a blank version, an unverified version, and the floating
+    alias ``"latest"`` all yield nothing, the same fail-closed contract every
+    other connector has by having no declaration at all.
+    """
+
+    declaration = repair_declaration("civicrm")
+    assert declaration is not None
+    assert declaration.verified_versions == ("6.17.2",)
+    operation_names = {operation.name for operation in declaration.operations}
+    assert operation_names == {"field-restore", "split-create"}
+    assert all(operation.destructive for operation in declaration.operations)
+
+    assert {op.name for op in supported_operations("civicrm", "6.17.2")} == operation_names
+    for version in ("", "5.81.0", "latest", "6.17.3"):
+        assert supported_operations("civicrm", version) == ()
 
 
 def test_unknown_name_raises_and_lists_known_names() -> None:
