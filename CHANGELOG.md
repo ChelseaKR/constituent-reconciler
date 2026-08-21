@@ -79,6 +79,16 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   asserts the household invariant directly: two people at one address with the
   same surname and different given names do not auto-merge, whether their dates
   of birth disagree or neither has one.
+- **The README's standards-conformance table declares every standard.** It
+  covered thirteen of the fifteen portfolio standards; Performance and AI
+  Development Measurement had no row. Both new rows are drawn from what is
+  already committed. Performance points at the dated per-stage baselines under
+  `eval/` and says plainly that they are measured locally, not gated in CI, and
+  that there is no hosted service and therefore no SLO. AI Development
+  Measurement points at the metrics ledger and the solo-scale DORA section of
+  `docs/ROADMAP.md`, and records that activity counters are deliberately not
+  tracked. The state column is now headed "State" rather than "Applies?", which
+  is the heading an automated read of the table looks for.
 
 ### Fixed
 - **Two eval-report labels were pointing fixes at the wrong module.** "Candidate
