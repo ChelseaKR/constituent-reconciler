@@ -135,6 +135,20 @@ perf-baseline-pdf:
 		--json-out eval/large-corpus-stage-baseline-pdf-$(PERF_DATE).json \
 		--regenerate
 
+# UC-01's "after" number (#78): the same corpus and machine, with a stage
+# cache pre-warmed then read warm for ingest and normalize. Reuses whatever
+# corpus is already at eval/large-corpus (refuses if its bytes have drifted
+# from the pinned seed/records), so run perf-baseline first, or pass
+# BASELINE_JSON at a report from the same day for the before/after table.
+BASELINE_JSON := eval/large-corpus-stage-baseline-$(PERF_DATE).json
+perf-baseline-cached:
+	.venv/bin/python -m tools.corpusgen.stage_baseline \
+		--out-dir eval/large-corpus \
+		--cached \
+		--baseline-json $(BASELINE_JSON) \
+		--report-out eval/large-corpus-stage-baseline-cached-$(PERF_DATE).md \
+		--json-out eval/large-corpus-stage-baseline-cached-$(PERF_DATE).json
+
 # Run the demo end to end and write outputs to ./out.
 run:
 	.venv/bin/reconcile run --config examples/intake-demo/recipe.toml --out out

@@ -1,0 +1,128 @@
+{
+  "baseline_schema_version": 1,
+  "cache_stats": {
+    "enabled": true,
+    "hits": {
+      "normalize": 50066
+    },
+    "misses": {}
+  },
+  "compared_to": {
+    "measured_on": "2026-08-21",
+    "stage_wall_seconds_after": {
+      "extract": 0.0,
+      "ingest": 0.242,
+      "normalize": 5.263,
+      "review_artifact": 0.132,
+      "score": 53.746,
+      "write": 3.51
+    },
+    "stage_wall_seconds_before": {
+      "extract": 0.0,
+      "ingest": 0.307,
+      "normalize": 0.986,
+      "review_artifact": 0.125,
+      "score": 53.538,
+      "write": 3.658
+    },
+    "stage_wall_seconds_delta": {
+      "extract": 0.0,
+      "ingest": -0.065,
+      "normalize": 4.277,
+      "review_artifact": 0.007,
+      "score": 0.208,
+      "write": -0.148
+    }
+  },
+  "corpus": {
+    "directory_name": "large-corpus",
+    "existing_rows": 25025,
+    "generator": "tools.corpusgen.generate",
+    "incoming_rows": 25041,
+    "input_digest_blake2b": "38f44cff24459be73c92bc068e57a6fe",
+    "requested_records": 50000,
+    "seed": 20260707
+  },
+  "environment": {
+    "cpu_count": 10,
+    "implementation": "CPython",
+    "machine": "arm64",
+    "python": "3.12.13",
+    "release": "25.4.0",
+    "system": "Darwin"
+  },
+  "kind": "large-corpus-stage-baseline",
+  "measured_on": "2026-08-21",
+  "notes": [
+    "Cached run (the UC-01 'after' side, #78): a stage cache was active, pre-warmed by an identical prior pass over the same corpus that this measurement discarded, so ingest and normalize read cache hits rather than recomputing extraction and normalization. Candidate generation, scoring, banding, and clustering are never cached (docs/adr, pipeline.run's own docstring) and are timed identically to the pre-cache baseline.",
+    "Timings come from one run on the machine class named in 'environment' and are not a performance promise.",
+    "Peak RSS is process-wide and monotonic; per-stage values are the peak observed by the end of that stage.",
+    "The write stage re-renders the review artifact inside pipeline.export, so the stage sum can slightly exceed an end-to-end run.",
+    "This report covers the CSV-only corpus. The mixed CSV+PDF variant's extract stage is not separately timed in the cached path (see the 'extract' stage's note) and needs its own comparison before a PDF-share claim could be made."
+  ],
+  "recipe": {
+    "auto_threshold": 0.97,
+    "connector": "csv",
+    "policy_pack": "default",
+    "prior": 0.01,
+    "review_threshold": 0.8
+  },
+  "results": {
+    "auto_pairs": 12512,
+    "candidate_pairs": 2356639,
+    "golden_records": 37575,
+    "peak_rss_mib": 2210.5,
+    "peak_rss_mib_before_stages": 2129.0,
+    "records": 50066,
+    "records_per_minute": 47762,
+    "review_pairs": 59,
+    "stage_wall_seconds_total": 62.894,
+    "stages": [
+      {
+        "items": 50066,
+        "name": "ingest",
+        "note": "extraction and normalization ran through the stage cache; see cache_stats",
+        "peak_rss_mib_after": 2129.0,
+        "wall_seconds": 0.242
+      },
+      {
+        "items": 0,
+        "name": "extract",
+        "note": "folded into the ingest row above in the cached path",
+        "peak_rss_mib_after": 2129.0,
+        "wall_seconds": 0.0
+      },
+      {
+        "items": 50066,
+        "name": "normalize",
+        "note": "",
+        "peak_rss_mib_after": 2129.0,
+        "wall_seconds": 5.263
+      },
+      {
+        "items": 2356639,
+        "name": "score",
+        "note": "matcher scoring plus banding, clustering, and golden-record reduction, the span pipeline.run covers between normalize and its returned result",
+        "peak_rss_mib_after": 2210.5,
+        "wall_seconds": 53.746
+      },
+      {
+        "items": 59,
+        "name": "review_artifact",
+        "note": "rendered into a scratch directory; the write stage renders it again inside pipeline.export, so these two stages overlap by one render",
+        "peak_rss_mib_after": 2210.5,
+        "wall_seconds": 0.132
+      },
+      {
+        "items": 37575,
+        "name": "write",
+        "note": "pipeline.export end to end: consent gate, connector write, run manifest, provenance log, run summary, and a second render of the review artifact",
+        "peak_rss_mib_after": 2210.5,
+        "wall_seconds": 3.51
+      }
+    ],
+    "withheld": 0,
+    "written": 37575
+  },
+  "variant": "cached"
+}
