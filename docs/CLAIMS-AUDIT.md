@@ -6,7 +6,8 @@ stage-baseline, and split repair-planning rows were added 2026-08-03; the
 mixed CSV and PDF variant row and the progress-events carve-out closure were
 added 2026-08-04; the per-source data-quality row was added 2026-08-06 (#96);
 the merged-consent row was added 2026-08-15 (#83); the external-benchmark row was added 2026-08-18;
-the split repair-planning row was updated for `apply_repair` execution on 2026-08-21 (#79).
+the split repair-planning row was updated for `apply_repair` execution on 2026-08-21 (#79); the
+CiviCRM live write-back row gained dated demonstration evidence the same day (#67).
 **Scope:** every capability claim in `README.md` and `CLAUDE.md`, read against
 the code in `src/constituent_reconciler/`.
 **Method:** each claim below was checked by opening the named module, not by
@@ -27,7 +28,7 @@ Status values: **implemented** (the code does what the sentence says),
 | Review verdict: correct (fix field values during review) | README.md "What it does" step 5 | `review/session.py` correction flow; `pipeline.py` applies corrections before normalization | implemented (EXP-01) |
 | Local CSV connector (default) | README.md:74-76 (step 6) | `connectors/csv_out.py`; `pipeline.py` `build_connector` | implemented |
 | Import-ready CRM export files (`salesforce_csv`, `civicrm_csv`) | README.md:254-258 | `connectors/crm_csv.py` | implemented |
-| CiviCRM live write-back (API v4 upsert) | README.md:74-76, 272-283 | `connectors/civicrm.py` | implemented |
+| CiviCRM live write-back (API v4 upsert) | README.md:74-76, 272-283 | `connectors/civicrm.py` | implemented; script-and-transcript live-demonstration evidence added 2026-08-21 against CiviCRM 6.17.2 (`docs/reviews/CIVICRM-LIVE-DEMONSTRATION-2026-08-21.md`) — not the published video recording Gate 3 of `docs/EXTERNAL-GATES-RUNBOOK.md` still asks for, so that gate stays open, but Contact/Email/Phone writes, the external-id upsert idempotency, and consent-withheld behavior are now verified against a real running instance, not only injected-transport tests |
 | Salesforce live write-back (REST upsert, NPSP Contact) | README.md:74-76, 285-292 | `connectors/salesforce.py` | implemented |
 | Generic webhook connector | README.md "What it does" step 6 | `connectors/webhook.py`; connector conformance tests | implemented |
 | Airtable connector | README.md "What it does" step 6 | `connectors/airtable.py`; connector conformance and adapter tests | implemented (native batched upsert; live-account evidence remains external) |

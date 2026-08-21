@@ -339,6 +339,18 @@ bug; resolve the account state before re-pushing tags.
 adoption kit and demo recipe | authorized running CiviCRM instance and
 recording."
 
+**Status 2026-08-21: still open, partial evidence added.** A disposable local
+instance was stood up and the CLI sequence below was run against it end to
+end (including a full repair-path pass, `plan-split` through
+`apply-repair --execute`), but as a committed script and content-free
+transcript, not the published video recording this gate's evidence line
+calls for — no interactive screen-capture tooling was available. See
+`docs/reviews/CIVICRM-LIVE-DEMONSTRATION-2026-08-21.md` for what that
+evidence covers, what it does not, and a live discrepancy it found and fixed
+(issue #113: `apply_repair`'s field-restore was looking the survivor up by
+the wrong column). The steps below remain the procedure for whoever records
+the video that actually closes this gate.
+
 **Why it is external.** The connector's code-level behavior is already the
 closed "CiviCRM adapter behavior" row ("dedicated Contact/Email/Phone writes
 and injected-transport tests"). What the tests cannot produce is a write into

@@ -1,0 +1,22 @@
+{
+  "date_utc": "2026-08-21T11:40:50+00:00",
+  "reconciler_commit": "6f4a057f974b499c4be3eb3ef22344f88720826c",
+  "civicrm_version": "6.17.2",
+  "civicrm_api": "v4",
+  "endpoint_host": "127.0.0.1:8760 (disposable local Docker instance)",
+  "checks": {
+    "email_in_dedicated_entity": true,
+    "phone_in_dedicated_entity": true,
+    "revoked_consent_withheld": true,
+    "rerun_updates_not_duplicates": true,
+    "repair_split_create_landed": true,
+    "repair_rerun_idempotent": true,
+    "provenance_verifies_both_runs": true
+  },
+  "artifact_hashes": {
+    "out1/repair_plan.json": "38bebace06945d0d1922afc71ee47815727bc342475e4bbd89c17020f2b37c6a",
+    "out1/repair_receipts.json": "328dbffca47b15c8c99be1529d9fd97ea6b091c370108f4a2cbebdac447ad889",
+    "out1/provenance.jsonl": "7dd729ea039238873c00f9cea3942a4ac9ede8de737af3ab94e16ef96d241aa7",
+    "out2/provenance.jsonl": "6280162740de07cbf5a1cb0ff1562116ff5a6b37a55ab56ecc76e366b3b1b7df"
+  }
+}

@@ -256,15 +256,18 @@ def test_inspect_repair_reads_the_live_version_read_only() -> None:
 def test_apply_repair_field_restore_writes_when_value_differs() -> None:
     transport = _FakeTransport(
         [
-            (200, {"values": [{"id": 7}]}),  # find old_external_id -> contact 7
+            (200, {"values": [{"id": 7}]}),  # old_external_id "7" still names a contact
             (200, {"values": [{"birth_date": "1990-04-12"}]}),  # current dob
             (200, {"values": [{"id": 7}]}),  # Contact.update
         ]
     )
     connector = _connector(transport)
+    # old_external_id is CiviCRM's own numeric contact id (what write_all
+    # recorded as WriteResult.external_id), never our external_identifier
+    # string -- confirmed against a live cluster on 2026-08-21.
     plan = {
         "survivor": "E1",
-        "old_external_id": "E1",
+        "old_external_id": "7",
         "restore_fields": [
             {"field": "dob", "written_value": "1990-04-12", "restore_to": "1990-01-01"}
         ],
@@ -289,14 +292,14 @@ def test_apply_repair_field_restore_is_idempotent_when_already_correct() -> None
     """A rerun that finds the value already restored writes nothing (no third call)."""
     transport = _FakeTransport(
         [
-            (200, {"values": [{"id": 7}]}),  # find old_external_id
+            (200, {"values": [{"id": 7}]}),  # old_external_id "7" still names a contact
             (200, {"values": [{"birth_date": "1990-01-01"}]}),  # already the restore_to value
         ]
     )
     connector = _connector(transport)
     plan = {
         "survivor": "E1",
-        "old_external_id": "E1",
+        "old_external_id": "7",
         "restore_fields": [{"field": "dob", "restore_to": "1990-01-01"}],
         "split_records": [{"record_id": "E1", "source": "x", "fields": {}}],
     }
@@ -310,7 +313,7 @@ def test_apply_repair_field_restore_is_idempotent_when_already_correct() -> None
 def test_apply_repair_split_create_creates_a_new_contact() -> None:
     transport = _FakeTransport(
         [
-            (200, {"values": [{"id": 7}]}),  # find old_external_id (survivor lookup)
+            (200, {"values": [{"id": 7}]}),  # old_external_id "7" still names a contact
             (200, {"values": []}),  # find N002: no match
             (200, {"values": [{"id": 42}]}),  # Contact.create
         ]
@@ -318,7 +321,7 @@ def test_apply_repair_split_create_creates_a_new_contact() -> None:
     connector = _connector(transport)
     plan = {
         "survivor": "E1",
-        "old_external_id": "E1",
+        "old_external_id": "7",
         "restore_fields": [],
         "split_records": [
             {"record_id": "E1", "source": "x", "fields": {}},
@@ -353,14 +356,14 @@ def test_apply_repair_split_create_is_idempotent_when_contact_already_exists() -
     """A rerun finds the split-off contact already created and makes no create call."""
     transport = _FakeTransport(
         [
-            (200, {"values": [{"id": 7}]}),  # find old_external_id
+            (200, {"values": [{"id": 7}]}),  # old_external_id "7" still names a contact
             (200, {"values": [{"id": 55}]}),  # find N002: already exists
         ]
     )
     connector = _connector(transport)
     plan = {
         "survivor": "E1",
-        "old_external_id": "E1",
+        "old_external_id": "7",
         "restore_fields": [],
         "split_records": [
             {"record_id": "E1", "source": "x", "fields": {}},
@@ -376,11 +379,12 @@ def test_apply_repair_split_create_is_idempotent_when_contact_already_exists() -
 
 
 def test_apply_repair_withholds_consent_before_any_network_call() -> None:
-    transport = _FakeTransport([(200, {"values": [{"id": 7}]})])  # find old_external_id only
+    # Only the survivor's existence check; old_external_id "7" still names a contact.
+    transport = _FakeTransport([(200, {"values": [{"id": 7}]})])
     connector = _connector(transport)
     plan = {
         "survivor": "E1",
-        "old_external_id": "E1",
+        "old_external_id": "7",
         "restore_fields": [],
         "split_records": [
             {"record_id": "E1", "source": "x", "fields": {}},
@@ -394,6 +398,50 @@ def test_apply_repair_withholds_consent_before_any_network_call() -> None:
 
     assert result.action == "withheld-consent"
     assert len(transport.calls) == 1  # only the survivor lookup; N002 was never looked up
+
+
+def test_apply_repair_field_restore_errors_when_survivor_contact_is_gone() -> None:
+    """A deleted survivor is a reported error, never a silent skip or a guess."""
+    transport = _FakeTransport([(200, {"values": []})])  # id 7 no longer exists
+    connector = _connector(transport)
+    plan = {
+        "survivor": "E1",
+        "old_external_id": "7",
+        "restore_fields": [{"field": "dob", "restore_to": "1990-01-01"}],
+        "split_records": [{"record_id": "E1", "source": "x", "fields": {}}],
+    }
+
+    (result,) = connector.apply_repair(plan, fields=FIELDS, dry_run=False)
+
+    assert result.action == "error"
+    assert "no CiviCRM contact found" in result.detail
+    assert len(transport.calls) == 1  # the existence check ran; nothing else did
+
+
+def test_apply_repair_field_restore_treats_a_non_numeric_old_external_id_as_absent() -> None:
+    """old_external_id is CiviCRM's own numeric id; a non-numeric value never reaches the API.
+
+    Guards against exactly the bug a live CiviCRM run caught on 2026-08-21:
+    plan_split's old_external_id is the value write_all reported as
+    WriteResult.external_id (CiviCRM's numeric contact id, e.g. "7"), never
+    our external_identifier column's string value (e.g. "existing:E003"). A
+    plan carrying the latter -- by a stale plan, a hand-edited one, or a
+    future regression -- must fail closed without a network call, not be
+    silently looked up under the wrong column.
+    """
+    transport = _FakeTransport([])
+    connector = _connector(transport)
+    plan = {
+        "survivor": "E1",
+        "old_external_id": "existing:E1",
+        "restore_fields": [{"field": "dob", "restore_to": "1990-01-01"}],
+        "split_records": [{"record_id": "E1", "source": "x", "fields": {}}],
+    }
+
+    (result,) = connector.apply_repair(plan, fields=FIELDS, dry_run=False)
+
+    assert result.action == "error"
+    assert transport.calls == []
 
 
 def test_apply_repair_dry_run_makes_zero_network_calls() -> None:
