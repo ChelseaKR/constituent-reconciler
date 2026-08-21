@@ -1,0 +1,83 @@
+=== supplementary live check: field-restore (2026-08-21) ===
+Purpose: the main demo's auto-merged cluster (existing:E003/incoming:N002)
+happened to have EMPTY restore_fields, so it never exercised the
+field-restore operation live. This synthetic pair is built so the fill
+policy pulls the golden record's email from the non-survivor member,
+forcing a real restore_fields entry.
+
+existing.csv: F001,Nora,Whitfield,1982-03-11,(blank email),,granted
+incoming.csv: G001,Nora,Whitfield,1982-03-11,nora.impostor@example.org,,granted
+
+$ reconcile run --config recipe.toml --out out
+Blocking time: 0.01 seconds
+Predict time: 0.05 seconds
+records read:        2
+candidate pairs:     1
+auto-merged pairs:   1
+pairs to review:     0
+resolved records:    1 (1 formed by merging)
+
+ingest:
+  files read:        2
+    existing.csv
+    incoming.csv
+
+connector 'civicrm' (wrote): created: 1
+  review queue: out/review_queue.csv
+  provenance:   out/provenance.jsonl (1 entries)
+  manifest:     out/run_manifest.json
+
+data quality by source:
+  source    records  worst field          failures  consent  duplicates
+  existing        1  email 0.0% complete         0   100.0%      100.0%
+  incoming        1  phone 0.0% complete         0   100.0%      100.0%
+  run report:   out/run_report.json
+
+$ reconcile plan-split ... --cluster existing:F001
+repair plan: out/repair_plan.json
+  cluster:      existing:F001 (2 members)
+  external id:  51
+  destination:  civicrm (no verified repair operations; the plan is manual)
+  plan digest:  4fc467fd39f86acab0cf3a09bdbc4823f8cf0eb6d3d828f50b38c1000ec3fb53 (recorded in the provenance log)
+  cannot-links: 1 pair(s) bound in out/decisions.json
+planning is read-only: nothing was sent to or changed in the destination.
+
+plan's restore_fields (proves this scenario needs a real restore):
+[
+  {
+    "field": "email",
+    "restore_to": "",
+    "supplied_by": "incoming:G001",
+    "written_value": "nora.impostor@example.org"
+  }
+]
+
+$ reconcile approve-repair (x2, distinct reviewers)
+recorded: approved by 'checker-a' for plan digest 4fc467fd39f86acab0cf3a09bdbc4823f8cf0eb6d3d828f50b38c1000ec3fb53
+  approvals file: out/repair_approvals.json
+  distinct approvers of this exact plan digest: 1 (checker-a)
+  1 more distinct approver(s) needed before apply-repair --execute runs.
+recorded: approved by 'checker-b' for plan digest 4fc467fd39f86acab0cf3a09bdbc4823f8cf0eb6d3d828f50b38c1000ec3fb53
+  approvals file: out/repair_approvals.json
+  distinct approvers of this exact plan digest: 2 (checker-a, checker-b)
+
+$ reconcile apply-repair --execute  (FIRST run)
+applied: cluster existing:F001 -> civicrm 6.17.2
+  field-restore email existing:F001: restored
+  split-create incoming:G001: created
+  approvers: checker-a, checker-b
+  receipts:  out/repair_receipts.json
+
+live verification: survivor's Email entity row is now cleared (None)
+live verification: split-off contact created with the misattributed email
+
+$ reconcile apply-repair --execute  (SECOND run, idempotency)
+applied: cluster existing:F001 -> civicrm 6.17.2
+  field-restore email existing:F001: unchanged
+  split-create incoming:G001: already-exists (a contact with this external id already exists; no call was made)
+  approvers: checker-a, checker-b
+  receipts:  out/repair_receipts.json
+
+receipts sha256: 43a0c7c876ecdaf6c874a1495de2d99361be0f5fdaa043e8ad72b6505732cd05
+provenance verify:
+intact: 7 entries; entries from seq 0 under manifest 3b5200c482ba0975317dca80321686c7ed64edd5b458d19ba04046127505cc8b

@@ -87,6 +87,20 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   entries, written ahead of implementation, are updated to say what is now
   mitigated rather than planned.
 
+- **A live-CiviCRM demonstration, script and transcript rather than the video
+  Gate 3 still wants (#67).** `docs/connectors/civicrm-live-demonstration-2026-08-21/`
+  runs `reconcile validate`, a dry run, a real write, review of the two
+  uncertain pairs against the fixture's own planted ground truth, `reconcile
+  apply`, live reads confirming Contact/Email/Phone/external-id/consent
+  behavior, a full rerun proving updates rather than duplicates, and the
+  complete repair path (`plan-split` through two `apply-repair --execute`
+  calls proving idempotency) against a disposable local
+  `civicrm/civicrm-docker` 6.17.2 instance. The transcript is content-free by
+  construction (counts, ids, hashes, never a raw field value), so it is
+  committed outright. `docs/reviews/CIVICRM-LIVE-DEMONSTRATION-2026-08-21.md`
+  is the dated pointer note and says plainly what this evidence does and does
+  not close.
+
 ### Changed
 - **A name disagreement no longer vetoes every other field.**
   `defaults._NAME_DIFFERENT_M`, the m_probability that two records of the same
@@ -226,6 +240,23 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   an existing SSH-signed stable tag; the read-only verifier checks signer,
   main ancestry, version, changelog, and the full gate before exact artifacts
   reach a checkout-free publisher that rechecks the tag object.
+- **`apply_repair`'s field-restore looked the survivor contact up by the wrong
+  column against CiviCRM (#113, found live for #67).** `old_external_id`, as
+  recorded in the repair plan and the provenance log, is CiviCRM's own
+  numeric contact id (whatever `write_all` reported as `WriteResult.external_id`),
+  never the `external_identifier` upsert-key string `plan_split` also carries.
+  Field-restore queried `Contact.get where external_identifier = old_external_id`,
+  a query that could never match a real contact, so every real field-restore
+  repair against CiviCRM would have failed closed (reported as an error, never
+  corrupted anything) rather than actually restoring a field. Caught by
+  building a live-CiviCRM demonstration whose first cluster happened to have
+  an empty `restore_fields` list, then a targeted follow-up case that forced a
+  real one. `connectors/civicrm.py` now takes `old_external_id` as the numeric
+  primary key directly (`_existing_contact_id`, confirming the contact still
+  exists via `Contact.get where id = <int>`) instead of re-deriving it through
+  the wrong column. `split-create`'s own `external_identifier` lookups are
+  unaffected -- those name a column this code itself populates, a different
+  and correct use.
 
 ### Added
 - **Progress events for `run` and `apply` (UC-01 remainder, #77).**

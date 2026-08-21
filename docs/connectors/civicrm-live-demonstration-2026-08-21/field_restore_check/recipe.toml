@@ -1,0 +1,37 @@
+# Supplementary live check, separate from the main demo: forces a genuine
+# field-restore (not just split-create) by pairing a survivor with a blank
+# email against a non-survivor with one populated, so the fill policy pulls
+# the golden record's email from the member being split away. Confirms the
+# 2026-08-21 old_external_id fix (connectors/civicrm.py's
+# _existing_contact_id) against a live restore, not just split-create.
+
+[input]
+existing = "existing.csv"
+incoming = "incoming.csv"
+id_column = "id"
+
+[mapping]
+first_name = "First Name"
+last_name = "Last Name"
+dob = "DOB"
+email = "Email"
+phone = "Phone"
+
+[consent]
+column = "Consent"
+
+[thresholds]
+prior = 0.01
+auto = 0.97
+review = 0.80
+
+[policy]
+pack = "default"
+
+[output]
+connector = "civicrm"
+endpoint = "http://127.0.0.1:8760/civicrm/ajax/api4"
+auth_env = "CIVICRM_API_KEY"
+auth_header = "Authorization"
+auth_scheme = "Bearer"
+external_id_field = "external_identifier"

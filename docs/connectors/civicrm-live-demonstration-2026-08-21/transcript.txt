@@ -1,0 +1,309 @@
+
+==============================================================================
+HEADER: what this run is, and against what
+==============================================================================
+date (UTC):            2026-08-21T11:40:38+00:00
+reconciler package:    constituent-reconciler 0.7.0
+reconciler git commit: 6f4a057f974b499c4be3eb3ef22344f88720826c
+CiviCRM version (live read): 6.17.2
+CiviCRM API surface:    API v4, Standalone UF, authx bearer-key REST
+endpoint:               http://127.0.0.1:8760/civicrm/ajax/api4
+credential:             CIVICRM_API_KEY env var (redacted in this transcript)
+recipe:                 recipe-live.toml (committed alongside this script)
+sources:                examples/intake-demo/{existing,incoming}.csv (synthetic, planted ground truth)
+
+==============================================================================
+STEP 1: reconcile validate
+==============================================================================
+$ /Users/chelsea/portfolio/constituent-reconciler/.venv/bin/reconcile validate --config /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/recipe-live.toml
+recipe: /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/recipe-live.toml
+  incoming: /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/../../../examples/intake-demo/incoming.csv
+  existing: /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/../../../examples/intake-demo/existing.csv
+  mapped fields: first_name, last_name, dob, email, phone
+  policy pack: default
+  switches: require_consent=True, require_local_targets=False, aggregate_export=False, household.enabled=False
+  thresholds: prior=0.01, auto=0.97, review=0.8
+  extract backend: none
+  address backend: deterministic
+  output connector: civicrm
+  cache: enabled=False
+
+recipe is valid.
+[exit 0]
+
+==============================================================================
+STEP 2: reconcile run --dry-run (preview, no write)
+==============================================================================
+$ /Users/chelsea/portfolio/constituent-reconciler/.venv/bin/reconcile run --config /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/recipe-live.toml --out /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1 --dry-run
+records read:        27
+candidate pairs:     12
+auto-merged pairs:   6
+pairs to review:     2
+resolved records:    21 (6 formed by merging)
+withheld (no consent): 1
+
+ingest:
+  files read:        2
+    /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/../../../examples/intake-demo/existing.csv
+    /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/../../../examples/intake-demo/incoming.csv
+
+connector 'civicrm' (dry run, nothing written): would-write: 20
+  review queue: /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/review_queue.csv
+  withheld:     /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/withheld.csv
+
+data quality by source:
+  source    records  worst field           failures  consent  duplicates
+  existing       15  phone 13.3% complete         0   100.0%       33.3%
+  incoming       12  email 8.3% complete          0    91.7%       58.3%
+[stderr]
+progress: ingest 0/2 started
+progress: ingest 2/2 done in 0.00s
+progress: normalize 0/27 started
+progress: normalize 27/27 done in 0.00s
+progress: score started
+Blocking time: 0.01 seconds
+Predict time: 0.04 seconds
+progress: score done in 0.70s
+progress: write 0/20 started
+progress: write 20/20 done in 0.00s
+progress: review artifact 0/2 started
+progress: review artifact 2/2 done in 0.00s
+[exit 0]
+
+==============================================================================
+STEP 3: reconcile run (first REAL write to live CiviCRM)
+==============================================================================
+$ /Users/chelsea/portfolio/constituent-reconciler/.venv/bin/reconcile run --config /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/recipe-live.toml --out /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1
+records read:        27
+candidate pairs:     12
+auto-merged pairs:   6
+pairs to review:     2
+resolved records:    21 (6 formed by merging)
+withheld (no consent): 1
+
+ingest:
+  files read:        2
+    /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/../../../examples/intake-demo/existing.csv
+    /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/../../../examples/intake-demo/incoming.csv
+
+connector 'civicrm' (wrote): created: 20
+  review queue: /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/review_queue.csv
+  withheld:     /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/withheld.csv
+  provenance:   /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/provenance.jsonl (20 entries)
+  manifest:     /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/run_manifest.json
+
+data quality by source:
+  source    records  worst field           failures  consent  duplicates
+  existing       15  phone 13.3% complete         0   100.0%       33.3%
+  incoming       12  email 8.3% complete          0    91.7%       58.3%
+  run report:   /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/run_report.json
+[stderr]
+progress: ingest 0/2 started
+progress: ingest 2/2 done in 0.00s
+progress: normalize 0/27 started
+progress: normalize 27/27 done in 0.00s
+progress: score started
+Blocking time: 0.01 seconds
+Predict time: 0.04 seconds
+progress: score done in 0.39s
+progress: write 0/20 started
+progress: write 20/20 done in 2.45s
+progress: review artifact 0/2 started
+progress: review artifact 2/2 done in 0.00s
+[exit 0]
+
+==============================================================================
+STEP 4: review the uncertain pairs, decided against the fixture's planted ground truth
+==============================================================================
+review pairs pending: 2
+  pair 0: existing:E002 / incoming:N004 -> approved (ground truth)
+  pair 1: existing:E008 / incoming:N007 -> rejected (ground truth)
+decisions written: /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/decisions.json
+
+==============================================================================
+STEP 5: reconcile apply (writes newly-confirmed merges to live CiviCRM)
+==============================================================================
+$ /Users/chelsea/portfolio/constituent-reconciler/.venv/bin/reconcile apply --config /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/recipe-live.toml --out /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1 --decisions /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/decisions.json
+records read:        27
+candidate pairs:     12
+auto-merged pairs:   7
+pairs to review:     0
+resolved records:    20 (7 formed by merging)
+withheld (no consent): 1
+
+ingest:
+  files read:        2
+    /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/../../../examples/intake-demo/existing.csv
+    /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/../../../examples/intake-demo/incoming.csv
+
+connector 'civicrm' (wrote): updated: 19
+  review queue: /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/review_queue.csv
+  withheld:     /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/withheld.csv
+  provenance:   /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/provenance.jsonl (19 entries)
+  manifest:     /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/run_manifest.json
+
+data quality by source:
+  source    records  worst field           failures  consent  duplicates
+  existing       15  phone 13.3% complete         0   100.0%       40.0%
+  incoming       12  email 8.3% complete          0    91.7%       66.7%
+[stderr]
+progress: ingest 0/2 started
+progress: ingest 2/2 done in 0.00s
+progress: normalize 0/27 started
+progress: normalize 27/27 done in 0.00s
+progress: score started
+Blocking time: 0.00 seconds
+Predict time: 0.04 seconds
+progress: score done in 0.40s
+progress: write 0/19 started
+progress: write 19/19 done in 2.45s
+progress: review artifact 0/0 started
+progress: review artifact 0/0 done in 0.00s
+[exit 0]
+
+==============================================================================
+STEP 6: reconcile verify (provenance hash chain)
+==============================================================================
+$ /Users/chelsea/portfolio/constituent-reconciler/.venv/bin/reconcile verify --provenance /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/provenance.jsonl
+intact: 41 entries; entries from seq 0 under manifest 308e52dba366920b7e28bb4c212756a5d436afa0602ca80fd0af5ce8ad46a769; entries from seq 21 under manifest 4930a5c287f8da306b3a857ade0966eec61a7b682b92b788237544f358008565
+[exit 0]
+
+==============================================================================
+STEP 7: live verification reads against CiviCRM
+==============================================================================
+existing:E004 (email-bearing) -> Contact 33, Email entity rows: 1
+existing:E006 (phone-bearing) -> Contact 35, Phone entity rows: 1
+incoming:N009 (revoked consent) -> Contact rows in CiviCRM: 0
+withheld.csv exists: True, sha256: 869e6212092f0be75ceb70e71ed4b2a2783de431b6d1eafe6c59f72d26dc29f8
+existing:E003 (survivor of the auto-merge) -> Contact rows: 1
+incoming:N002 (merged away, no own contact expected yet) -> Contact rows: 0
+
+==============================================================================
+STEP 8: RERUN the same reviewed batch (idempotency: updates, not duplicates)
+==============================================================================
+$ /Users/chelsea/portfolio/constituent-reconciler/.venv/bin/reconcile apply --config /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/recipe-live.toml --out /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run2 --decisions /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/decisions.json
+records read:        27
+candidate pairs:     12
+auto-merged pairs:   7
+pairs to review:     0
+resolved records:    20 (7 formed by merging)
+withheld (no consent): 1
+
+ingest:
+  files read:        2
+    /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/../../../examples/intake-demo/existing.csv
+    /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/../../../examples/intake-demo/incoming.csv
+
+connector 'civicrm' (wrote): updated: 19
+  review queue: /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run2/review_queue.csv
+  withheld:     /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run2/withheld.csv
+  provenance:   /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run2/provenance.jsonl (19 entries)
+  manifest:     /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run2/run_manifest.json
+
+data quality by source:
+  source    records  worst field           failures  consent  duplicates
+  existing       15  phone 13.3% complete         0   100.0%       40.0%
+  incoming       12  email 8.3% complete          0    91.7%       66.7%
+[stderr]
+progress: ingest 0/2 started
+progress: ingest 2/2 done in 0.00s
+progress: normalize 0/27 started
+progress: normalize 27/27 done in 0.00s
+progress: score started
+Blocking time: 0.01 seconds
+Predict time: 0.04 seconds
+progress: score done in 0.41s
+progress: write 0/19 started
+progress: write 19/19 done in 2.44s
+progress: review artifact 0/0 started
+progress: review artifact 0/0 done in 0.00s
+[exit 0]
+$ /Users/chelsea/portfolio/constituent-reconciler/.venv/bin/reconcile verify --provenance /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run2/provenance.jsonl
+intact: 20 entries; entries from seq 0 under manifest 56639221940d17375cbd9c6865c9feaee31da829ce980174d8b6def0b2c9e393
+[exit 0]
+first run's connector summary:  connector 'civicrm' (wrote): updated: 19
+second run's connector summary: connector 'civicrm' (wrote): updated: 19
+existing:E004 contact rows after rerun (must stay 1, never 2): 1
+
+==============================================================================
+STEP 9: repair path -- plan-split, approve-repair x2, apply-repair --execute
+==============================================================================
+$ /Users/chelsea/portfolio/constituent-reconciler/.venv/bin/reconcile plan-split --config /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/recipe-live.toml --manifest /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/run_manifest.json --cluster existing:E003 --reason live demo: reviewer found E003/N002 merged into one written record --reviewer demo-reviewer-a
+repair plan: /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/repair_plan.json
+  cluster:      existing:E003 (2 members)
+  external id:  32
+  destination:  civicrm (no verified repair operations; the plan is manual)
+  plan digest:  1c1c0f6b3d865874f6efb9490ef03e2d259e3bab6da030de25a0c4783243b059 (recorded in the provenance log)
+  cannot-links: 1 pair(s) bound in /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/decisions.json
+planning is read-only: nothing was sent to or changed in the destination.
+[exit 0]
+$ /Users/chelsea/portfolio/constituent-reconciler/.venv/bin/reconcile approve-repair --plan /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/repair_plan.json --reviewer demo-reviewer-a --approvals /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/repair_approvals.json
+recorded: approved by 'demo-reviewer-a' for plan digest 1c1c0f6b3d865874f6efb9490ef03e2d259e3bab6da030de25a0c4783243b059
+  approvals file: /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/repair_approvals.json
+  distinct approvers of this exact plan digest: 1 (demo-reviewer-a)
+  1 more distinct approver(s) needed before apply-repair --execute runs.
+[exit 0]
+$ /Users/chelsea/portfolio/constituent-reconciler/.venv/bin/reconcile approve-repair --plan /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/repair_plan.json --reviewer demo-reviewer-b --approvals /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/repair_approvals.json
+recorded: approved by 'demo-reviewer-b' for plan digest 1c1c0f6b3d865874f6efb9490ef03e2d259e3bab6da030de25a0c4783243b059
+  approvals file: /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/repair_approvals.json
+  distinct approvers of this exact plan digest: 2 (demo-reviewer-a, demo-reviewer-b)
+[exit 0]
+dry-run preview first (no network call, no credential needed):
+$ /Users/chelsea/portfolio/constituent-reconciler/.venv/bin/reconcile apply-repair --config /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/recipe-live.toml --manifest /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/run_manifest.json --plan /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/repair_plan.json --approvals /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/repair_approvals.json
+dry run: cluster existing:E003 -> civicrm
+  split-create incoming:N002: would-create
+dry run: no network call was made; nothing was written to the destination.
+re-run with --execute once two distinct reviewers have approved this plan digest (1c1c0f6b3d865874f6efb9490ef03e2d259e3bab6da030de25a0c4783243b059) via `reconcile approve-repair`.
+[exit 0]
+now --execute, against the live instance, gated by the two approvals above:
+$ /Users/chelsea/portfolio/constituent-reconciler/.venv/bin/reconcile apply-repair --config /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/recipe-live.toml --manifest /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/run_manifest.json --plan /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/repair_plan.json --approvals /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/repair_approvals.json --execute
+applied: cluster existing:E003 -> civicrm 6.17.2
+  split-create incoming:N002: created
+  approvers: demo-reviewer-a, demo-reviewer-b
+  receipts:  /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/repair_receipts.json
+[exit 0]
+receipts written: True, sha256: 9a0f8367cba7853345d2d97bb70837fecf0277bf9032975bc6c32a7e0c6f5fb8
+incoming:N002 after repair -> Contact rows: 1 (expect 1: split-create ran)
+
+==============================================================================
+STEP 10: rerun apply-repair --execute (idempotency: no duplicate contact)
+==============================================================================
+$ /Users/chelsea/portfolio/constituent-reconciler/.venv/bin/reconcile apply-repair --config /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/recipe-live.toml --manifest /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/run_manifest.json --plan /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/repair_plan.json --approvals /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/repair_approvals.json --execute
+applied: cluster existing:E003 -> civicrm 6.17.2
+  split-create incoming:N002: already-exists (a contact with this external id already exists; no call was made)
+  approvers: demo-reviewer-a, demo-reviewer-b
+  receipts:  /Users/chelsea/portfolio/constituent-reconciler/docs/connectors/civicrm-live-demonstration-2026-08-21/out/run1/repair_receipts.json
+[exit 0]
+incoming:N002 after repair rerun -> Contact rows (must stay 1): 1
+
+==============================================================================
+STEP 11: final provenance verification, both run directories
+==============================================================================
+out1 provenance.jsonl: intact: 44 entries; entries from seq 0 under manifest 308e52dba366920b7e28bb4c212756a5d436afa0602ca80fd0af5ce8ad46a769; entries from seq 21 under manifest 4930a5c287f8da306b3a857ade0966eec61a7b682b92b788237544f358008565
+out2 provenance.jsonl: intact: 20 entries; entries from seq 0 under manifest 56639221940d17375cbd9c6865c9feaee31da829ce980174d8b6def0b2c9e393
+
+==============================================================================
+SUMMARY
+==============================================================================
+{
+  "date_utc": "2026-08-21T11:40:50+00:00",
+  "reconciler_commit": "6f4a057f974b499c4be3eb3ef22344f88720826c",
+  "civicrm_version": "6.17.2",
+  "civicrm_api": "v4",
+  "endpoint_host": "127.0.0.1:8760 (disposable local Docker instance)",
+  "checks": {
+    "email_in_dedicated_entity": true,
+    "phone_in_dedicated_entity": true,
+    "revoked_consent_withheld": true,
+    "rerun_updates_not_duplicates": true,
+    "repair_split_create_landed": true,
+    "repair_rerun_idempotent": true,
+    "provenance_verifies_both_runs": true
+  },
+  "artifact_hashes": {
+    "out1/repair_plan.json": "38bebace06945d0d1922afc71ee47815727bc342475e4bbd89c17020f2b37c6a",
+    "out1/repair_receipts.json": "328dbffca47b15c8c99be1529d9fd97ea6b091c370108f4a2cbebdac447ad889",
+    "out1/provenance.jsonl": "7dd729ea039238873c00f9cea3942a4ac9ede8de737af3ab94e16ef96d241aa7",
+    "out2/provenance.jsonl": "6280162740de07cbf5a1cb0ff1562116ff5a6b37a55ab56ecc76e366b3b1b7df"
+  }
+}

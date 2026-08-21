@@ -1,0 +1,41 @@
+# Live-CiviCRM demonstration recipe (issue #67, #79).
+#
+# Points at the disposable local civicrm/civicrm-docker Standalone instance
+# (127.0.0.1:8760), not a real deployment. Sources are the repo's own
+# committed synthetic demo fixtures (examples/intake-demo/*.csv): zero real
+# client PII, planted ground truth, already used throughout the test suite.
+# [consent] require = true is added on top of the stock demo recipe so the
+# consent-withheld path is genuinely exercised (incoming:N009, Omar Said,
+# carries a "revoked" status in that fixture).
+
+[input]
+existing = "../../../examples/intake-demo/existing.csv"
+incoming = "../../../examples/intake-demo/incoming.csv"
+id_column = "id"
+
+[mapping]
+first_name = "First Name"
+last_name = "Last Name"
+dob = "DOB"
+email = "Email"
+phone = "Phone"
+
+[consent]
+column = "Consent"
+require = true
+
+[thresholds]
+prior = 0.01
+auto = 0.97
+review = 0.80
+
+[policy]
+pack = "default"
+
+[output]
+connector = "civicrm"
+endpoint = "http://127.0.0.1:8760/civicrm/ajax/api4"
+auth_env = "CIVICRM_API_KEY"
+auth_header = "Authorization"
+auth_scheme = "Bearer"
+external_id_field = "external_identifier"

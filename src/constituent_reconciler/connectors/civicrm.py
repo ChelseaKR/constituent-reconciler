@@ -182,6 +182,35 @@ class CivicrmConnector:
         matches = existing.get("values", [])
         return matches[0]["id"] if matches else None
 
+    def _existing_contact_id(self, raw_contact_id: str) -> int | None:
+        """CiviCRM's own numeric id, if ``raw_contact_id`` still names a contact.
+
+        Used only by ``apply_repair``'s ``field-restore``, which addresses
+        the survivor directly by the id ``write_all`` recorded as its
+        ``WriteResult.external_id`` -- CiviCRM's own numeric primary key,
+        not our ``external_identifier`` upsert column. A lookup by
+        ``external_identifier`` would query the wrong thing here: the
+        plan's ``old_external_id`` already *is* the destination-assigned
+        id, not a value keyed under our own column (confirmed against a
+        live cluster on 2026-08-21: ``write_all``'s provenance entry for a
+        written cluster carries CiviCRM's contact id as ``external_id``,
+        e.g. ``"9"``, never the ``external_identifier`` string
+        ``plan_split`` also has, e.g. ``"existing:E003"``). Blank or
+        non-numeric input is refused as absent rather than sent to the API;
+        the JSON round trip (int id -> ``str()`` for ``WriteResult`` and the
+        plan file -> back to int here) is why this takes a string and
+        returns the int every other contact-id call site in this class
+        expects.
+        """
+        cleaned = raw_contact_id.strip()
+        if not cleaned.isdigit():
+            return None
+        contact_id = int(cleaned)
+        existing = self._call(
+            "Contact", "get", {"where": [["id", "=", contact_id]], "select": ["id"], "limit": 1}
+        )
+        return contact_id if existing.get("values") else None
+
     def _current_contact_value(self, contact_id: Any, field_name: str) -> str:
         """The live value of one canonical field, for a field-restore receipt.
 
@@ -347,9 +376,9 @@ class CivicrmConnector:
         """
         survivor = str(plan.get("survivor", ""))
         old_external_id = str(plan.get("old_external_id", ""))
-        survivor_contact_id: Any | None = None
-        if not dry_run:
-            survivor_contact_id = self._find_contact_id(old_external_id)
+        survivor_contact_id: int | None = None
+        if not dry_run and old_external_id:
+            survivor_contact_id = self._existing_contact_id(old_external_id)
 
         results: list[RepairOperationResult] = []
         for entry in plan.get("restore_fields") or []:
@@ -384,7 +413,7 @@ class CivicrmConnector:
         *,
         survivor: str,
         old_external_id: str,
-        survivor_contact_id: Any | None,
+        survivor_contact_id: int | None,
         dry_run: bool,
     ) -> RepairOperationResult:
         """One ``restore_fields`` entry: read-check, then write only if changed."""
