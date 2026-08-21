@@ -31,20 +31,25 @@ queue exists for exactly the pairs a confidence threshold should not decide
 on its own. Auto-level recall is below 100% on purpose, while coverage recall
 (auto plus review) captures every true duplicate.
 
-## The external benchmark report
+## The external benchmark reports
 
-`febrl4-report.md` is the one eval here that does not score fixtures this
+`febrl4-report.md` is the original eval here that does not score fixtures this
 project wrote. FEBRL4 is a published record-linkage benchmark: the corpus, the
 corruptions, and the ground truth are all third-party, so the difficulty cannot
 be tuned to flatter the result. Regenerate it with `make eval-benchmark`. The
 corpus is downloaded on demand into gitignored `benchmarks/`, verified against
 pinned SHA-256 digests, and never committed.
 
-Measured on 10,000 records and 5,000 known pairs: 100% precision and 67.3%
-recall at the auto band, 99.3% precision and 77.1% recall (F1 86.8%) counting
-the review queue. See [../docs/BENCHMARK.md](../docs/BENCHMARK.md) for what the
-benchmark is, why a real-person corpus was declined, and the normalizer gap the
-benchmark exposed that no fixture here could.
+Measured on 10,000 records and 5,000 known pairs: 100% precision and 74.3%
+recall at the auto band, 99.3% precision and 87.9% recall (F1 93.3%) counting
+the review queue. `febrl1-report.md`, `febrl2-report.md`, and `febrl3-report.md`
+score three more corruption levels from the same pinned upstream commit
+(`make eval-benchmark-multi DATASET=N`); unlike FEBRL4, an original in those
+datasets can carry more than one duplicate, so they also cover clustering
+across three or more records of the same person. See
+[../docs/BENCHMARK.md](../docs/BENCHMARK.md) for what the benchmarks are, why
+a real-person corpus was declined, the normalizer gap FEBRL4 exposed that no
+fixture here could, and each dataset's own threshold sweep.
 
 ## The large-corpus report
 

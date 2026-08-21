@@ -104,6 +104,18 @@ eval-benchmark:
 		--out-dir benchmarks/febrl4 \
 		--report-out eval/febrl4-report.md
 
+# The same treatment applied to FEBRL datasets 1-3 (docs/BENCHMARK.md, #68):
+# three more corruption levels from the same pinned upstream commit, each
+# its own file mixing originals and duplicates rather than FEBRL4's two-file
+# split. DATASET selects which one; default 1. Same non-CI, network-needed
+# reasoning as eval-benchmark above.
+DATASET := 1
+eval-benchmark-multi:
+	.venv/bin/python -m tools.benchmark.febrl_multi \
+		--dataset $(DATASET) \
+		--out-dir benchmarks/febrl$(DATASET) \
+		--report-out eval/febrl$(DATASET)-report.md
+
 # Stage-timing baseline over the large synthetic corpus (UC-01 "before"
 # numbers): per-stage wall clock and peak memory for ingest, extract,
 # normalize, score, review artifact, and write, as a dated report plus a JSON

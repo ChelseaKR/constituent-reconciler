@@ -124,6 +124,35 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   recompute across separate runs of the same records (a corrections re-run,
   `reconcile apply` after review), not reuse within one pass.
 
+- **The external benchmark widens to FEBRL datasets 1-3, each with its own
+  threshold sweep (#68).** FEBRL4 was the one external, third-party-ground-truth
+  eval in this repository; `tools/benchmark/febrl_multi.py` gives the same
+  treatment (pinned fetch, SHA-256 verification, no vendoring) to three more
+  datasets from the same upstream commit, at three corruption levels FEBRL
+  itself defines as low/medium/high. Datasets 1-3 ship as one file mixing
+  originals and duplicates rather than FEBRL4's two-file split, and an
+  original can carry more than one duplicate (dataset3: up to five, 1,165 of
+  2,000 originals matched) -- closing a real gap FEBRL4 alone left, since its
+  duplicates are strictly one-to-one and nothing tested clustering across
+  three or more records of the same person. `truth_clusters` groups every id
+  sharing one dsgen person number into a single cluster rather than a
+  per-duplicate pair, which matters under Splink's `dedupe_only` mode: two
+  duplicates of the same person are themselves a true pair the scorer must
+  count. A dedicated test proves the grouping against dataset3's own
+  five-duplicate shape, where the naive per-pair derivation this module does
+  not use would silently under-count (114 vs. 1,934 true pairs on the real
+  corpus). `threshold_sweep` re-bands the same scored candidates (no
+  re-scoring) at six auto-merge thresholds per dataset, so each report shows
+  the precision/recall trade-off directly rather than a single operating
+  point. Measured, gated, zero false merges on every dataset: dataset1 (1,000
+  records) 100% / 74.4% recall at auto; dataset2 (5,000 records, medium
+  corruption) 100% / 59.7%; dataset3 (5,000 records, high corruption) 100% /
+  56.3%. `docs/CLAIMS-AUDIT.md`'s FEBRL4 row is also corrected here: it had
+  gone stale since a later matching change (#110) and still quoted 67.3%
+  recall at auto, where `docs/BENCHMARK.md` and the committed
+  `eval/febrl4-report.md` have carried the current 74.3% since that change
+  landed.
+
 ### Changed
 - **A name disagreement no longer vetoes every other field.**
   `defaults._NAME_DIFFERENT_M`, the m_probability that two records of the same
