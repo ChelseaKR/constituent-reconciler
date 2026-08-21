@@ -49,9 +49,13 @@ MIGRATION_SUMMARY_SCHEMA_VERSION = 1
 # target side (target_corrections.csv) and the ``export`` section it adds to
 # compare_manifest.json. Version 1: one row per identity the target must add
 # or correct, columns from the chosen import field map plus the external-id
-# column, and a manifest section carrying digests and counts only. A future
-# column or manifest-key change bumps this and ships a migration note.
-CUTOVER_CORRECTIONS_SCHEMA_VERSION = 1
+# column, and a manifest section carrying digests and counts only. Version 2
+# added the ``target_record_ids`` column (the ids the target export itself
+# supplied, empty when it supplied none) and the manifest section's
+# ``fill_policy`` key. Both are additive: a version-1 consumer reading by
+# column name still finds every column it had. A future column or manifest-key
+# change bumps this and ships a migration note.
+CUTOVER_CORRECTIONS_SCHEMA_VERSION = 2
 # The repair-plan artifact (repair_plan.json) that ``reconcile plan-split``
 # writes: the old external id, the proposed split records, the fields needing
 # restoration, and the operations the destination supports. A versioned

@@ -22,6 +22,7 @@ from constituent_reconciler import compare
 from constituent_reconciler.cli import main
 from constituent_reconciler.compare import CompareError, CompareResult, Identity, Side
 from constituent_reconciler.config import NormalizeConfig, Recipe
+from constituent_reconciler.decisions import DEFAULT_FILL_POLICY
 from constituent_reconciler.manifest import file_digest
 from constituent_reconciler.models import IngestReport, Record, SkippedFile
 from constituent_reconciler.schema import MIGRATION_SUMMARY_SCHEMA_VERSION
@@ -556,6 +557,7 @@ def test_render_compare_summary_reports_skips_pages_and_failures() -> None:
         prior=0.01,
         auto_threshold=0.97,
         review_threshold=0.80,
+        fill_policy=DEFAULT_FILL_POLICY,
         left_ingest=IngestReport(
             files_read=("left.csv",),
             files_skipped=(SkippedFile(path="notes.docx", reason="unsupported extension: .docx"),),

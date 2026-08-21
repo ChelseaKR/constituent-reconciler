@@ -36,12 +36,17 @@ target currently holds. Its columns follow the same import field maps the
 run pipeline's ``salesforce_csv`` and ``civicrm_csv`` exports use, plus the
 external-id column keyed on the identity id, so a CRM-side upsert on that
 column stays idempotent across repeated imports of this file. The identity id
-is minted by the reconciler, not by the target system: for a matched identity,
-an upsert keyed on it would add a record rather than update the one the target
-already holds, so match those rows to their existing target records with the
-import tool's own matching before writing. It is a PII artifact: local only,
-listed in the destruction inventory, covered in
-docs/DATA-FLOW-AND-RETENTION.md.
+is minted by the reconciler, not by the target system: an upsert keyed on it
+would add a record rather than update one the target already holds. So the
+file carries a second key, ``target_record_ids``, holding the ids the target
+export itself supplied for the records in that identity (its
+``input.id_column`` values, pipe-separated when an identity covers more than
+one target record). A matched row therefore names the record to update, and a
+missing-from-target row leaves the column empty because the target has no
+record yet. When the target export carried no id column there is nothing
+honest to put there, and those rows need the import tool's own matching.
+It is a PII artifact: local only, listed in the destruction inventory, covered
+in docs/DATA-FLOW-AND-RETENTION.md.
 """
 
 from __future__ import annotations
@@ -58,6 +63,7 @@ from constituent_reconciler.compare import (
     COMPARE_MANIFEST_FILENAME,
     LEFT_ONLY,
     MATCHED,
+    RIGHT,
     CompareError,
     CompareResult,
     Identity,
@@ -65,6 +71,7 @@ from constituent_reconciler.compare import (
 )
 from constituent_reconciler.connectors.crm_csv import (
     CIVICRM_IMPORT_MAP,
+    DEFAULT_TARGET_ID_COLUMN,
     SALESFORCE_IMPORT_MAP,
     CrmCsvConnector,
 )
@@ -83,6 +90,12 @@ COMPARE_DECISIONS_FILENAME = "compare_decisions.json"
 # default the run pipeline's [output] section uses, so an operator who has
 # already mapped one import file maps this one the same way.
 EXTERNAL_ID_COLUMN = "external_identifier"
+
+# The second key: the ids the target export supplied for the records behind an
+# identity. The external id above is this tool's own, which the target has
+# never seen; this column is what an operator points the import tool's
+# matching at. Empty for an identity with no record on the target side.
+TARGET_ID_COLUMN = DEFAULT_TARGET_ID_COLUMN
 
 # Why a row is in the correction file. ``missing-from-target``: the identity
 # exists only in the legacy export. ``field-correction``: the two sides
@@ -106,7 +119,8 @@ class AppliedComparison:
 
     ``identities`` re-partitions every record under the reviewed pair bands;
     ``golden`` holds one merged record per identity that needs a correction
-    row, and ``reasons`` says why each is included, keyed by identity id.
+    row, ``reasons`` says why each is included, and ``target_ids`` carries the
+    target export's own ids for it, all keyed by identity id.
     """
 
     result: CompareResult
@@ -114,6 +128,7 @@ class AppliedComparison:
     identities: tuple[Identity, ...]
     golden: tuple[GoldenRecord, ...]
     reasons: dict[str, str]
+    target_ids: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -323,12 +338,19 @@ def apply_review(
     )
     compare._check_accounting(result.records, identities)
     golden, reasons = _correction_records(result, clusters, identities)
+    included = {identity.identity_id for identity in identities} & set(reasons)
+    target_ids = {
+        identity.identity_id: _target_ids(identity)
+        for identity in identities
+        if identity.identity_id in included
+    }
     return AppliedComparison(
         result=result,
         pairs=tuple(adjusted),
         identities=identities,
         golden=golden,
         reasons=reasons,
+        target_ids=target_ids,
     )
 
 
@@ -355,6 +377,27 @@ def _needs_field_correction(
     return False
 
 
+_TARGET_ID_PREFIX = f"{RIGHT}:"
+
+
+def _target_ids(identity: Identity) -> str:
+    """The target export's own ids for this identity, pipe-separated.
+
+    A record read from a side whose recipe maps ``input.id_column`` keeps that
+    id, namespaced by the side label (``right:41827``); a side without one gets
+    a content-derived id the target system has never seen. Only the first kind
+    is written here, stripped of the namespace, so the column holds destination
+    ids or nothing at all. Empty for a left-only identity, which by definition
+    has no record on the target side yet.
+    """
+
+    return "|".join(
+        member.removeprefix(_TARGET_ID_PREFIX)
+        for member in identity.right_members
+        if member.startswith(_TARGET_ID_PREFIX)
+    )
+
+
 def _correction_records(
     result: CompareResult,
     clusters: Sequence[Cluster],
@@ -366,6 +409,11 @@ def _correction_records(
     Matched identities contribute a row only when a reviewed golden value
     differs from what the target holds. Right-only identities and matched
     identities the target already agrees with produce nothing.
+
+    Merging runs under the comparison's governing survivorship fill policy
+    (``compare._resolve_fill_policy``), the same setting ``pipeline.run``
+    threads from the recipe, so the golden values this export writes are the
+    values that recipe asks for rather than the package default.
     """
 
     by_id = {cluster.cluster_id: cluster for cluster in clusters}
@@ -377,12 +425,19 @@ def _correction_records(
             included.append(by_id[identity.identity_id])
         elif identity.status == MATCHED:
             [candidate] = decisions.golden_records(
-                [by_id[identity.identity_id]], result.records, result.fields
+                [by_id[identity.identity_id]],
+                result.records,
+                result.fields,
+                fill_policy=result.fill_policy,
             )
             if _needs_field_correction(result, identity, candidate):
                 reasons[identity.identity_id] = REASON_FIELD
                 included.append(by_id[identity.identity_id])
-    golden = tuple(decisions.golden_records(included, result.records, result.fields))
+    golden = tuple(
+        decisions.golden_records(
+            included, result.records, result.fields, fill_policy=result.fill_policy
+        )
+    )
     return golden, reasons
 
 
@@ -447,6 +502,9 @@ def export_corrections(
     connector = CrmCsvConnector(
         "cutover-corrections", path, field_map, external_id_column=EXTERNAL_ID_COLUMN
     )
+    # The target's own ids for the rows it already holds, so a matched
+    # correction updates that record instead of adding a second one.
+    connector.set_target_id_column(applied.target_ids, column=TARGET_ID_COLUMN)
     connector.write_all(exportable, applied.result.fields, dry_run=False)
     withheld_path = _write_cutover_withheld(withheld, out_dir) if withheld else None
 
@@ -462,6 +520,9 @@ def export_corrections(
         "created_at": datetime.now(UTC).isoformat(),
         "schema_version": CUTOVER_CORRECTIONS_SCHEMA_VERSION,
         "format": fmt,
+        # Run metadata, not data: how the merged values in this file were
+        # chosen, recorded the way the run pipeline records it for a write.
+        "fill_policy": applied.result.fill_policy,
         "correction_file": CORRECTIONS_FILENAME,
         "correction_file_digest": file_digest(path),
         "decisions_digest": (file_digest(decisions_path) if decisions_path.is_file() else None),

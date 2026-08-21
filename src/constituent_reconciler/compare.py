@@ -185,6 +185,26 @@ def _resolve_thresholds(left: Side, right: Side) -> tuple[float, float, float]:
     return governing.prior, governing.auto_threshold, governing.review_threshold
 
 
+def _resolve_fill_policy(left: Side, right: Side) -> str:
+    """One survivorship policy for both sides, fail-closed on disagreement.
+
+    The same reasoning as ``_resolve_thresholds``: the policy decides which
+    member supplies a merged field, so silently taking one side's setting would
+    change the values a cutover writes into the target without anyone choosing
+    that. A bare side states nothing, so the recipe side's policy governs.
+    """
+
+    if not left.bare and not right.bare and left.recipe.fill_policy != right.recipe.fill_policy:
+        raise CompareError(
+            "the two recipes disagree on the survivorship fill policy "
+            f"(left {left.recipe.fill_policy!r}, right {right.recipe.fill_policy!r}); one "
+            "comparison needs one configuration, so align the [policy] sections "
+            "before comparing"
+        )
+    governing = right.recipe if left.bare and not right.bare else left.recipe
+    return governing.fill_policy
+
+
 def _compared_fields(left: Side, right: Side) -> tuple[str, ...]:
     """The canonical fields both sides map. Only these can match or conflict."""
 
@@ -251,6 +271,7 @@ class CompareResult:
     prior: float
     auto_threshold: float
     review_threshold: float
+    fill_policy: str
     left_ingest: IngestReport
     right_ingest: IngestReport
     normalization_failures: dict[str, dict[str, int]]
@@ -371,6 +392,7 @@ def run_compare(
 
     fields = _compared_fields(left, right)
     prior, auto_threshold, review_threshold = _resolve_thresholds(left, right)
+    fill_policy = _resolve_fill_policy(left, right)
     address_backend = _address_backend(left, right, fields)
 
     left_accounting = IngestAccumulator()
@@ -438,6 +460,7 @@ def run_compare(
         prior=prior,
         auto_threshold=auto_threshold,
         review_threshold=review_threshold,
+        fill_policy=fill_policy,
         left_ingest=left_accounting.freeze(),
         right_ingest=right_accounting.freeze(),
         normalization_failures=failures,
