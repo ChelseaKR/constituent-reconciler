@@ -16,6 +16,16 @@ recorded approvals), ``review`` serves the local web queue for a run,
 ``destroy`` deletes retained artifacts, ``verify`` checks a provenance log's
 hash chain, and ``schema`` prints the declared schema versions. The CLI uses
 argparse only, so the package has no runtime dependency beyond the matcher.
+
+``ai-explain``, ``ai-ask``, ``ai-propose-corrections``, and ``ai-triage`` are
+the opt-in AI assistant surface (``constituent_reconciler.assistant``,
+docs/adr/0014-runtime-ai-at-the-edges.md): every ``constituent_reconciler.
+assistant`` import in this file is inside its ``_cmd_ai_*`` function body,
+never at module level, so running any command above -- the offline-first
+deterministic pipeline -- never imports the ``anthropic`` or ``boto3`` SDKs
+and never calls a model provider. Output from every ``ai-*`` command is
+always labeled AI-generated and advisory; none of them can write a merge
+decision or apply a correction.
 """
 
 from __future__ import annotations
@@ -26,8 +36,15 @@ import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from constituent_reconciler import __version__, compare, compare_apply, pipeline, stage_cache
+
+if TYPE_CHECKING:
+    # Only for type hints: the deterministic pipeline commands never import
+    # the assistant package or its provider/rate-limit types at runtime.
+    from constituent_reconciler.assistant.provider import Provider
+    from constituent_reconciler.assistant.rate_limit import RateLimiter
 from constituent_reconciler.config import Recipe, RecipeError, load_recipe
 from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.consent import partition_by_consent
@@ -40,10 +57,11 @@ from constituent_reconciler.evaluate import (
     evaluate,
     extraction_metrics,
 )
+from constituent_reconciler.matching.evidence import PairEvidence, comparison_evidence
 from constituent_reconciler.models import Correction, RunResult
 from constituent_reconciler.narrative import LANGUAGES, render_narrative
 from constituent_reconciler.pipeline import ExportSummary
-from constituent_reconciler.policy import PolicyViolation
+from constituent_reconciler.policy import Policy, PolicyViolation, policy_for
 from constituent_reconciler.progress import ConsoleProgressRenderer
 from constituent_reconciler.provenance import ProvenanceLog, verify_log
 from constituent_reconciler.quality import SourceQuality
@@ -1102,6 +1120,310 @@ def _cmd_schema(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ai_pair_evidence(
+    result: RunResult, recipe: Recipe, left_id: str, right_id: str
+) -> PairEvidence | None:
+    """Resolve two record ids to their real Splink comparison evidence, or None."""
+
+    if left_id not in result.records or right_id not in result.records:
+        return None
+    evidence_map = comparison_evidence(
+        result.records.values(), recipe.fields, [(left_id, right_id)]
+    )
+    return evidence_map.get((left_id, right_id))
+
+
+def _ai_withheld_fields(
+    result: RunResult, recipe: Recipe, policy: Policy, *ids: str
+) -> tuple[str, ...]:
+    from constituent_reconciler.assistant import filter_record
+
+    withheld: set[str] = set()
+    for record_id in ids:
+        filtered = filter_record(result.records[record_id], policy=policy, fields=recipe.fields)
+        withheld.update(filtered.withheld_fields())
+    return tuple(sorted(withheld))
+
+
+def _ai_load_recipe_and_policy(args: argparse.Namespace) -> tuple[Recipe, Policy] | int:
+    """Load the recipe and confirm the AI assistant is allowed under its policy pack.
+
+    Every ``_cmd_ai_*`` command starts with
+    ``setup = _ai_load_recipe_and_policy(args); if isinstance(setup, int): return setup``.
+    Shared so the dv/hipaa cloud gate (``assert_cloud_ai_allowed``) is checked
+    in exactly one place, not reimplemented per command.
+    """
+    from constituent_reconciler.assistant import assert_cloud_ai_allowed
+
+    try:
+        recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+    except PolicyViolation as error:
+        print(f"policy error: {error}", file=sys.stderr)
+        return 2
+    policy = policy_for(recipe.policy_pack)
+    try:
+        assert_cloud_ai_allowed(policy)
+    except PolicyViolation as error:
+        print(f"policy error: {error}", file=sys.stderr)
+        return 2
+    return recipe, policy
+
+
+def _ai_provider_or_error(args: argparse.Namespace) -> Provider | int:
+    """Construct the configured provider, or report why none is available.
+
+    Does not itself apply the rate limit: a caller that will make more than
+    one provider call (``ai-propose-corrections``, one call per field) must
+    call ``RateLimiter.check_and_record()`` before each individual call, not
+    once for the whole command.
+    """
+    from constituent_reconciler.assistant import make_provider
+
+    provider = make_provider(name=args.ai_provider, model=args.ai_model)
+    if not provider.is_enabled():
+        print(
+            "error: no AI provider is configured "
+            "(set ANTHROPIC_API_KEY, or pass --ai-provider bedrock with AWS credentials)",
+            file=sys.stderr,
+        )
+        return 2
+    return provider
+
+
+def _ai_rate_limiter(out_dir: Path) -> RateLimiter:
+    from constituent_reconciler.assistant.rate_limit import RateLimiter
+
+    return RateLimiter(state_path=out_dir / "ai_usage.json")
+
+
+def _cmd_ai_explain(args: argparse.Namespace) -> int:
+    """AI-GENERATED, ADVISORY: explain one pair's real comparison evidence.
+
+    The model narrates the field-by-field evidence Splink already computed;
+    it never re-scores, and nothing here changes a match probability, a
+    band, or a decision. Every per-field claim is checked against the real
+    evidence before display; an unverifiable claim is withheld and counted,
+    not shown. See docs/adr/0014-runtime-ai-at-the-edges.md.
+    """
+    from constituent_reconciler.assistant import explain_match
+    from constituent_reconciler.assistant.errors import AssistantError
+
+    setup = _ai_load_recipe_and_policy(args)
+    if isinstance(setup, int):
+        return setup
+    recipe, policy = setup
+
+    result = pipeline.run(recipe)
+    left_id, right_id = sorted(args.pair)
+    pair_evidence = _ai_pair_evidence(result, recipe, left_id, right_id)
+    if pair_evidence is None:
+        print(
+            f"error: no real comparison evidence for ({left_id}, {right_id}) -- unknown "
+            "id, or Splink's own blocking rules never scored this pair",
+            file=sys.stderr,
+        )
+        return 2
+    withheld = _ai_withheld_fields(result, recipe, policy, left_id, right_id)
+
+    try:
+        provider = _ai_provider_or_error(args)
+        if isinstance(provider, int):
+            return provider
+        _ai_rate_limiter(Path(args.out)).check_and_record()
+        explanation = explain_match(pair_evidence, provider=provider, withheld_fields=withheld)
+    except AssistantError as error:
+        print(f"AI error: {error}", file=sys.stderr)
+        return 2
+
+    print("AI-GENERATED, ADVISORY -- narrates real evidence only; never a merge decision")
+    print(f"pair: {explanation.left_id} / {explanation.right_id}")
+    print(f"match probability: {explanation.match_probability:.3f}\n")
+    print(explanation.summary)
+    for claim in explanation.claims:
+        if claim.verified:
+            print(f"  [{claim.field}] {claim.narrative}")
+    if explanation.withheld_claim_count():
+        print(
+            f"\n({explanation.withheld_claim_count()} claim(s) withheld: "
+            "could not be verified against real evidence)"
+        )
+    if withheld:
+        print(f"withheld from the model by consent/policy: {', '.join(withheld)}")
+    print(
+        f"\nprovider={explanation.provider} model={explanation.model} "
+        f"prompt_version={explanation.prompt_version}"
+    )
+    return 0
+
+
+def _cmd_ai_ask(args: argparse.Namespace) -> int:
+    """AI-GENERATED, ADVISORY: answer a grounded question about one pair.
+
+    Refuses, by design and by a deterministic scanner on the response, to
+    ever recommend a merge, claim two records are the same person, or tell
+    a reviewer which to keep. See eval/ai/adversarial_refusal.py, the
+    zero-tolerance eval this surface is held to.
+    """
+    from constituent_reconciler.assistant import ask
+    from constituent_reconciler.assistant.errors import AssistantError
+
+    setup = _ai_load_recipe_and_policy(args)
+    if isinstance(setup, int):
+        return setup
+    recipe, policy = setup
+
+    result = pipeline.run(recipe)
+    left_id, right_id = sorted(args.pair)
+    pair_evidence = _ai_pair_evidence(result, recipe, left_id, right_id)
+    if pair_evidence is None:
+        print(f"error: no real comparison evidence for ({left_id}, {right_id})", file=sys.stderr)
+        return 2
+    withheld = _ai_withheld_fields(result, recipe, policy, left_id, right_id)
+
+    try:
+        provider = _ai_provider_or_error(args)
+        if isinstance(provider, int):
+            return provider
+        _ai_rate_limiter(Path(args.out)).check_and_record()
+        response = ask(
+            args.question, evidence=pair_evidence, provider=provider, withheld_fields=withheld
+        )
+    except AssistantError as error:
+        print(f"AI error: {error}", file=sys.stderr)
+        return 2
+
+    print("AI-GENERATED, ADVISORY -- never a merge decision")
+    print(f"\nQ: {response.question}\nA: {response.answer}\n")
+    if response.scrubbed:
+        print("(this response was withheld by the safety scanner and replaced with a redirect)")
+    print(
+        f"provider={response.provider} model={response.model} "
+        f"prompt_version={response.prompt_version}"
+    )
+    return 0
+
+
+def _cmd_ai_propose_corrections(args: argparse.Namespace) -> int:
+    """AI-GENERATED DRAFT, never applied: propose quote-bound OCR corrections.
+
+    Every accepted proposal quotes the exact source-document text it is
+    based on, verified as an exact substring before it is ever shown.
+    Nothing here writes to a record or to ``out/corrections.json``; the
+    output is a draft file a human reviews, and turning an accepted
+    proposal into a real correction still goes through the ordinary
+    review-and-correction path.
+    """
+    from constituent_reconciler.assistant import filter_record, propose_correction
+    from constituent_reconciler.assistant.errors import AssistantError
+    from constituent_reconciler.assistant.source_text import for_field
+
+    setup = _ai_load_recipe_and_policy(args)
+    if isinstance(setup, int):
+        return setup
+    recipe, policy = setup
+
+    result = pipeline.run(recipe)
+    record = result.records.get(args.record)
+    if record is None:
+        print(f"error: unknown record id {args.record!r}", file=sys.stderr)
+        return 2
+    fields = tuple(args.field) if args.field else recipe.fields
+    filtered = filter_record(record, policy=policy, fields=recipe.fields)
+
+    proposals = []
+    try:
+        provider = _ai_provider_or_error(args)
+        if isinstance(provider, int):
+            return provider
+        limiter = _ai_rate_limiter(Path(args.out))
+        for field in fields:
+            if filtered.value(field) is None:
+                continue  # withheld by consent/policy, or no extracted value at all
+            source = for_field(record, field)
+            if source is None:
+                continue  # no source-document text available to ground a quote in
+            limiter.check_and_record()
+            proposals.append(
+                propose_correction(
+                    record_id=record.unique_id,
+                    field=field,
+                    original_value=record.raw.get(field, ""),
+                    source_text=source,
+                    provider=provider,
+                )
+            )
+    except AssistantError as error:
+        print(f"AI error: {error}", file=sys.stderr)
+        return 2
+
+    out_path = Path(args.out) / "ai_ocr_proposals.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        json.dumps(
+            {
+                "label": "AI-GENERATED DRAFT -- not applied to any record; review required",
+                "record_id": record.unique_id,
+                "proposals": [dataclasses.asdict(p) for p in proposals],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+
+    accepted = [p for p in proposals if p.verified]
+    print(
+        f"AI-GENERATED, DRAFT ONLY -- {len(accepted)} of {len(proposals)} checked field(s) "
+        "have a verified proposed correction"
+    )
+    for proposal in proposals:
+        if proposal.verified:
+            print(
+                f"  [{proposal.field}] {proposal.original_value!r} -> "
+                f"{proposal.proposed_value!r}  (quote: {proposal.quote!r})"
+            )
+        else:
+            print(f"  [{proposal.field}] abstained: {proposal.abstain_reason}")
+    print(f"\nwritten to {out_path} -- a draft; nothing was applied to any record")
+    return 0
+
+
+def _cmd_ai_triage(args: argparse.Namespace) -> int:
+    """Order the review queue by real signal (score, disagreement, consent).
+
+    Ranking only -- this command never calls a model and never needs an AI
+    provider configured, so it runs the same under every policy pack
+    including dv/hipaa. The order is a suggestion for where to look first,
+    never a decision: every pair still goes through the ordinary review UI.
+    """
+    from constituent_reconciler.assistant.triage import triage_queue
+
+    try:
+        recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+    except PolicyViolation as error:
+        print(f"policy error: {error}", file=sys.stderr)
+        return 2
+
+    result = pipeline.run(recipe)
+    pairs = list(result.review_pairs)
+    consents = {record_id: record.consent for record_id, record in result.records.items()}
+    pair_ids: list[tuple[str, str]] = [
+        (a, b) for a, b in (sorted((pair.left, pair.right)) for pair in pairs)
+    ]
+    evidence_map: dict[tuple[str, str], PairEvidence] = (
+        comparison_evidence(result.records.values(), recipe.fields, pair_ids) if pairs else {}
+    )
+
+    items = triage_queue(pairs, consents=consents, evidence=evidence_map)
+    print(f"review-queue triage -- ordering only, never a decision ({len(items)} pair(s))")
+    for item in items:
+        flag = " [CONSENT CONFLICT]" if item.consent_conflict else ""
+        print(
+            f"  {item.priority_rank:>3}. {item.left_id} / {item.right_id}{flag} -- "
+            f"{'; '.join(item.reasons)}"
+        )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="reconcile",
@@ -1513,6 +1835,93 @@ def build_parser() -> argparse.ArgumentParser:
         "schema", help="print the declared config, connector, and report schema versions"
     )
     schema_parser.set_defaults(func=_cmd_schema)
+
+    ai_explain_parser = sub.add_parser(
+        "ai-explain",
+        help="AI-GENERATED, ADVISORY: explain one pair's real comparison evidence",
+    )
+    ai_explain_parser.add_argument("--config", required=True, help="path to recipe.toml")
+    ai_explain_parser.add_argument(
+        "--out", default="out", help="output directory (AI usage/rate-limit state)"
+    )
+    ai_explain_parser.add_argument(
+        "--pair",
+        nargs=2,
+        metavar=("LEFT_ID", "RIGHT_ID"),
+        required=True,
+        help="the two record ids to explain",
+    )
+    ai_explain_parser.add_argument(
+        "--policy-pack",
+        default=None,
+        help="override the recipe's policy pack; dv/hipaa disable the AI assistant entirely",
+    )
+    ai_explain_parser.add_argument(
+        "--ai-provider",
+        default=None,
+        help="anthropic (default) or bedrock; also $RECONCILER_AI_PROVIDER",
+    )
+    ai_explain_parser.add_argument(
+        "--ai-model", default=None, help="override the provider's default model"
+    )
+    ai_explain_parser.set_defaults(func=_cmd_ai_explain)
+
+    ai_ask_parser = sub.add_parser(
+        "ai-ask",
+        help="AI-GENERATED, ADVISORY: answer a grounded question about one pair",
+    )
+    ai_ask_parser.add_argument("--config", required=True, help="path to recipe.toml")
+    ai_ask_parser.add_argument(
+        "--out", default="out", help="output directory (AI usage/rate-limit state)"
+    )
+    ai_ask_parser.add_argument("--pair", nargs=2, metavar=("LEFT_ID", "RIGHT_ID"), required=True)
+    ai_ask_parser.add_argument(
+        "--question", required=True, help="free-text question about this pair"
+    )
+    ai_ask_parser.add_argument(
+        "--policy-pack",
+        default=None,
+        help="override the recipe's policy pack; dv/hipaa disable the AI assistant entirely",
+    )
+    ai_ask_parser.add_argument("--ai-provider", default=None)
+    ai_ask_parser.add_argument("--ai-model", default=None)
+    ai_ask_parser.set_defaults(func=_cmd_ai_ask)
+
+    ai_propose_parser = sub.add_parser(
+        "ai-propose-corrections",
+        help="AI-GENERATED DRAFT, never applied: propose quote-bound OCR corrections",
+    )
+    ai_propose_parser.add_argument("--config", required=True, help="path to recipe.toml")
+    ai_propose_parser.add_argument("--out", default="out", help="output directory")
+    ai_propose_parser.add_argument(
+        "--record", required=True, help="record id to propose corrections for"
+    )
+    ai_propose_parser.add_argument(
+        "--field",
+        action="append",
+        default=None,
+        help="field to check (repeatable; default: every mapped field)",
+    )
+    ai_propose_parser.add_argument(
+        "--policy-pack",
+        default=None,
+        help="override the recipe's policy pack; dv/hipaa disable the AI assistant entirely",
+    )
+    ai_propose_parser.add_argument("--ai-provider", default=None)
+    ai_propose_parser.add_argument("--ai-model", default=None)
+    ai_propose_parser.set_defaults(func=_cmd_ai_propose_corrections)
+
+    ai_triage_parser = sub.add_parser(
+        "ai-triage",
+        help="order the review queue by real signal (score, disagreement, consent)",
+    )
+    ai_triage_parser.add_argument("--config", required=True, help="path to recipe.toml")
+    ai_triage_parser.add_argument(
+        "--policy-pack",
+        default=None,
+        help="override the recipe's policy pack (e.g. dv); fail-closed on unknown",
+    )
+    ai_triage_parser.set_defaults(func=_cmd_ai_triage)
 
     return parser
 
