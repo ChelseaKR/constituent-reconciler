@@ -35,6 +35,13 @@ reconcile = "constituent_reconciler.cli:main"
 [project.optional-dependencies]
 extract = ["pdfplumber>=0.11"]
 ocr = ["pytesseract>=0.3.10"]
+# The AI assistant package (constituent_reconciler.assistant) is opt-in and
+# never imported by the deterministic pipeline. This extra installs the
+# default provider's SDK only; the Bedrock provider's boto3 dependency is
+# intentionally left undeclared here, matching extract/seam.py's existing
+# BedrockSeam convention (lazy-imported, install-hint-on-missing) rather
+# than adding a second, inconsistent way to depend on boto3.
+ai = ["anthropic>=0.40"]
 
 [dependency-groups]
 dev = [
@@ -44,6 +51,8 @@ dev = [
   "ruff>=0.15",
   "pip-audit>=2.7",
   "pdfplumber>=0.11",
+  "anthropic>=0.40",
+  "boto3>=1.34",
 ]
 
 [project.urls]
