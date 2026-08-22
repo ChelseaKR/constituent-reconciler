@@ -1,4 +1,4 @@
-.PHONY: install verify format-check lint type test security axe-fixtures axe eval eval-extraction eval-bias eval-large eval-benchmark perf-baseline perf-baseline-pdf run docker bundle clean
+.PHONY: install verify format-check lint type test security axe-fixtures axe eval eval-extraction eval-bias eval-large eval-benchmark eval-ai perf-baseline perf-baseline-pdf run docker bundle clean
 
 # Reproduce the full local toolchain. CI mirrors `make verify` byte for byte.
 # `--locked`, not `--frozen`: both install exactly what uv.lock pins and
@@ -115,6 +115,18 @@ eval-benchmark-multi:
 		--dataset $(DATASET) \
 		--out-dir benchmarks/febrl$(DATASET) \
 		--report-out eval/febrl$(DATASET)-report.md
+
+# Score the opt-in AI assistant package (constituent_reconciler.assistant,
+# docs/adr/0014-runtime-ai-at-the-edges.md) against its adversarial-refusal,
+# OCR-proposal, citation-grounding, consent-leakage, and unanswerable-query
+# fixtures (tools/ai_eval/), and render eval/ai/report.md. Every fixture is
+# synthetic. Needs a configured provider to run live (ANTHROPIC_API_KEY, or
+# --provider bedrock with AWS credentials); without one it honestly records
+# "not run" rather than fabricating a number. The consent-leakage eval is
+# deterministic and always runs regardless. Not part of `verify` or CI, for
+# the same live/network/credentialed reasoning as eval-benchmark above.
+eval-ai:
+	.venv/bin/python -m tools.ai_eval.run_eval
 
 # Stage-timing baseline over the large synthetic corpus (UC-01 "before"
 # numbers): per-stage wall clock and peak memory for ingest, extract,
