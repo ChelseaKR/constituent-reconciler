@@ -246,6 +246,24 @@ writes the same artifact shapes as the default pack (it does not emit
 record-bearing artifact in the inventory as PHI-bearing and apply the covered
 entity's own retention schedule to all of it.
 
+## Part 3: the AI assistant layer (opt-in, a second egress path)
+
+[ADR 0014](adr/0014-runtime-ai-at-the-edges.md) added a second place this
+codebase can send data off the machine: the opt-in `assistant/` package
+(four CLI commands, `ai-explain`/`ai-ask`/`ai-propose-corrections`/
+`ai-triage`). It is not part of the flow map in Part 1 above -- nothing in
+`pipeline.run`'s data path touches it -- and it is bound by the same
+non-egress switch (`policy.forbid_cloud_seam`) the extraction seam already
+uses, so the `dv` and `hipaa` packs disable it exactly as they disable that
+seam. Under the `default` pack, where it is reachable, `assistant/
+consent_filter.py` filters every field through the record's own consent
+before any prompt is built, the same gate `consent.partition_by_consent`
+applies to export. What is *not* settled by that mechanism: whether sending
+a field to a third-party model provider at all fits an adopting
+organization's own donor/client consent language and subprocessor
+obligations, independent of this project's consent-scope switch. That
+question is recorded as a DECISION NEEDED in ADR 0014, not answered here.
+
 ## What is enforced versus what is procedure
 
 The flow half of this model is enforced by merge-blocking tests: non-egress
@@ -257,4 +275,9 @@ review, consent, and no-live-connector gates (`tests/test_compare.py`,
 `tests/test_compare_apply.py`). The destruction executor and its provenance
 certificates are enforced by `tests/test_destruction.py`, and cache-entry
 destruction by `tests/test_stage_cache.py`; choosing the retention window
-remains operator procedure.
+remains operator procedure. The AI assistant layer's own non-egress and
+consent-filtering gates are enforced by
+`tests/test_assistant_consent_filter.py`,
+`tests/test_assistant_evidence_payload.py`, and the deterministic
+consent-leakage eval in `tools/ai_eval/consent_leakage.py`
+(`eval/ai/report.md` §4).
