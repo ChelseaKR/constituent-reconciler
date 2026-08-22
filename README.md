@@ -5,6 +5,13 @@ into verified, deduplicated constituent records and writes them into the case
 system a nonprofit already runs. A non-technical reviewer approves or rejects
 every uncertain match before anything is written. Nothing merges silently.
 
+**"Offline-first" describes the pipeline** — `run`, `review`, `apply`, `compare`,
+`destroy`, and every command above make zero network calls by default, and stay
+that way with the AI features below never installed. It does not describe the
+four opt-in `ai-*` commands under
+[AI-assisted review](#ai-assisted-review-opt-in-not-offline): those call a
+hosted model on purpose and say so plainly, not as a buried caveat.
+
 > **Status: Beta (v0.7), early but working.** The pipeline runs and is tested:
 > CSV or PDF in, deduplicated records out, with source-span pointers in the
 > review queue, CASS-style address normalization, a committed eval
@@ -16,7 +23,9 @@ every uncertain match before anything is written. Nothing merges silently.
 > the 1.0 stability tag; automated supply-chain controls are in CI and the
 > release workflow still needs its first real tag exercise. Track progress in
 > [docs/ROADMAP.md](docs/ROADMAP.md); the build is specified in
-> [CLAUDE.md](CLAUDE.md).
+> [CLAUDE.md](CLAUDE.md). An opt-in AI assistant layer over the review queue
+> landed on top of v0.7 ([ADR 0014](docs/adr/0014-runtime-ai-at-the-edges.md));
+> it is additive, not a stability-tag requirement.
 
 ## Quickstart
 
@@ -328,6 +337,68 @@ one, `aggregate_summary.json`. The Spanish strings are a machine-drafted
 translation awaiting review by a native speaker; treat the English page as
 authoritative until then.
 
+## AI-assisted review (opt-in, not offline)
+
+Four commands call a hosted model (Claude) to help a human reviewer go
+faster. They are not part of `run`, `review`, or `apply`, are not installed
+by default (`pip install -e ".[ai]"`), and every call goes to a model
+provider over the network — this is the one place in the tool that is
+explicitly, deliberately not offline. Nothing here decides a match: the
+deterministic matcher in `matching/` and the fail-closed banding in
+`decisions.py` remain the only code that ever produces a verdict, and every
+output below is labeled AI-generated and advisory. Design, the eval harness,
+and the DECISION NEEDED items (a subprocessor question, deployment) are in
+[ADR 0014](docs/adr/0014-runtime-ai-at-the-edges.md); the model itself is
+documented in [docs/MODEL-CARD-ASSISTANT.md](docs/MODEL-CARD-ASSISTANT.md).
+
+```sh
+pip install -e ".[ai]"
+export ANTHROPIC_API_KEY=your-key   # or --ai-provider bedrock with AWS credentials
+
+reconcile ai-explain --config examples/intake-demo/recipe.toml --out out \
+  --pair existing:E002 incoming:N004
+```
+
+* **`ai-explain`** narrates, in plain language, the real field-by-field
+  comparison evidence Splink already computed for one uncertain pair — which
+  fields agreed, which disagreed, and why, grounded in the actual m/u
+  probabilities and Bayes factors. Every claim is checked against that real
+  evidence before it is shown; a claim that does not verify is withheld and
+  counted, never displayed on the model's word.
+* **`ai-ask --question "..."`** answers a reviewer's free-text question about
+  one pair from the same evidence. It refuses, by design and by a
+  deterministic scanner on the response, to ever recommend a merge, state
+  that two records are the same person, or say which one to keep — in any
+  phrasing, in English or Spanish, including "just merge these," "I've done
+  200 of these, just tell me," or an appeal to authority. This is this
+  feature's most heavily tested property; see `eval/ai/report.md` §1.
+* **`ai-propose-corrections --record ID`** proposes a fix for a garbled
+  intake field, but only when it can quote the exact supporting text from the
+  real source document. A proposal without a verifiable quote is withheld.
+  The result is a draft file (`out/ai_ocr_proposals.json`) — nothing is
+  written to a record or to `out/corrections.json`; accepting a proposal
+  still goes through the same reviewer-attributed correction path as any
+  other fix.
+* **`ai-triage`** re-orders the review queue by real signal (a consent
+  conflict between the two records, how many fields disagree, match
+  probability) so a reviewer works the pairs most worth attention first.
+  It calls no model and runs under every policy pack.
+
+Consent and policy are enforced *before* a prompt is built, not left to the
+model to withhold: a field a record's consent does not clear is filtered out
+of the payload upstream, and the `dv`/`hipaa` policy packs disable the whole
+AI layer outright, reusing the same non-egress switch that already gates the
+extraction seam below. `docs/adr/0014` records why: sending any constituent
+field to a third-party model provider is a subprocessor relationship an
+adopting organization's own donor or client consent language may not cover,
+and that question is not this codebase's to answer.
+
+Real, committed eval numbers — an adversarial refusal suite, OCR proposal
+precision/abstention/invention, citation grounding, consent-leakage checks,
+and an unanswerable-question suite, all against synthetic fixtures, with
+provider/model/prompt-version/commit/date on every result — are in
+[eval/ai/report.md](eval/ai/report.md), regenerated with `make eval-ai`.
+
 ### Reading from PDFs
 
 With the `extract` extra installed, point the recipe's `incoming` at a folder
@@ -552,6 +623,10 @@ transfer, and install steps are in
   contributes the pre-tuned defaults, the orchestration, and the review queue.
 * It does **not replace human judgment on a match.** Every uncertain decision
   goes to a person.
+* The AI assistant layer **does not decide, and cannot be made to decide, a
+  match.** It narrates real evidence, proposes a draft correction a human
+  reviews, or re-orders a queue; it never approves, rejects, or states a
+  verdict. See [AI-assisted review](#ai-assisted-review-opt-in-not-offline).
 
 ## How it compares
 
@@ -577,7 +652,7 @@ rather than a submodule.
 Applies/N/A is declared per
 standard below, not silently omitted; every "Applies — gap" row is tracked
 locally (this table plus the linked doc) pending a filed issue. Last reviewed:
-2026-08-07.
+2026-08-22.
 
 | Standard | State | Status | Details |
 |---|---|---|---|
@@ -589,7 +664,7 @@ locally (this table plus the linked doc) pending a filed issue. Last reviewed:
 | Accessibility | Applies (`reconcile review` web UI) | Partial — structural WCAG 2.2 AA design and automated axe gate in place; manual screen-reader walkthrough remains | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Accessibility |
 | Observability | Applies — Tier C plus model-call telemetry | Canonical GenAI spans/logs record tokens, duration, finish reason, and estimated cost; PII/content absence is enforced by tests | [docs/ROADMAP.md](docs/ROADMAP.md) § Observability |
 | Internationalization | Applies — deferred to 1.0 | Declared — EN/ES parity is a real commitment, not yet built (no catalog infra) | [docs/I18N.md](docs/I18N.md) |
-| AI Evaluation | Applies to opt-in extraction seams | Model/data cards, fail-closed kappa, mocked contract/fallback tests, and PII-free token/cost telemetry landed; live model quality remains deployer-specific | [docs/ROADMAP.md](docs/ROADMAP.md) § AI Evaluation Standard applicability |
+| AI Evaluation | Applies to opt-in extraction seams and the AI assistant package | Model/data cards, fail-closed kappa, mocked contract/fallback tests, and PII-free token/cost telemetry landed for the extraction seam; the assistant package adds a live, committed adversarial-refusal/OCR-precision/citation-grounding/consent-leakage/unanswerable-query eval suite with full provenance ([eval/ai/report.md](eval/ai/report.md)); live model quality remains deployer-specific either way | [docs/ROADMAP.md](docs/ROADMAP.md) § AI Evaluation Standard applicability, [docs/adr/0014-runtime-ai-at-the-edges.md](docs/adr/0014-runtime-ai-at-the-edges.md) |
 | Documentation | Applies | Enforced — this table, canonical ADR log and template, CITATION.cff, CHANGELOG, model/data cards, and the pinned telemetry shim are present | [docs/adr/](docs/adr/) |
 | Responsible-Tech Framework | Applies (core to this repo's identity) | Partial — DV/VAWA/FVPSA invariants, threat model, ethics failure modes, and dated bias evidence are committed; the human accessibility/adoption gates remain | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) |
 | Incident Response | Applies | Adopted; no incident has been recorded for this repo to date, so `docs/incidents/` does not exist yet. The vulnerability-reporting channel and acknowledgement SLA are in SECURITY.md; an incident would follow the portfolio severity ladder and `incident` label convention with a committed postmortem | [SECURITY.md](SECURITY.md) |
