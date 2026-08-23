@@ -206,6 +206,57 @@ def test_repair_receipts_is_a_listed_artifact_and_is_destroyed(tmp_path: Path) -
     assert ok, message
 
 
+def test_ai_ocr_proposals_is_a_listed_artifact_and_is_destroyed(tmp_path: Path) -> None:
+    """The AI OCR proposals artifact holds raw and quoted PII, so destroy must cover it.
+
+    `reconcile ai-propose-corrections` writes `out/ai_ocr_proposals.json`, which
+    contains original values, proposed values, and verbatim quoted source text.
+    Without this entry, `reconcile destroy` would leave behind PII in permissive
+    pipeline runs.
+    """
+
+    assert "ai_ocr_proposals.json" in PII_ARTIFACTS
+    out_dir = _make_out_dir(tmp_path)
+    proposals_path = out_dir / "ai_ocr_proposals.json"
+    proposals_path.write_text(
+        json.dumps(
+            {
+                "label": "AI-GENERATED DRAFT -- not applied to any record; review required",
+                "record_id": "REC-1",
+                "proposals": [
+                    {
+                        "field": "email",
+                        "original_value": SENTINEL,
+                        "proposed_value": "alice.corrected@example.org",
+                        "quote": f"Contact: {SENTINEL}",
+                        "verified": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _age(proposals_path, 2 * DAY_SECONDS)
+
+    log = ProvenanceLog(out_dir / PROVENANCE_FILENAME)
+    summary = destroy(out_dir, timedelta(days=1), policy="1d", log=log, dry_run=False)
+
+    assert not proposals_path.exists()
+    assert "ai_ocr_proposals.json" in {artifact.name for artifact in summary.destroyed}
+    entries = [
+        json.loads(line)
+        for line in (out_dir / PROVENANCE_FILENAME).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    certified = [
+        e for e in entries if e["action"] == "destroyed" and e["record_id"] == proposals_path.name
+    ]
+    assert len(certified) == 1
+    assert SENTINEL not in (out_dir / PROVENANCE_FILENAME).read_text(encoding="utf-8")
+    ok, message = verify_log(out_dir / PROVENANCE_FILENAME)
+    assert ok, message
+
+
 def test_no_planted_value_survives_under_out_dir(tmp_path: Path) -> None:
     out_dir = _make_out_dir(tmp_path)
     log = ProvenanceLog(out_dir / PROVENANCE_FILENAME)

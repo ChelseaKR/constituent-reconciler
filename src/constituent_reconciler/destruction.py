@@ -57,6 +57,9 @@ from constituent_reconciler.stage_cache import CACHE_DIR_NAME, EXTRACT_STAGE, NO
 # deliberately absent here: it carries reviewer names, verdicts, and
 # timestamps only, the same content class as decisions.json's own audit
 # section, which this list has never covered.
+# ai_ocr_proposals.json is written by ``reconcile ai-propose-corrections``:
+# it holds real raw field values, proposed values, and verbatim quoted source
+# text, so it is destroyed here under the same retention policies.
 PII_ARTIFACTS: tuple[str, ...] = (
     "resolved.csv",
     "review_queue.csv",
@@ -70,6 +73,7 @@ PII_ARTIFACTS: tuple[str, ...] = (
     "cutover_withheld.csv",
     "repair_plan.json",
     "repair_receipts.json",
+    "ai_ocr_proposals.json",
 )
 
 PROVENANCE_FILENAME = "provenance.jsonl"
