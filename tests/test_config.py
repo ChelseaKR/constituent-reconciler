@@ -265,6 +265,42 @@ def test_validate_command_reports_a_missing_incoming_file(tmp_path: Path, capsys
     assert "does not exist" in err
 
 
+# `validate` and `compare`/`plan-split`/`apply-repair` catch `RecipeError` and
+# print a clean "invalid recipe: ..." message; every other command that loads
+# a recipe (`run`, `eval`, `apply`, `review`, `export-comparable`, and the
+# `ai-*` commands) used to catch only `PolicyViolation`, so the same malformed
+# recipe.toml a new operator hand-edits (the exact scenario `validate` exists
+# to check for first, per the README) crashed with an uncaught RecipeError
+# traceback instead of the same clean message, on the very commands the
+# README's quickstart tells an operator to run next. Parametrized over one
+# representative argv per command so a future command wired the same way is
+# covered by adding one more case here rather than a whole new test.
+@pytest.mark.parametrize(
+    "extra_args",
+    [
+        pytest.param(["run"], id="run"),
+        pytest.param(["eval", "--truth", "ground_truth.json"], id="eval"),
+        pytest.param(["apply", "--decisions", "decisions.json"], id="apply"),
+        pytest.param(["review", "--reviewer", "Test Reviewer", "--no-browser"], id="review"),
+        pytest.param(["export-comparable"], id="export-comparable"),
+        pytest.param(["ai-explain", "--pair", "a", "b"], id="ai-explain"),
+        pytest.param(["ai-triage"], id="ai-triage"),
+    ],
+)
+def test_command_reports_an_invalid_recipe_instead_of_crashing(
+    tmp_path: Path, capsys: object, extra_args: list[str]
+) -> None:
+    from constituent_reconciler.cli import main
+
+    path = _write(tmp_path, MINIMAL_INPUT + "\n[thresholds]\nauto_threshold = 0.99\n")
+    command, *rest = extra_args
+    code = main([command, "--config", str(path), *rest])
+    err = capsys.readouterr().err  # type: ignore[attr-defined]
+    assert code == 2
+    assert "invalid recipe" in err
+    assert "auto_threshold" in err
+
+
 def test_review_calibration_must_be_a_non_negative_integer(tmp_path: Path) -> None:
     recipe = load_recipe(_write(tmp_path, MINIMAL_INPUT + "\n[review]\ncalibration = 3\n"))
     assert recipe.review_calibration == 3

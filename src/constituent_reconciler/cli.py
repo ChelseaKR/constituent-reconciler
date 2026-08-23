@@ -215,6 +215,9 @@ def _write_run_report(
 def _cmd_run(args: argparse.Namespace) -> int:
     try:
         recipe = load_recipe(args.config, policy_pack=args.policy_pack, tsa_url=args.tsa_url)
+    except RecipeError as error:
+        print(f"invalid recipe: {error}", file=sys.stderr)
+        return 2
     except PolicyViolation as error:
         print(f"policy error: {error}", file=sys.stderr)
         return 2
@@ -276,7 +279,11 @@ def _load_calibration(path: Path | None) -> CalibrationReport | None:
 
 
 def _cmd_eval(args: argparse.Namespace) -> int:
-    recipe = load_recipe(args.config)
+    try:
+        recipe = load_recipe(args.config)
+    except RecipeError as error:
+        print(f"invalid recipe: {error}", file=sys.stderr)
+        return 2
     result = pipeline.run(recipe)
     truth = json.loads(Path(args.truth).read_text(encoding="utf-8"))
     clusters = truth.get("clusters", [])
@@ -447,6 +454,9 @@ def _refuse_incomplete_review(
 def _cmd_apply(args: argparse.Namespace) -> int:
     try:
         recipe = load_recipe(args.config, policy_pack=args.policy_pack, tsa_url=args.tsa_url)
+    except RecipeError as error:
+        print(f"invalid recipe: {error}", file=sys.stderr)
+        return 2
     except PolicyViolation as error:
         print(f"policy error: {error}", file=sys.stderr)
         return 2
@@ -909,6 +919,9 @@ def _cmd_export_comparable(args: argparse.Namespace) -> int:
 
     try:
         recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+    except RecipeError as error:
+        print(f"invalid recipe: {error}", file=sys.stderr)
+        return 2
     except PolicyViolation as error:
         print(f"policy error: {error}", file=sys.stderr)
         return 2
@@ -947,6 +960,9 @@ def _cmd_review(args: argparse.Namespace) -> int:
 
     try:
         recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+    except RecipeError as error:
+        print(f"invalid recipe: {error}", file=sys.stderr)
+        return 2
     except PolicyViolation as error:
         print(f"policy error: {error}", file=sys.stderr)
         return 2
@@ -1157,6 +1173,9 @@ def _ai_load_recipe_and_policy(args: argparse.Namespace) -> tuple[Recipe, Policy
 
     try:
         recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+    except RecipeError as error:
+        print(f"invalid recipe: {error}", file=sys.stderr)
+        return 2
     except PolicyViolation as error:
         print(f"policy error: {error}", file=sys.stderr)
         return 2
@@ -1399,6 +1418,9 @@ def _cmd_ai_triage(args: argparse.Namespace) -> int:
 
     try:
         recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+    except RecipeError as error:
+        print(f"invalid recipe: {error}", file=sys.stderr)
+        return 2
     except PolicyViolation as error:
         print(f"policy error: {error}", file=sys.stderr)
         return 2
