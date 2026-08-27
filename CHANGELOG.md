@@ -184,6 +184,42 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   is the heading an automated read of the table looks for.
 
 ### Fixed
+- **`reconcile destroy` certified destruction it had not performed.**
+  `destruction.PII_ARTIFACTS` is a hand-maintained list of filenames, and
+  `destroy` considers nothing else, so an artifact missing from it is left on
+  disk while the command exits 0 and appends destruction certificates for
+  everything else. Two artifacts were missing. `ai_ocr_proposals.json`
+  (`reconcile ai-propose-corrections`) holds each field's raw
+  `original_value`, the model's `proposed_value`, and a `quote` copied
+  verbatim out of the intake document. `household_suggestions.csv`
+  (`reconcile run` with `[household] enabled = true`) holds a standardized
+  street address and a surname for every candidate household. Reproduced end
+  to end: after a real run and a real destruction pass with `--older-than
+  0d`, `corrections.json` and `resolved.csv` were destroyed and certified
+  while both of those files remained, readable, with an email address, a
+  street address, and a quoted line of intake text in them. Both are now on
+  the list. Reported as #121; PR #122 proposed the one-line addition for the
+  first of the two.
+- **The same omission can no longer happen quietly.** The reason the miss
+  survived the test suite is that every destruction test planted its sentinel
+  in a file whose name it read off `PII_ARTIFACTS` first, so no test could
+  see a name that was never there. Two new checks derive the question from
+  the code instead. `tests/test_destruction_inventory.py` parses the package
+  for every filename it builds a path to and fails unless each one is
+  classified, either on `PII_ARTIFACTS` or on the new
+  `destruction.NOT_DESTROYED`, which records why each retained artifact holds
+  no field values; adding a writer without classifying its artifact now fails
+  the merge gate. `tests/test_destruction_leaves_nothing.py` covers the other
+  half, a wrong classification rather than a missing one, by running the real
+  writers over sentinel-laced input and failing if any planted value is still
+  readable under the out directory after a destruction pass. Both fail
+  against the pre-fix code, naming both files.
+- **Seven artifacts were missing from the retention inventory.**
+  `docs/DATA-FLOW-AND-RETENTION.md` now carries rows for
+  `ai_ocr_proposals.json`, `household_suggestions.csv`, `ai_usage.json`,
+  `run_manifest.json`, `run_summary.json`, `run_report.json`, and
+  `comparable_report.json`, and the table's completeness is now enforced by
+  the inventory test rather than asserted in prose.
 - **Two eval-report labels were pointing fixes at the wrong module.** "Candidate
   pairs after blocking" was counting pairs kept above the 0.001 scoring floor,
   not pairs blocking generated, understating blocking by a factor of eighteen

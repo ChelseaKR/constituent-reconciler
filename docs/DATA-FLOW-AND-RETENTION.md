@@ -97,12 +97,28 @@ flowchart TD
 ### Artifact inventory
 
 Every artifact below was checked against the writer named for it; nothing in
-this table is aspirational.
+this table is aspirational. The "written by" column names the module holding
+the actual write call, which is not always the module that builds the content:
+`ai_ocr_proposals.json` is assembled by `assistant/ocr_propose.py` and written
+by `cli.py`, and the writer is what matters when you are tracing where a file
+came from.
+
+The table was incomplete once, and the omission was not harmless. Two
+artifacts reached the `--out` directory with no row here and no entry in
+`destruction.PII_ARTIFACTS`, so `reconcile destroy` exited 0 and issued
+destruction certificates while leaving both on disk. Completeness is a test
+now rather than a habit: `tests/test_destruction_inventory.py` reads the
+package's own source for every filename it builds a path to and fails unless
+each is classified in `destruction.py`, and
+`tests/test_destruction_leaves_nothing.py` runs the real writers over
+sentinel-laced input and fails if any planted field value survives a
+destruction pass.
 
 | Artifact | Written by | Where it lives | Holds individual records? | Notes |
 | --- | --- | --- | --- | --- |
 | Source CSVs and intake PDFs | the operator; read by `pipeline._ingest_source` | wherever the operator keeps them | Yes | Read in place. Destruction of inputs is the operator's procedure, not the tool's. |
 | `review_queue.csv` | `pipeline._write_review_queue` | the `--out` directory | Yes: field values of both records in every uncertain pair, plus source spans when extracted | Written on every `reconcile run`, including `--dry-run`. |
+| `household_suggestions.csv` | `pipeline._write_household_suggestions` | the `--out` directory | Yes: the standardized street address and surname shared by one candidate household, plus its member cluster ids | Written only when a recipe sets `[household] enabled = true`; the grouping step is off by default. A suggestion, never a match decision. In the destruction inventory (`destruction.PII_ARTIFACTS`). |
 | `resolved.csv` | `connectors/csv_out.py` | the `--out` directory | Yes: golden-record field values, member ids, consent | The default write target. Skipped on `--dry-run`. |
 | `civicrm_import.csv`, `salesforce_import.csv` | `connectors/crm_csv.py` | the `--out` directory | Yes: import-shaped field values | Local files, so permitted under the `dv` pack. Skipped on `--dry-run`. |
 | Live CRM records | `connectors/civicrm.py`, `connectors/salesforce.py` | the remote CRM | Yes | Non-local; refused fail-closed under the `dv` pack (`pipeline.build_connector`). |
@@ -122,6 +138,12 @@ this table is aspirational.
 | `corrections.json` | `review/session.py` (either review surface) | the `--out` directory | Yes: reviewer-supplied replacement field values | Written only when a reviewer corrects a value during review. In the destruction inventory (`destruction.PII_ARTIFACTS`). |
 | `target_corrections.csv` | `compare_apply.export_corrections` | the `--out` directory | Yes: import-shaped golden field values for the target side, plus the target export's own record ids in `target_record_ids` | Written by `reconcile compare-apply` only, after review completeness and the consent gate. In the destruction inventory. |
 | `cutover_withheld.csv` | `compare_apply._write_cutover_withheld` | the `--out` directory | Ids only | Identity id, member record ids, withhold reason. Written only when consent withholds an identity from the correction file. In the destruction inventory. |
+| `ai_ocr_proposals.json` | `cli._cmd_ai_propose_corrections`, over proposals built by `assistant/ocr_propose.py` | the `--out` directory | Yes: each entry carries the record's raw `original_value`, the model's `proposed_value`, and a `quote` copied verbatim out of the real intake document | Written by `reconcile ai-propose-corrections` only, and never under `dv` or `hipaa`, which disable the assistant package outright. A draft: nothing in it is applied to any record. In the destruction inventory (`destruction.PII_ARTIFACTS`). |
+| `ai_usage.json` | `assistant/rate_limit.py`, via any `ai-*` command that calls a provider | the `--out` directory | No | A list of call timestamps backing the per-minute and daily caps. No record id, prompt, or field value. Not in the destruction inventory. |
+| `run_manifest.json` | `manifest.py` via `reconcile run` | the `--out` directory | No field values | Input file digests, column mappings, thresholds, and versions, for reproducing a run. |
+| `run_summary.json` | `pipeline._write_run_summary` | the `--out` directory | No | Per-stage counts, cache hit counts, and durations; content-free by construction. |
+| `run_report.json` | `cli._write_run_report` over `quality.py` | the `--out` directory | No | Run counts plus the per-source data-quality aggregate (completeness, normalization failure rates, consent coverage, duplicate density), already small-cell suppressed under the active policy. |
+| `comparable_report.json` | `pipeline._write_comparable_report` over `suppression.py` | the `--out` directory | No | The comparable-database posture's suppressed aggregate. Cell values are integers or the string `suppressed`, never a record id or a field value. |
 | `eval/report.md` | `report.py` via `reconcile eval` | the path given to `--out` | No | Match-quality rates on seeded synthetic fixtures; the fixtures contain no real personal data. |
 | Terminal output | `report.render_run_summary`, `suppression.render_summary` | the operator's terminal | No | Per-stage counts and the suppressed aggregate. |
 | Cloud seam egress | `extract/seam.py` | Amazon Bedrock | Yes, when enabled | Low-confidence PDF pages only. A no-op under `dv` and `hipaa`, asserted by `tests/test_no_egress.py`. |
@@ -151,6 +173,13 @@ organization's existing records schedule. The model:
   the same way: it is the local evidence of a real write to CiviCRM, so
   retain it on the destination's own records schedule rather than deleting it
   as soon as the repair looks done.
+* `household_suggestions.csv` (written only when a recipe enables household
+  grouping) and `ai_ocr_proposals.json` (written only by `reconcile
+  ai-propose-corrections`) belong in the same bucket. The suggestions file
+  carries a standardized street address and a surname per candidate household;
+  the proposals file carries raw field values and text quoted verbatim out of
+  an intake document, and it is a draft nothing was applied from, so there is
+  rarely a reason to keep it once a reviewer has acted on it.
 * `provenance.jsonl`, `decisions.json`, and `withheld.csv` hold ids and hashes
   rather than field values and may outlive the record artifacts, which is what
   lets the audit trail survive routine cleanup.
@@ -188,8 +217,15 @@ the same schedule; the destruction command reaches them wherever the recipe
 put the cache. `withheld.csv` and `decisions.json` hold record ids without
 field values, but those ids resolve to survivors inside the organization's own
 systems, so they go on the same destruction schedule, as do
-`compare_decisions.json` and `cutover_withheld.csv`. Source intake files are
-destroyed under the organization's own intake procedure.
+`compare_decisions.json` and `cutover_withheld.csv`.
+`household_suggestions.csv` is on this schedule too when a recipe enables
+household grouping: a shared address is itself sensitive under this pack, which
+is the reason the grouping step ships off by default.
+`ai_ocr_proposals.json` is not reachable under this pack at all, for the same
+structural reason `repair_receipts.json` is not: the `dv` pack sets
+`forbid_cloud_seam`, and `assert_cloud_ai_allowed` refuses every `ai-*` command
+before any record is read, so no proposal file can be written. Source intake
+files are destroyed under the organization's own intake procedure.
 
 **Retain.** `aggregate_summary.json` may be kept: it is already
 non-identifying, small cells are suppressed (`suppression.py`), and it is the
