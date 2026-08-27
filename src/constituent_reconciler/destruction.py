@@ -57,6 +57,17 @@ from constituent_reconciler.stage_cache import CACHE_DIR_NAME, EXTRACT_STAGE, NO
 # deliberately absent here: it carries reviewer names, verdicts, and
 # timestamps only, the same content class as decisions.json's own audit
 # section, which this list has never covered.
+# household_suggestions.csv is written by
+# ``pipeline._write_household_suggestions``, which ``pipeline.export`` calls
+# whenever a recipe sets ``[household] enabled = true``: every row carries a
+# standardized street address and a surname for the members of one candidate
+# household, which are field values, so it destroys with the record-bearing
+# files. ai_ocr_proposals.json is written by ``reconcile
+# ai-propose-corrections`` (the write itself lives in cli.py, not in
+# assistant/ocr_propose.py, which only builds the proposal objects): each
+# entry carries the record's raw ``original_value``, the model's
+# ``proposed_value``, and a ``quote`` copied verbatim out of the real intake
+# document, so it concentrates raw source text and belongs here too.
 PII_ARTIFACTS: tuple[str, ...] = (
     "resolved.csv",
     "review_queue.csv",
@@ -70,7 +81,60 @@ PII_ARTIFACTS: tuple[str, ...] = (
     "cutover_withheld.csv",
     "repair_plan.json",
     "repair_receipts.json",
+    "household_suggestions.csv",
+    "ai_ocr_proposals.json",
 )
+
+# The other half of the same judgment: every filename this package joins onto
+# a directory that destruction deliberately does not delete, each with the
+# reason. Splitting the classification across two named constants is what
+# makes it checkable. ``tests/test_destruction_inventory.py`` parses the
+# package's own source for the filenames it joins onto a directory and fails
+# when one is on neither constant, so a new artifact cannot reach the out
+# directory without someone deciding, in writing and in code, which of these
+# two it belongs on. That check catches an omission. It cannot catch a
+# misclassification, which is why ``tests/test_destruction_leaves_nothing.py``
+# separately runs the real writers over sentinel-laced input and asserts no
+# sentinel byte survives a destruction pass.
+#
+# Membership here is not an assertion that a file is harmless to keep. It is
+# the narrower claim that the file holds no individual field values, so
+# destroying it would remove audit evidence without removing personal data.
+NOT_DESTROYED: dict[str, str] = {
+    "provenance.jsonl": (
+        "the evidence of destruction itself; refused fail-closed in ``destroy`` "
+        "even if a future edit were to list it"
+    ),
+    "decisions.json": "pair ids, verdicts, reviewer names, and timestamps; no field values",
+    "compare_decisions.json": "the same shape as decisions.json, for the cutover comparison",
+    "repair_approvals.json": (
+        "reviewer names, verdicts, and timestamps keyed by the plan digest they "
+        "approved; the same content class as decisions.json's audit section"
+    ),
+    "run_manifest.json": "input file digests, column mappings, and thresholds; no field values",
+    "compare_manifest.json": "the same, for the two exports ``reconcile compare`` read",
+    "run_summary.json": "per-stage counts and durations; content-free by construction",
+    "run_report.json": (
+        "counts plus the per-source data-quality aggregate (quality.py), already "
+        "small-cell suppressed under the active policy; no field values"
+    ),
+    "migration_summary.json": "identity and conflict counts only",
+    "aggregate_summary.json": (
+        "the non-identifying suppressed aggregate the dv pack exports (suppression.py)"
+    ),
+    "comparable_report.json": (
+        "the comparable-database posture's suppressed aggregate; cell values are "
+        "integers or the string 'suppressed', never a record id or a field value"
+    ),
+    "ai_usage.json": (
+        "the AI assistant's rate-limiter state (assistant/rate_limit.py): a list of "
+        "call timestamps, carrying no record id, prompt, or field value"
+    ),
+    "labels.json": (
+        "an extraction-eval fixture ``reconcile eval-extraction`` reads; this "
+        "package never writes it, and it never lands in an out directory"
+    ),
+}
 
 PROVENANCE_FILENAME = "provenance.jsonl"
 
