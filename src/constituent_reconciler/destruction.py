@@ -68,6 +68,14 @@ from constituent_reconciler.stage_cache import CACHE_DIR_NAME, EXTRACT_STAGE, NO
 # entry carries the record's raw ``original_value``, the model's
 # ``proposed_value``, and a ``quote`` copied verbatim out of the real intake
 # document, so it concentrates raw source text and belongs here too.
+#
+# Adding a name here is two edits, not one.
+# ``tests/test_destruction_leaves_nothing.py`` classifies every name on this
+# tuple as one it drives a real writer to produce and then sweeps by content,
+# or one it exercises but can only check by existence (the id-only withheld
+# lists), and it fails on a name that is on neither. That is deliberate: a name
+# added here with nothing exercising it would collect a destruction certificate
+# no test has ever watched being earned.
 PII_ARTIFACTS: tuple[str, ...] = (
     "resolved.csv",
     "review_queue.csv",
