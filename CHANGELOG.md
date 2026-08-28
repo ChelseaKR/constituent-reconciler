@@ -184,6 +184,38 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   is the heading an automated read of the table looks for.
 
 ### Fixed
+- **A repair plan told a person to create a record for every split member,
+  including one whose consent had lapsed.** `reconcile plan-split` proposes one
+  destination record per member of a merged cluster. For every destination but
+  the CiviCRM pilot the plan is manual: the tool executes none of it and a
+  person follows `manual_instructions` by hand. Those instructions said to
+  create a record for each member and said nothing about consent, while the
+  verified path's `_withheld_split_members` applied exactly that gate. The path
+  with no gate was the one told nothing.
+  Every `split_records` entry now carries a `consent` object:
+  `withhold_reason` is what `Consent.reason` returns, the same value the
+  ordinary write path gates on, and `blocks_creation` is true only when the
+  recipe requires consent and that reason is not null. That is the write path's
+  own rule, not a stricter one. A recipe that does not require consent still
+  gets the label, because the state is a fact about the record and the operator
+  was previously shown nothing, but nothing is blocked, since refusing there
+  would invent a policy the recipe does not state. Under a consent-requiring
+  recipe the instructions add the rule and, when anyone is blocked, name them.
+  `REPAIR_PLAN_SCHEMA_VERSION` is 2. Additive: every version 1 key keeps its
+  meaning, both readers of the plan use `.get` and ignore unknown keys, and no
+  release has been tagged, so no published artifact carries version 1.
+  `plan_split` gains an `as_of` argument, defaulting to today and mirroring
+  `consent.partition_by_consent`, which is also how the lapse is reached in a
+  test without waiting for a date.
+  The reachable window turned out to be narrower than the backlog triage
+  recorded, and the note in `_withheld_split_members` claiming this could not
+  fire through today's CLI was wrong. A revocation would change a source byte
+  and the manifest check refuses that; corrections cannot touch the consent
+  column; and a cluster written at all had every member active. What none of
+  those stop is time crossing a recorded `expires` date, which lapses a consent
+  with no byte changing anywhere. Both notes are corrected.
+
+### Fixed
 - **`reconcile destroy` certified destruction it had not performed.**
   `destruction.PII_ARTIFACTS` is a hand-maintained list of filenames, and
   `destroy` considers nothing else, so an artifact missing from it is left on
