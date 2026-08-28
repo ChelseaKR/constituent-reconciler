@@ -53,3 +53,17 @@ class VerificationFailed(AssistantError):
     that forgets to handle withholding fails loudly instead of silently
     showing an unverified claim.
     """
+
+
+class SourceDocumentUnavailable(AssistantError):
+    """A field has a source span, but the document it points into could not be read.
+
+    Raised rather than returned as ``None`` because the two conditions are
+    not the same. A field with no span at all (a CSV-sourced record, or a
+    field the extractor never located) has no source text by construction,
+    and skipping it is correct. A field whose span names a document that
+    cannot be found or read is a broken run: the grounding evidence the
+    proposal path exists to quote against is missing, and continuing would
+    write an empty draft and exit 0 as though the model had simply nothing
+    to say.
+    """

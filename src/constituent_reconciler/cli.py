@@ -1334,7 +1334,7 @@ def _cmd_ai_propose_corrections(args: argparse.Namespace) -> int:
     """
     from constituent_reconciler.assistant import filter_record, propose_correction
     from constituent_reconciler.assistant.errors import AssistantError
-    from constituent_reconciler.assistant.source_text import for_field
+    from constituent_reconciler.assistant.source_text import document_roots, for_field
 
     setup = _ai_load_recipe_and_policy(args)
     if isinstance(setup, int):
@@ -1350,6 +1350,7 @@ def _cmd_ai_propose_corrections(args: argparse.Namespace) -> int:
     filtered = filter_record(record, policy=policy, fields=recipe.fields)
 
     proposals = []
+    roots = document_roots(recipe)
     try:
         provider = _ai_provider_or_error(args)
         if isinstance(provider, int):
@@ -1358,9 +1359,9 @@ def _cmd_ai_propose_corrections(args: argparse.Namespace) -> int:
         for field in fields:
             if filtered.value(field) is None:
                 continue  # withheld by consent/policy, or no extracted value at all
-            source = for_field(record, field)
+            source = for_field(record, field, roots=roots)
             if source is None:
-                continue  # no source-document text available to ground a quote in
+                continue  # the field has no source span at all, so there is nothing to quote
             limiter.check_and_record()
             proposals.append(
                 propose_correction(
