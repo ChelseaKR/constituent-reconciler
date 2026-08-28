@@ -184,6 +184,37 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   is the heading an automated read of the table looks for.
 
 ### Fixed
+- **The content sweep behind `reconcile destroy` was checking four artifacts
+  out of fourteen, and said so only in a docstring.**
+  `tests/test_destruction_leaves_nothing.py` is the test that proves a
+  destruction certificate is honest: it plants sentinel field values, lets the
+  real writers place them, destroys, and then reads every surviving byte. It
+  drove `reconcile run` and `ai-propose-corrections` and nothing else, so of
+  the fourteen names on `destruction.PII_ARTIFACTS` only `resolved.csv`,
+  `civicrm_import.csv`, `household_suggestions.csv` and `ai_ocr_proposals.json`
+  ever held a planted value. The cutover artifacts, both repair artifacts, both
+  withheld lists, the reviewer corrections file, the Salesforce import file and
+  the stage cache were left to the filename-driven tests, which are the tests
+  that could not see the original defect. The limitation was written down
+  honestly, in the module docstring, where nothing could fail on it.
+  The sweep now drives every command that writes a destroyable artifact:
+  `run` across the csv, civicrm_csv and salesforce_csv connectors with
+  household grouping and the stage cache on, `ai-propose-corrections`,
+  `compare`, the review session `compare-review` serves, `compare-apply`,
+  `plan-split`, `approve-repair` twice, and `apply-repair --execute` against a
+  CiviCRM transport double. Only the model call and the CiviCRM transport are
+  doubles, because those are the two things a test here may not do for real;
+  every gate, consent filter, quote verification and write around them is the
+  real code.
+  Coverage is now data rather than prose. Every name on `PII_ARTIFACTS` is
+  classified in the test module as swept by content, or as exercised but
+  checkable only by existence, and the guard fails on a name classified as
+  neither, so a new destroyable artifact cannot be added without a scenario for
+  it. Two artifacts are in the second class and the reason is recorded:
+  `withheld.csv` and `cutover_withheld.csv` carry cluster ids, member ids and a
+  withhold reason and no field value at all, so no sentinel can reach them, and
+  planting one in a record id would also reach `provenance.jsonl`, the one
+  artifact destruction must refuse to touch.
 - **A repair plan told a person to create a record for every split member,
   including one whose consent had lapsed.** `reconcile plan-split` proposes one
   destination record per member of a merged cluster. For every destination but
