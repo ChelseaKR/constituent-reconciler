@@ -300,6 +300,14 @@ organization's own donor/client consent language and subprocessor
 obligations, independent of this project's consent-scope switch. That
 question is recorded as a DECISION NEEDED in ADR 0014, not answered here.
 
+The threat side of this layer is modelled in
+[`THREAT-MODEL.md`](./THREAT-MODEL.md) as T9 through T12: prompt injection
+reaching a prompt from an intake document, the concentration of raw values
+and quoted source text in `ai_ocr_proposals.json`, egress to the model
+provider, and grounding text read from outside the run. This section says
+what moves and what is kept; that one says what an adversary could do with
+either.
+
 ## What is enforced versus what is procedure
 
 The flow half of this model is enforced by merge-blocking tests: non-egress

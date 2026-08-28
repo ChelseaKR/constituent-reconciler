@@ -5,13 +5,18 @@ files, PDF extraction in particular, because that is the one place the tool
 runs complex parsing logic over bytes an adversary may have crafted. It closes
 the security TODO in [`RESPONSIBLE-TECH-AUDITS.md`](./RESPONSIBLE-TECH-AUDITS.md)
 and pairs with [`SECURITY.md`](../SECURITY.md), which owns reporting and the
-out-of-scope list.
+out-of-scope list. Two surfaces added since have been folded in rather than
+given documents of their own, because both are reached from that same parse
+path and inherit its boundaries: the repair-plan surface (T6 through T8) and
+the AI assistant surface (T9 through T12).
 
 Status: committed 2026-07-02, re-verified 2026-07-12 against the implemented
 Bedrock and local-model seams, updated 2026-07-17 when the sandboxed
 extraction path became the pipeline default, and extended 2026-08-03 with the
 repair-plan surface that ADR 0012 names as a prerequisite for storing plans.
-Revisit whenever the extraction or repair surface changes.
+Extended again on 2026-08-27 with the AI assistant surface of ADR 0014, which
+had shipped without any entry here. Revisit whenever the extraction, repair,
+or assistant surface changes.
 
 ## System description and trust boundaries
 
@@ -203,6 +208,109 @@ then `apply_repair`. The DV pack refuses both through the same
 `pipeline.build_connector` is the single place that gate is enforced and
 `apply_repair_plan` uses it unless a connector is injected for testing.
 
+### Added 2026-08-27: the AI assistant surface (ADR 0014)
+
+`reconcile ai-explain`, `ai-ask`, `ai-propose-corrections` and `ai-triage`
+put an opt-in advisory layer over the review queue. Three of the four call a
+model provider, which makes this the second network path in the system after
+the extraction seam of T5, and `ai-propose-corrections` is the one command
+that feeds untrusted document text straight into a prompt. `ai-triage` calls
+no model and is unaffected by everything below.
+
+- **T9, prompt injection from an intake document (tampering).** The source
+  text `ai-propose-corrections` grounds a quote in is the same
+  operator-supplied, possibly crafted bytes T1 through T3 already model, and
+  it reaches a model prompt verbatim. Mitigations present: nothing the model
+  returns is ever applied, because the command's only output is the labeled
+  draft `ai_ocr_proposals.json` and turning a proposal into a correction is
+  the ordinary human path (`models.Correction`, the review server's correct
+  action, or `reconcile apply --decisions`); a proposal is accepted only when
+  its quote is an exact whitespace-normalized substring of the real source
+  text (`ocr_propose._quote_verifies`,
+  `tests/test_assistant_ocr_propose.py::test_never_invents_a_value_the_source_does_not_support`
+  and `tests/test_assistant_ocr_propose.py::test_quote_not_present_in_source_is_withheld`);
+  `refusal.enforce` scans every response deterministically before display and
+  replaces a flagged one with a canned message whatever the model said
+  (`tests/test_assistant_refusal.py::test_enforce_replaces_prohibited_text_with_canned_message`);
+  and the package cannot reach the deterministic path at all, since nothing
+  in `pipeline.py`, `decisions.py`, or the `run`, `review` and `apply`
+  commands imports it
+  (`tests/test_no_ai_in_deterministic_path.py::test_pipeline_module_never_imports_the_assistant_package_or_its_sdks`).
+  The residual risk is stated in the assistant model card and repeated here
+  because it is the part a reader should not have to infer: quote
+  verification grounds a proposal against a string's presence in the
+  document, not against its attribution to the right person. ADR 0014's
+  `wrong_person_trap` eval fixture is exactly that case. A crafted document
+  can therefore still produce a proposal that verifies, which is why the
+  draft-only rule above is load-bearing rather than a formality.
+
+- **T10, the proposals file concentrates raw values and quoted source text
+  (information disclosure).** `ai_ocr_proposals.json` is written from
+  `dataclasses.asdict()` over `OCRProposal`, whose fields include
+  `original_value` and `quote`, so one small file holds a raw field value
+  and a verbatim line of the intake document for every field checked. That
+  is the same shape as T6, and it should be read the same way. Mitigations
+  present: the file is written only into the operator's `--out` directory
+  and is never transmitted; it is listed in `destruction.PII_ARTIFACTS`, so
+  `reconcile destroy` removes it and certifies the removal, checked both by
+  the classification scan
+  (`tests/test_destruction_inventory.py::test_every_artifact_the_code_writes_is_classified`)
+  and, without consulting any list, by its bytes after a real destruction
+  pass
+  (`tests/test_destruction_leaves_nothing.py::test_no_sentinel_survives_a_destruction_pass`);
+  it carries a row in the artifact inventory of
+  [`DATA-FLOW-AND-RETENTION.md`](./DATA-FLOW-AND-RETENTION.md); and it is
+  never written under the DV or HIPAA packs, which refuse the command before
+  any record is read. This artifact is named here rather than folded into
+  T6 because it was missing from `PII_ARTIFACTS` until 2026-08-27: a real
+  run exited 0, certified three other artifacts as destroyed, and left this
+  one on disk holding a raw value, a verbatim intake quote, and an email
+  address.
+
+- **T11, egress to the model provider (information disclosure).** A
+  configured assistant sends filtered record values and pipeline evidence to
+  Anthropic or to Bedrock. Mitigations present: `assert_cloud_ai_allowed`
+  gates every `ai-*` command on the same `policy.forbid_cloud_seam` field
+  that fuses the extraction seam, deliberately not a second field that could
+  drift out of step with it, so the DV and HIPAA packs disable the package
+  outright
+  (`tests/test_assistant_consent_filter.py::test_dv_pack_forbids_the_assistant_entirely`,
+  `tests/test_assistant_consent_filter.py::test_hipaa_pack_forbids_the_assistant_entirely`);
+  `consent_filter.filter_record` reduces a record to values cleared for the
+  named `ai-assistant` destination before a prompt is built rather than
+  after
+  (`tests/test_assistant_consent_filter.py::test_consent_scoped_away_from_ai_destination_withholds`);
+  `evidence_payload` is the single boundary deciding what text a provider
+  sees and never sends an email address or a phone number by literal value
+  (`tests/test_assistant_evidence_payload.py::test_a_withheld_field_present_in_real_evidence_never_shows_its_value`);
+  credentials are read from the environment and never written to disk; and a
+  per-minute rate and a hard daily cap are enforced before any call
+  (`tests/test_assistant_rate_limit.py::test_exceeding_the_daily_cap_raises_even_with_gaps`).
+
+- **T12, grounding text read from outside the run (information disclosure and
+  tampering).** A source span records the intake document's bare filename,
+  never a path. Until 2026-08-27 `source_text.for_field` resolved that name
+  against the process working directory, which made two things possible: run
+  from a directory holding an unrelated file of the same name, that file was
+  sent to the provider and the quote was verified against it, so a proposal
+  about one person could be supported by a sentence from another person's
+  document and by a document the operator had never named as a source; run
+  from any other directory, every field reported no source text and the
+  command wrote an empty draft and exited 0 without saying it had opened
+  nothing. Mitigations present: `source_text.document_roots` derives the
+  permitted directories from the recipe's own sources, `for_field` requires
+  them and has no default, and a name that resolves to no file, to more than
+  one file, or that carries a directory component is refused rather than
+  guessed, with the command exiting 2 and writing no draft
+  (`tests/test_cli_ai_propose_grounding.py::test_a_same_named_file_in_the_working_directory_is_never_read`,
+  `tests/test_cli_ai_propose_grounding.py::test_a_filename_in_two_source_directories_is_refused_not_guessed`).
+
+The assistant adds no new trust boundary of its own. It sits behind the
+network boundary already described for the extraction seam, reads documents
+through the same file boundary, and writes only into the same `--out`
+directory. What it changes is how much crosses that network boundary and how
+concentrated one local artifact is, which is what T9 through T12 record.
+
 ### Planned
 
 - **Typed, content-free parse errors (T4).** Wrap extraction failures in an
@@ -226,6 +334,15 @@ then `apply_repair`. The DV pack refuses both through the same
   Bedrock backend configured will send low-confidence page content to AWS.
   That is an explicit deployer choice, not a defect; the model and data cards
   document its terms and the account-level controls the deployer must review.
+- **Assistant egress under permissive packs is also by design, and one
+  question about it is open.** The `default` pack permits the `ai-*`
+  commands, and most deployments run under `default`. Whether sending
+  constituent values to a model provider needs a subprocessor agreement or a
+  specific donor consent is a question ADR 0014 records as needing counsel
+  and does not answer, and the code does not refuse on the project's behalf.
+  A deployer enabling the `ai` extra is making that call. Nothing in the
+  assistant is required to run the pipeline: `run`, `review` and `apply`
+  behave identically with the package uninstalled.
 - **The host itself.** Software already running on the operator's machine,
   including anything able to read loopback traffic or the reviewer's browser,
   is outside every boundary here and belongs to the host's own security
