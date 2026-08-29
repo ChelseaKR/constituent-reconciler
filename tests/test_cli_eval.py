@@ -68,3 +68,24 @@ def test_eval_exits_one_on_empty_labels(tmp_path: Path) -> None:
     out = tmp_path / "report.md"
     code = main(_eval_args(out, "--calibration", str(labels_path)))
     assert code == 1
+
+
+def test_the_committed_eval_report_matches_a_fresh_run(tmp_path: Path) -> None:
+    """eval/report.md is a committed measurement: the README points a visitor at it
+    before they have run anything, so it must be what the current code computes.
+    Nothing enforced that. A matching change could land, every test could pass on
+    its own tmp-path reports, and the committed file would keep quoting the old
+    pipeline with no gate going red.
+
+    The eval is deterministic on the committed demo and labels, so this is a byte
+    comparison. If it goes red after a deliberate matching change, regenerate with
+    `make eval` and commit the diff; never edit the report by hand.
+    """
+    out = tmp_path / "report.md"
+    labels = EXAMPLES / "calibration_labels.json"
+    assert main(_eval_args(out, "--calibration", str(labels))) == 0
+    committed = EXAMPLES.parents[1] / "eval" / "report.md"
+    assert out.read_text(encoding="utf-8") == committed.read_text(encoding="utf-8"), (
+        "eval/report.md no longer matches what `reconcile eval` computes from the "
+        "committed demo; regenerate it with `make eval` and commit the diff"
+    )
