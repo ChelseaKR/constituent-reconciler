@@ -79,3 +79,31 @@ than the three the committed file names. The parity delta and the
 reconciliation command are recorded in `docs/rulesets/README.md`. This note
 records the applied state per the append-only convention; the Decision text
 above is unedited.
+
+## Follow-up note (2026-08-28, append-only): the admin bypass is intended
+
+The Decision text above says the branch ruleset "does not grant an admin
+bypass", and the 2026-08-07 note records the live ruleset as having "no bypass
+actors". Both were true when written. Neither is true now, and the change is
+deliberate rather than drift, so this note supersedes those two clauses and
+nothing else in this ADR.
+
+`bypass_actors` holds exactly the repository owner's standing bypass
+(`RepositoryRole` 5, `bypass_mode: always`), deliberately and permanently: an
+agent once applied a ruleset with no bypass and locked the owner out of their
+own repository, and restoring access took a sweep across eighteen
+repositories. An empty list there is not a stricter gate, it is the lockout.
+The live `protect-main` ruleset (id 18752844) carries that actor and reports
+`current_user_can_bypass: "always"`, read 2026-08-28;
+`docs/rulesets/main.json` now records the same thing, so re-applying the
+committed file no longer strips it.
+
+What this does **not** change is the waiver itself. The compensating controls
+above stand: every merge-blocking automated gate still applies and still runs,
+required status checks and strict up-to-date branches are still required of
+every pull request, and force-push and deletion are still refused. The bypass
+is a recovery path held by one person who already has admin on the
+repository — it grants no capability that admin did not already carry, it only
+makes the way back in survive a wedged required check. Whoever adds a *second*
+bypass actor, or a team or a GitHub App, is making a different decision and
+owes it a new ADR.

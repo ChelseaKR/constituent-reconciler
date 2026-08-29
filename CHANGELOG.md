@@ -184,6 +184,20 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   is the heading an automated read of the table looks for.
 
 ### Fixed
+- **The committed ruleset would have locked the owner out of the repository.**
+  `docs/rulesets/main.json` declared `"bypass_actors": []` and
+  `docs/rulesets/README.md` called that "no admin override", while the live
+  `protect-main` ruleset (id 18752844) carries the repository owner's standing
+  bypass — so the reconciliation `PUT` those documents prescribe would have
+  stripped it. The committed file now records that bypass (`RepositoryRole` 5,
+  `bypass_mode: always`), deliberately and permanently: an agent once applied a
+  ruleset with no bypass and locked the owner out of their own repository, and
+  restoring access took a sweep across eighteen repositories. An empty list
+  there is not a stricter gate, it is the lockout. The ruleset README gains a
+  "Why the owner can bypass" section, the README standards table and
+  `docs/EXTERNAL-GATES-RUNBOOK.md` no longer claim "no bypass actors", both
+  apply procedures now check that the bypass survived, and ADR 0008 carries a
+  dated append-only note superseding the two clauses that argued the other way.
 - **`reconcile destroy` certified destruction it had not performed.**
   `destruction.PII_ARTIFACTS` is a hand-maintained list of filenames, and
   `destroy` considers nothing else, so an artifact missing from it is left on
