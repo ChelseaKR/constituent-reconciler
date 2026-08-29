@@ -114,6 +114,15 @@ each is classified in `destruction.py`, and
 sentinel-laced input and fails if any planted field value survives a
 destruction pass.
 
+That sweep covers every artifact on `destruction.PII_ARTIFACTS`, not a sample
+of them. It drives `run` on three connectors with household grouping and the
+stage cache on, `ai-propose-corrections`, `compare`, the comparison review
+session, `compare-apply`, `plan-split`, `approve-repair` and `apply-repair
+--execute`, and it fails when a name is added to that list without a scenario
+exercising it. The two withheld lists are the one exception it states rather
+than hides: they carry ids and a reason and no field value, so no sentinel can
+appear in them, and they are checked by being written and then deleted.
+
 | Artifact | Written by | Where it lives | Holds individual records? | Notes |
 | --- | --- | --- | --- | --- |
 | Source CSVs and intake PDFs | the operator; read by `pipeline._ingest_source` | wherever the operator keeps them | Yes | Read in place. Destruction of inputs is the operator's procedure, not the tool's. |
