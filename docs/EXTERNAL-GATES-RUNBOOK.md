@@ -206,9 +206,11 @@ automated remediation pass does not take on this maintainer's behalf."
   active enforcement on the default branch, pull requests required with zero
   required approvals and required review-thread resolution, required status
   checks `verify`, `security`, and `secrets` with the strict up-to-date
-  policy, force-pushes and deletion blocked, linear history required, and no
-  bypass actors. Those three check contexts match the job names in
-  `.github/workflows/ci.yml`.
+  policy, force-pushes and deletion blocked, linear history required, and
+  exactly one bypass actor: the repository owner (`RepositoryRole` 5,
+  `bypass_mode: always`), which is deliberate and permanent and is explained
+  in `docs/rulesets/README.md` under "Why the owner can bypass". Those three
+  check contexts match the job names in `.github/workflows/ci.yml`.
 - `docs/rulesets/README.md` records that a live `protect-main` ruleset has
   been active since 2026-07-09 (verified read-only 2026-08-07), lists its
   delta from the committed desired state, and gives the reconciliation
@@ -233,6 +235,14 @@ automated remediation pass does not take on this maintainer's behalf."
    contexts still match the job names in `ci.yml`.
 2. Apply it. The committed instruction offers both routes:
 
+   Check `bypass_actors` in `docs/rulesets/main.json` before running this. It
+   must hold `{"actor_id": 5, "actor_type": "RepositoryRole",
+   "bypass_mode": "always"}`; it said `[]` until 2026-08-28, and applying that
+   version is how the owner gets locked out. `POST` adds a ruleset rather than
+   replacing one, and rules from every applicable ruleset combine while bypass
+   actors are per-ruleset, so a second ruleset over `main` with an empty
+   bypass list blocks the owner whatever the live one allows.
+
    ```sh
    gh api --method POST repos/ChelseaKR/constituent-reconciler/rulesets \
      --input docs/rulesets/main.json
@@ -246,7 +256,11 @@ automated remediation pass does not take on this maintainer's behalf."
 3. Verify it took: `gh api repos/ChelseaKR/constituent-reconciler/rulesets`
    (the same read-only check the README used) should now list `protect-main`,
    and a test branch pushed and opened as a PR should show `verify`,
-   `security`, and `secrets` as required checks.
+   `security`, and `secrets` as required checks. Check the bypass list in the
+   same breath — `gh api repos/ChelseaKR/constituent-reconciler/rulesets/<id>
+   --jq .current_user_can_bypass` must read `"always"`. An apply that lands
+   every rule and loses the owner's bypass looks exactly like a successful
+   one, and it is the lockout described in `docs/rulesets/README.md`.
 4. Record it: update the README standards table's CI/CD row from "not yet
    applied" language to enforced, and add a follow-up note or a new ADR
    rather than editing ADR 0008 (the ruleset README is explicit that ADRs are
