@@ -58,8 +58,8 @@ This connector implements none of that itself. It sits at the same choke
 point in the pipeline every write destination sits at, so a record consented
 for CiviCRM only does not leak out through a newly added webhook just
 because both are "granted" in the loosest sense. See
-`tests/test_connectors_webhook.py::test_webhook_export_honors_consent_scope_not_just_status`
-(in `tests/test_pipeline.py`) and `tests/test_no_egress.py`.
+`tests/test_pipeline.py::test_webhook_export_honors_consent_scope_not_just_status`
+and `tests/test_no_egress.py`.
 
 ## Non-local egress
 

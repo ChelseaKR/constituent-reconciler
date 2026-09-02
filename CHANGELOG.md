@@ -183,6 +183,43 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   tracked. The state column is now headed "State" rather than "Applies?", which
   is the heading an automated read of the table looks for.
 
+### Changed
+- **The threat model covers the AI assistant surface, and its citations are
+  now checked.** `docs/THREAT-MODEL.md` had no entry for the `assistant/`
+  package at all, though the layer shipped in ADR 0014 and
+  `ai_ocr_proposals.json` concentrates raw values and quoted source text in
+  exactly the shape the document's own T6 describes for repair plans. Four
+  threats are added: T9 prompt injection reaching a prompt from an intake
+  document, T10 the proposals file's concentration of raw values and verbatim
+  quotes, T11 egress to the model provider, and T12 grounding text read from
+  outside the run. Each names the tests that pin its mitigations, and each
+  states its residual risk rather than implying none: quote verification
+  grounds a proposal against a string's presence in the document and not
+  against its attribution to the right person, and the `default` pack, where
+  most deployments run, permits the assistant while the subprocessor question
+  ADR 0014 records stays open.
+- **Documentation may no longer cite a test that does not exist.** The
+  convention across the threat model, the model and data cards, the retention
+  model and the ADRs is that a claim ends by naming the test that pins it,
+  and nothing was checking those names. A renamed or deleted test left the
+  prose asserting a guarantee nothing enforced, reading exactly as it did the
+  day it was true. `tests/test_doc_test_citations.py` resolves every module
+  path under `tests/`, and every such path carrying a pytest node name, in
+  every committed markdown file. Run against the tree before this change it
+  found two stale citations nobody had reported: `docs/connectors/webhook.md`
+  attributed `test_webhook_export_honors_consent_scope_not_just_status` to
+  `tests/test_connectors_webhook.py`, where it has never been defined, while
+  the same sentence went on to say the test lives in `tests/test_pipeline.py`,
+  which it does; and `docs/ideation/02-large-scale-fixes.md` dropped the
+  `test_` prefix from `tests/test_connector_conformance.py`, naming a path
+  that has never existed. Both are corrected. Bare test names written in prose
+  with no file beside them are deliberately not checked, because documents
+  quote them historically, including one `docs/CLAIMS-AUDIT.md` cites
+  precisely to record that it never existed. Prose describing a citation that
+  used to be wrong has to describe it rather than reproduce it, which this
+  entry does; that is the price of a check with no allowlist, and it is
+  cheaper than the allowlist.
+
 ### Fixed
 - **`ai-propose-corrections` read the wrong document, or none at all, depending
   on the working directory.** A source span records the intake document's bare
@@ -275,7 +312,6 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   column; and a cluster written at all had every member active. What none of
   those stop is time crossing a recorded `expires` date, which lapses a consent
   with no byte changing anywhere. Both notes are corrected.
-
 
 ### Fixed
 - **`reconcile destroy` certified destruction it had not performed.**
