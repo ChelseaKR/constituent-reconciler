@@ -309,7 +309,7 @@ load-bearing for the no-egress invariant).
 **Shape of the work:** A registration mapping in `connectors/__init__.py`
 (name to factory taking `OutputConfig` and out_dir), with
 `build_connector` reduced to lookup plus the existing policy check. A
-`tests/connector_conformance.py` parametrized suite: dry-run writes
+`tests/test_connector_conformance.py` parametrized suite: dry-run writes
 nothing to disk or transport; every WriteResult action is in the known
 vocabulary; `is_local=False` connectors never touch the filesystem;
 external-id round-trips. Run it against all four existing connectors first,

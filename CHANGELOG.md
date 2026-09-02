@@ -183,6 +183,43 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   tracked. The state column is now headed "State" rather than "Applies?", which
   is the heading an automated read of the table looks for.
 
+### Changed
+- **The threat model covers the AI assistant surface, and its citations are
+  now checked.** `docs/THREAT-MODEL.md` had no entry for the `assistant/`
+  package at all, though the layer shipped in ADR 0014 and
+  `ai_ocr_proposals.json` concentrates raw values and quoted source text in
+  exactly the shape the document's own T6 describes for repair plans. Four
+  threats are added: T9 prompt injection reaching a prompt from an intake
+  document, T10 the proposals file's concentration of raw values and verbatim
+  quotes, T11 egress to the model provider, and T12 grounding text read from
+  outside the run. Each names the tests that pin its mitigations, and each
+  states its residual risk rather than implying none: quote verification
+  grounds a proposal against a string's presence in the document and not
+  against its attribution to the right person, and the `default` pack, where
+  most deployments run, permits the assistant while the subprocessor question
+  ADR 0014 records stays open.
+- **Documentation may no longer cite a test that does not exist.** The
+  convention across the threat model, the model and data cards, the retention
+  model and the ADRs is that a claim ends by naming the test that pins it,
+  and nothing was checking those names. A renamed or deleted test left the
+  prose asserting a guarantee nothing enforced, reading exactly as it did the
+  day it was true. `tests/test_doc_test_citations.py` resolves every module
+  path under `tests/`, and every such path carrying a pytest node name, in
+  every committed markdown file. Run against the tree before this change it
+  found two stale citations nobody had reported: `docs/connectors/webhook.md`
+  attributed `test_webhook_export_honors_consent_scope_not_just_status` to
+  `tests/test_connectors_webhook.py`, where it has never been defined, while
+  the same sentence went on to say the test lives in `tests/test_pipeline.py`,
+  which it does; and `docs/ideation/02-large-scale-fixes.md` dropped the
+  `test_` prefix from `tests/test_connector_conformance.py`, naming a path
+  that has never existed. Both are corrected. Bare test names written in prose
+  with no file beside them are deliberately not checked, because documents
+  quote them historically, including one `docs/CLAIMS-AUDIT.md` cites
+  precisely to record that it never existed. Prose describing a citation that
+  used to be wrong has to describe it rather than reproduce it, which this
+  entry does; that is the price of a check with no allowlist, and it is
+  cheaper than the allowlist.
+
 ### Fixed
 - **The committed ruleset would have locked the owner out of the repository.**
   `docs/rulesets/main.json` declared `"bypass_actors": []` and
@@ -198,6 +235,36 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   `docs/EXTERNAL-GATES-RUNBOOK.md` no longer claim "no bypass actors", both
   apply procedures now check that the bypass survived, and ADR 0008 carries a
   dated append-only note superseding the two clauses that argued the other way.
+- **`ai-propose-corrections` read the wrong document, or none at all, depending
+  on the working directory.** A source span records the intake document's bare
+  filename, never a path, because every extractor builds it from `path.name`
+  and the value reaches review screens and cache entries. `source_text.for_field`
+  resolved that name against the process working directory. Run from anywhere
+  but the intake directory, every field returned "no source text", the loop
+  skipped all of them, and the command wrote `ai_ocr_proposals.json` holding an
+  empty list and exited 0, saying nothing about having been unable to open a
+  single document. Run from a directory that happened to hold an unrelated file
+  of the same name, the model was sent that file and the quote was verified
+  against it. Verification still passed, because the quote genuinely appeared in
+  the text the model had been shown; it was the wrong text, about a different
+  person, and reaching it meant sending an unrelated local document to the
+  provider. Both were reproduced against the real pipeline: from the intake
+  directory four fields grounded, from the repository root zero did, and from a
+  directory holding a same-named decoy the command produced a verified
+  correction for `Garciaintake` quoting `Last Name: Okonkwodecoy`.
+  The name is now resolved against the directories the recipe actually named as
+  sources (`source_text.document_roots`), which `for_field` requires and has no
+  default for. A field with no span still returns `None` and is skipped, which
+  is correct for a CSV-sourced record. Every other outcome now raises
+  `SourceDocumentUnavailable` and the command exits 2 without writing a draft:
+  a document missing from every source directory, a span carrying a directory
+  component (no extractor writes one), a filename present in more than one
+  source directory (the span does not record which one it came from, so the
+  choice is refused rather than guessed), and a span naming a page the PDF does
+  not have, which `pdfplumber` raises as an `IndexError` that nothing used to
+  catch. `tests/test_cli_ai_propose_grounding.py` drives the real command for
+  all of this; three of its four tests fail against the previous code and its
+  fourth, the in-intake-directory case, passes against both.
 - **The content sweep behind `reconcile destroy` was checking four artifacts
   out of fourteen, and said so only in a docstring.**
   `tests/test_destruction_leaves_nothing.py` is the test that proves a
