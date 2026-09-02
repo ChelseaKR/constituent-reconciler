@@ -181,6 +181,23 @@ pip install -e ".[extract]"
 a registry install. See [docs/ROADMAP.md](docs/ROADMAP.md) for the Trusted
 Publishing plan.)
 
+To install a tagged release without cloning, use the Git ref directly — this
+repository's `release.yml` publishes a GitHub Release with a wheel and sdist,
+and there is deliberately no PyPI publish stage, so there is no
+`pip install constituent-reconciler` to run:
+
+```sh
+uvx --from git+https://github.com/ChelseaKR/constituent-reconciler@v0.8.0 reconcile --help
+```
+
+The wheel and sdist attached to that GitHub Release are the same artifacts,
+if you would rather install a downloaded file.
+
+The bundled demos below need the repository, not just the wheel: `examples/`
+is committed at the repository root and ships in the sdist, but a wheel
+contains the importable package only. Clone the repository (or unpack the
+sdist) to run anything whose `--config` points into `examples/`.
+
 Before pointing the tool at your own data, check a recipe's shape without
 resolving anything:
 
@@ -660,7 +677,7 @@ locally (this table plus the linked doc) pending a filed issue. Last reviewed:
 | Code Quality | Applies | Enforced — `ruff` (incl. `S`, `C90`), `ruff format`, `mypy --strict`, `pytest --strict-markers`, `uv.lock` committed, `uv sync --locked` | `pyproject.toml`, `Makefile` |
 | Security & Supply-Chain | Applies — ASVS L2 (handles DV-survivor PII) | Partial — secret scan, dependency-vuln scan, SAST (Semgrep + CodeQL + zizmor), and a release-time CycloneDX SBOM + keyless build-provenance attestation (`release.yml`) enforced; container scan (Trivy) is enforced in CI; VEX is still a gap | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Security |
 | CI/CD | Applies | Partial — SHA-pinned actions, least-privilege tokens, `make verify` parity, `secrets`+`security` jobs, CODEOWNERS, and a solo-maintainer review waiver (ADR 0008) all in place; a live `protect-main` branch ruleset has been active since 2026-07-09 (force-push and deletion blocked, nine required check contexts, and the repository owner's standing bypass and no other, deliberately), though it does not yet carry the committed profile's pull-request and linear-history rules (parity delta recorded in [docs/rulesets/README.md](docs/rulesets/README.md)) | `.github/workflows/ci.yml`, [docs/adr/0008-solo-maintainer-review-waiver.md](docs/adr/0008-solo-maintainer-review-waiver.md), [docs/rulesets/](docs/rulesets/) |
-| Release & Versioning | Applies (release-producing: 0.1.0-0.7.0) | Partial — `.github/workflows/release.yml` is tag-triggered (`v*`), re-verifies at the tagged commit, checks tag/`pyproject.toml` version consistency, builds sdist+wheel, generates a CycloneDX SBOM, attests build provenance (keyless OIDC), and publishes a GitHub Release with the matching CHANGELOG section; gap — no `v*` tag has been cut yet, so the workflow is unexercised, and there is no PyPI publish stage (not yet published to PyPI) | [.github/workflows/release.yml](.github/workflows/release.yml), [CHANGELOG.md](CHANGELOG.md) |
+| Release & Versioning | Applies (release-producing: 0.1.0-0.8.0) | Partial — `.github/workflows/release.yml` is tag-triggered (`v*`), re-verifies at the tagged commit, checks tag/`pyproject.toml` version consistency, builds sdist+wheel, generates a CycloneDX SBOM, attests build provenance (keyless OIDC), and publishes a GitHub Release with the matching CHANGELOG section; gap — no `v*` tag has been cut yet, so the workflow is unexercised, and there is no PyPI publish stage (not yet published to PyPI) | [.github/workflows/release.yml](.github/workflows/release.yml), [CHANGELOG.md](CHANGELOG.md) |
 | Accessibility | Applies (`reconcile review` web UI) | Partial — structural WCAG 2.2 AA design and automated axe gate in place; manual screen-reader walkthrough remains | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Accessibility |
 | Observability | Applies — Tier C plus model-call telemetry | Canonical GenAI spans/logs record tokens, duration, finish reason, and estimated cost; PII/content absence is enforced by tests | [docs/ROADMAP.md](docs/ROADMAP.md) § Observability |
 | Internationalization | Applies — deferred to 1.0 | Declared — EN/ES parity is a real commitment, not yet built (no catalog infra) | [docs/I18N.md](docs/I18N.md) |
