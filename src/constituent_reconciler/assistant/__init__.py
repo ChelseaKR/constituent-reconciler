@@ -51,6 +51,7 @@ from constituent_reconciler.assistant.errors import (
     ProviderCallFailed,
     ProviderNotConfigured,
     RateLimitExceeded,
+    SourceDocumentUnavailable,
     VerificationFailed,
 )
 from constituent_reconciler.assistant.match_explain import (
@@ -88,6 +89,7 @@ __all__ = [
     "ProviderResult",
     "RateLimitExceeded",
     "RateLimiter",
+    "SourceDocumentUnavailable",
     "TriageItem",
     "VerificationFailed",
     "ask",

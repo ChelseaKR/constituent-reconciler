@@ -184,6 +184,36 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   is the heading an automated read of the table looks for.
 
 ### Fixed
+- **`ai-propose-corrections` read the wrong document, or none at all, depending
+  on the working directory.** A source span records the intake document's bare
+  filename, never a path, because every extractor builds it from `path.name`
+  and the value reaches review screens and cache entries. `source_text.for_field`
+  resolved that name against the process working directory. Run from anywhere
+  but the intake directory, every field returned "no source text", the loop
+  skipped all of them, and the command wrote `ai_ocr_proposals.json` holding an
+  empty list and exited 0, saying nothing about having been unable to open a
+  single document. Run from a directory that happened to hold an unrelated file
+  of the same name, the model was sent that file and the quote was verified
+  against it. Verification still passed, because the quote genuinely appeared in
+  the text the model had been shown; it was the wrong text, about a different
+  person, and reaching it meant sending an unrelated local document to the
+  provider. Both were reproduced against the real pipeline: from the intake
+  directory four fields grounded, from the repository root zero did, and from a
+  directory holding a same-named decoy the command produced a verified
+  correction for `Garciaintake` quoting `Last Name: Okonkwodecoy`.
+  The name is now resolved against the directories the recipe actually named as
+  sources (`source_text.document_roots`), which `for_field` requires and has no
+  default for. A field with no span still returns `None` and is skipped, which
+  is correct for a CSV-sourced record. Every other outcome now raises
+  `SourceDocumentUnavailable` and the command exits 2 without writing a draft:
+  a document missing from every source directory, a span carrying a directory
+  component (no extractor writes one), a filename present in more than one
+  source directory (the span does not record which one it came from, so the
+  choice is refused rather than guessed), and a span naming a page the PDF does
+  not have, which `pdfplumber` raises as an `IndexError` that nothing used to
+  catch. `tests/test_cli_ai_propose_grounding.py` drives the real command for
+  all of this; three of its four tests fail against the previous code and its
+  fourth, the in-intake-directory case, passes against both.
 - **The content sweep behind `reconcile destroy` was checking four artifacts
   out of fourteen, and said so only in a docstring.**
   `tests/test_destruction_leaves_nothing.py` is the test that proves a
@@ -245,6 +275,7 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   column; and a cluster written at all had every member active. What none of
   those stop is time crossing a recorded `expires` date, which lapses a consent
   with no byte changing anywhere. Both notes are corrected.
+
 
 ### Fixed
 - **`reconcile destroy` certified destruction it had not performed.**
