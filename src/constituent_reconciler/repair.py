@@ -314,8 +314,59 @@ def _reconstructed_golden(
     return golden
 
 
-def _manual_instructions(destination: str, external_id: str, survivor: str) -> tuple[str, ...]:
-    return (
+def _member_consent(
+    record: Record,
+    *,
+    require_consent: bool,
+    destination: str,
+    as_of: date,
+) -> dict[str, object]:
+    """One split member's consent state, as the plan reports it.
+
+    ``withhold_reason`` is exactly what ``Consent.reason`` returns, the same
+    value ``consent.partition_by_consent`` gates the ordinary write path on:
+    ``None`` when consent is active, otherwise one of revoked, absent,
+    future-dated, expired, or out-of-scope. It is recorded whether or not the
+    recipe requires consent, because it is a fact about the record and the
+    operator was previously shown nothing at all.
+
+    ``blocks_creation`` is the actionable half, and it is true only when the
+    recipe requires consent and the reason is not ``None``. That is the same
+    rule the destination's own write gate applies, not a stricter one. Under a
+    recipe that does not require consent, a member whose status reads
+    "revoked" is still labeled as such and still creatable, because the
+    ordinary export path would write that record too; making the repair path
+    refuse where the write path would not would be inventing policy here
+    rather than reading it from the recipe.
+    """
+
+    reason = record.consent.reason(as_of=as_of, destination=destination)
+    return {
+        "required_by_recipe": require_consent,
+        "withhold_reason": reason,
+        "blocks_creation": require_consent and reason is not None,
+    }
+
+
+def _manual_instructions(
+    destination: str,
+    external_id: str,
+    survivor: str,
+    *,
+    blocked: Sequence[str],
+    require_consent: bool,
+) -> tuple[str, ...]:
+    """The steps a person follows to apply a plan this tool cannot execute.
+
+    Every destination but the CiviCRM pilot lands here, so for most operators
+    these lines are the whole of the repair. Until the consent lines below
+    existed they said to create a record for every split member and said
+    nothing about consent, while ``_withheld_split_members`` applied that gate
+    on the verified path. The manual path is the one with no gate at all, so
+    it is the one that needed telling.
+    """
+
+    steps = [
         f"No verified repair operations exist for destination {destination!r}, so this "
         "plan is manual: a person applies it in the destination itself, and this tool "
         "will not execute any of it.",
@@ -325,10 +376,28 @@ def _manual_instructions(destination: str, external_id: str, survivor: str) -> t
         "written value came from a record this plan separates out.",
         f"Create one new record for each split_records entry other than the survivor "
         f"{survivor!r}, using the field values listed there.",
+    ]
+    if require_consent:
+        steps.append(
+            "This recipe requires consent, so do not create a record for any "
+            "split_records entry whose consent.blocks_creation is true. The "
+            "destination's own write gate would refuse that record, and applying this "
+            "plan by hand must not route around it."
+        )
+        if blocked:
+            named = ", ".join(blocked)
+            steps.append(
+                f"On this plan that means: {named}. Each entry's "
+                "consent.withhold_reason says why. Consent is read when the plan is "
+                "written, so re-plan rather than trusting an old file if time has "
+                "passed."
+            )
+    steps.append(
         "Delete or merge nothing this plan does not name. If the destination does not "
         "look the way the plan describes, stop and regenerate the plan before "
-        "continuing.",
+        "continuing."
     )
+    return tuple(steps)
 
 
 def _plan_payload(
@@ -342,15 +411,23 @@ def _plan_payload(
     records: dict[str, Record],
     reason: str,
     reviewer: str,
+    as_of: date,
 ) -> dict[str, object]:
     """Assemble the deterministic plan payload. Raw values live only here."""
 
     survivor = golden.primary
+    destination = recipe.output.connector
     split_records = [
         {
             "record_id": member,
             "source": records[member].source,
             "fields": {name: records[member].normalized.get(name, "") for name in recipe.fields},
+            "consent": _member_consent(
+                records[member],
+                require_consent=recipe.require_consent,
+                destination=destination,
+                as_of=as_of,
+            ),
         }
         for member in members
     ]
@@ -364,7 +441,6 @@ def _plan_payload(
         for name in recipe.fields
         if (supplied := golden.field_sources.get(name, "")) and supplied != survivor
     ]
-    destination = recipe.output.connector
     # Planning is offline: no destination version was read, and the blank
     # version never matches a declaration's enumerated list, so operations
     # stay empty and the plan is manual until a verified pilot exists.
@@ -389,7 +465,23 @@ def _plan_payload(
         "restore_fields": restore_fields,
         "cannot_links": [list(pair) for pair in combinations(members, 2)],
         "manual_instructions": (
-            [] if operations else list(_manual_instructions(destination, external_id, survivor))
+            []
+            if operations
+            else list(
+                _manual_instructions(
+                    destination,
+                    external_id,
+                    survivor,
+                    blocked=[
+                        str(entry["record_id"])
+                        for entry in split_records
+                        if entry["record_id"] != survivor
+                        and isinstance(entry["consent"], dict)
+                        and entry["consent"]["blocks_creation"]
+                    ],
+                    require_consent=recipe.require_consent,
+                )
+            )
         ),
     }
 
@@ -513,8 +605,15 @@ def plan_split(
     reviewer: str,
     corrections: Iterable[Correction] = (),
     decisions_path: Path | None = None,
+    as_of: date | None = None,
 ) -> PlannedSplit:
     """Plan the split of one written cluster. Read-only toward the destination.
+
+    ``as_of`` is the date each member's consent is evaluated against, default
+    today, mirroring ``consent.partition_by_consent`` so a reproducible run can
+    pin it. It is the only input that makes two plans of the same cluster
+    against the same manifest differ, and only when a grant or an expiry
+    crosses that date between them.
 
     Refuses, fail-closed, on a blank reason or reviewer, a manifest that does
     not match the loaded recipe and current sources, a provenance log that
@@ -558,6 +657,7 @@ def plan_split(
         records=records,
         reason=reason_text,
         reviewer=reviewer_name,
+        as_of=as_of if as_of is not None else date.today(),
     )
     encoded = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     digest = hashlib.blake2b(encoded.encode("utf-8"), digest_size=32).hexdigest()
@@ -781,23 +881,28 @@ def _withheld_split_members(
     A no-op returning an empty set when the recipe does not require consent,
     matching the main write path's own gate (``consent.partition_by_consent``)
     exactly: this is the same rule applied to repair-created contacts, not a
-    stricter one. Consent is read fresh here, at apply time, rather than
-    trusted from the plan, in case a future change loosens the source-batch
-    freeze this function currently relies on.
+    stricter one.
 
-    One honest limit, worth stating plainly rather than implying this check
-    catches a live gap: under today's invariants it cannot actually fire for
-    a plan produced by ``plan_split``. ``_verify_manifest`` refuses apply
-    unless the current source files hash identically to what the original
-    write's manifest recorded, corrections cannot touch the consent column
+    The freeze around this is tight but not total, and the earlier version of
+    this docstring overstated it. ``_verify_manifest`` refuses apply unless
+    the current source files hash identically to what the original write's
+    manifest recorded, corrections cannot touch the consent column
     (``pipeline._apply_corrections`` preserves it), and
     ``Consent.most_restrictive`` means a cluster that was written at all had
-    every member's consent active at that moment. So a member proposed here
-    for split-create cannot have had its consent change between the original
-    write and this apply. This function is a safety net against a future
-    change to that freeze, or against a plan applied with a hand-assembled
-    ``plan_data`` outside the normal plan-split path, not evidence of a gap
-    reachable through today's CLI.
+    every member's consent active at that moment. Together those stop a
+    member's consent being *edited* between the write and this apply. They do
+    not stop time passing. A grant carrying an ``expires`` date that was in
+    the future at the write and is in the past at the apply lapses with no
+    byte changing anywhere, and this check fires on it. That is the one
+    reachable case, and it is the same one the plan file now labels on every
+    ``split_records`` entry so the manual path is not the only path without a
+    gate. Beyond it, this stays a safety net against a future change to the
+    freeze, or against a plan applied with a hand-assembled ``plan_data``
+    outside the normal plan-split path.
+
+    The label in the plan is never trusted here. Consent is read fresh from
+    the sources at apply time, so a plan written before a lapse cannot
+    authorize a write after it.
     """
 
     if not recipe.require_consent:

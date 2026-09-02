@@ -213,6 +213,21 @@ the maintainer's call.
 
 ## One finding this backlog does not have an issue for
 
+**Resolved 2026-08-27 by taking option 1, the option this section named as the
+one to prefer.** Every `split_records` entry now carries a `consent` object
+(`required_by_recipe`, `withhold_reason`, `blocks_creation`), and under a
+consent-requiring recipe the manual instructions state the rule and name the
+members a person must not create. `REPAIR_PLAN_SCHEMA_VERSION` is 2. The bump
+is additive and no release has been tagged, so no published artifact carries
+version 1. The paragraphs below are kept as written, because the reasoning
+about which window is actually reachable is what made the fix testable, and
+because the schema-bump caveat was the maintainer's to overrule rather than
+mine to delete. One correction to them: the window is narrower than "lapsed or
+was revoked", since a revocation would change a source byte and the manifest
+check refuses that. What passes the manifest check is time crossing a recorded
+`expires` date, which changes consent with no byte changing anywhere.
+
+
 `repair.plan_split` writes a local repair plan whose manual instructions tell
 an operator to create one destination record per split member, and it does not
 consult any member's consent while doing so. After #83 a cluster written under

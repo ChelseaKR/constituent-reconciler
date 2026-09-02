@@ -63,7 +63,13 @@ CUTOVER_CORRECTIONS_SCHEMA_VERSION = 2
 # writes: the old external id, the proposed split records, the fields needing
 # restoration, and the operations the destination supports. A versioned
 # surface from its first byte, per docs/adr/0012-connector-repair-capabilities.md.
-REPAIR_PLAN_SCHEMA_VERSION = 1
+# Version 2 adds a ``consent`` object to every ``split_records`` entry, and the
+# manual instructions of a consent-requiring recipe now name the members a
+# person must not create. Additive: every version 1 key keeps its meaning, and
+# a reader that ignores the new object behaves as before, which is why this is
+# a minor bump rather than a break. No release has been tagged, so no published
+# artifact carries version 1.
+REPAIR_PLAN_SCHEMA_VERSION = 2
 
 # The connector repair-capability declaration shape (connectors/repair.py):
 # destination, enumerated verified versions, operation vocabulary, and the
