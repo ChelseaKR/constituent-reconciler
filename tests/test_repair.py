@@ -139,7 +139,10 @@ def test_plan_split_writes_a_grounded_local_plan(run_dir: tuple[Path, Path]) -> 
     assert main(_plan_args(demo, out_dir, MERGED_CLUSTER)) == 0
 
     plan = _plan(out_dir)
-    assert plan["repair_plan_schema"] == 1
+    # Pinned as a literal, not read from the constant, so a bump has to be
+    # deliberate. Raised 1 -> 2 when every split_records entry gained its
+    # consent object.
+    assert plan["repair_plan_schema"] == 2
     assert plan["cluster_id"] == MERGED_CLUSTER
     assert plan["old_external_id"] == "existing:E003"
     assert plan["survivor"] == "existing:E003"

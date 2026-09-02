@@ -214,6 +214,70 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   catch. `tests/test_cli_ai_propose_grounding.py` drives the real command for
   all of this; three of its four tests fail against the previous code and its
   fourth, the in-intake-directory case, passes against both.
+- **The content sweep behind `reconcile destroy` was checking four artifacts
+  out of fourteen, and said so only in a docstring.**
+  `tests/test_destruction_leaves_nothing.py` is the test that proves a
+  destruction certificate is honest: it plants sentinel field values, lets the
+  real writers place them, destroys, and then reads every surviving byte. It
+  drove `reconcile run` and `ai-propose-corrections` and nothing else, so of
+  the fourteen names on `destruction.PII_ARTIFACTS` only `resolved.csv`,
+  `civicrm_import.csv`, `household_suggestions.csv` and `ai_ocr_proposals.json`
+  ever held a planted value. The cutover artifacts, both repair artifacts, both
+  withheld lists, the reviewer corrections file, the Salesforce import file and
+  the stage cache were left to the filename-driven tests, which are the tests
+  that could not see the original defect. The limitation was written down
+  honestly, in the module docstring, where nothing could fail on it.
+  The sweep now drives every command that writes a destroyable artifact:
+  `run` across the csv, civicrm_csv and salesforce_csv connectors with
+  household grouping and the stage cache on, `ai-propose-corrections`,
+  `compare`, the review session `compare-review` serves, `compare-apply`,
+  `plan-split`, `approve-repair` twice, and `apply-repair --execute` against a
+  CiviCRM transport double. Only the model call and the CiviCRM transport are
+  doubles, because those are the two things a test here may not do for real;
+  every gate, consent filter, quote verification and write around them is the
+  real code.
+  Coverage is now data rather than prose. Every name on `PII_ARTIFACTS` is
+  classified in the test module as swept by content, or as exercised but
+  checkable only by existence, and the guard fails on a name classified as
+  neither, so a new destroyable artifact cannot be added without a scenario for
+  it. Two artifacts are in the second class and the reason is recorded:
+  `withheld.csv` and `cutover_withheld.csv` carry cluster ids, member ids and a
+  withhold reason and no field value at all, so no sentinel can reach them, and
+  planting one in a record id would also reach `provenance.jsonl`, the one
+  artifact destruction must refuse to touch.
+- **A repair plan told a person to create a record for every split member,
+  including one whose consent had lapsed.** `reconcile plan-split` proposes one
+  destination record per member of a merged cluster. For every destination but
+  the CiviCRM pilot the plan is manual: the tool executes none of it and a
+  person follows `manual_instructions` by hand. Those instructions said to
+  create a record for each member and said nothing about consent, while the
+  verified path's `_withheld_split_members` applied exactly that gate. The path
+  with no gate was the one told nothing.
+  Every `split_records` entry now carries a `consent` object:
+  `withhold_reason` is what `Consent.reason` returns, the same value the
+  ordinary write path gates on, and `blocks_creation` is true only when the
+  recipe requires consent and that reason is not null. That is the write path's
+  own rule, not a stricter one. A recipe that does not require consent still
+  gets the label, because the state is a fact about the record and the operator
+  was previously shown nothing, but nothing is blocked, since refusing there
+  would invent a policy the recipe does not state. Under a consent-requiring
+  recipe the instructions add the rule and, when anyone is blocked, name them.
+  `REPAIR_PLAN_SCHEMA_VERSION` is 2. Additive: every version 1 key keeps its
+  meaning, both readers of the plan use `.get` and ignore unknown keys, and no
+  release has been tagged, so no published artifact carries version 1.
+  `plan_split` gains an `as_of` argument, defaulting to today and mirroring
+  `consent.partition_by_consent`, which is also how the lapse is reached in a
+  test without waiting for a date.
+  The reachable window turned out to be narrower than the backlog triage
+  recorded, and the note in `_withheld_split_members` claiming this could not
+  fire through today's CLI was wrong. A revocation would change a source byte
+  and the manifest check refuses that; corrections cannot touch the consent
+  column; and a cluster written at all had every member active. What none of
+  those stop is time crossing a recorded `expires` date, which lapses a consent
+  with no byte changing anywhere. Both notes are corrected.
+
+
+### Fixed
 - **`reconcile destroy` certified destruction it had not performed.**
   `destruction.PII_ARTIFACTS` is a hand-maintained list of filenames, and
   `destroy` considers nothing else, so an artifact missing from it is left on
