@@ -218,8 +218,9 @@ automated remediation pass does not take on this maintainer's behalf."
 - docs/adr/0008-solo-maintainer-review-waiver.md is the honesty half of the
   ruleset decision: zero required approvals is a named waiver with
   compensating controls, not an oversight.
-- CHANGELOG.md keeps an `[Unreleased]` section, and `pyproject.toml` reads
-  `version = "0.7.0"` as of this writing. No `v*` tag exists yet.
+- CHANGELOG.md's `[Unreleased]` content has been dated as
+  `## [0.8.0] - 2026-09-02`, and `pyproject.toml` reads
+  `version = "0.8.0"` as of this writing. No `v*` tag exists yet.
 
 **Steps, part A: apply the ruleset.**
 
@@ -287,7 +288,7 @@ automated remediation pass does not take on this maintainer's behalf."
      signed it). The signature is the maintainer's act; the workflow adds the
      keyless build-provenance attestation on top.
 2. Prepare the release PR on a branch:
-   - Choose the version `X.Y.Z` (the next release from the current `0.7.0`,
+   - Choose the version `X.Y.Z` (the next release from the current `0.8.0`,
      per the versioning contract in docs/adr/0006-schema-stability.md).
    - Move the `[Unreleased]` content of CHANGELOG.md into a dated
      `## [X.Y.Z] - YYYY-MM-DD` section. The `changelog-section` job fails the

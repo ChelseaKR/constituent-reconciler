@@ -104,7 +104,7 @@ as demand.
    deliberate solo-maintainer posture, then make the two agree. Leaving them
    divergent is the one outcome the issue's acceptance criterion forbids.
 2. *First release, an authorized act.* `git tag` and `gh release list` are both
-   still empty, and `pyproject.toml` is at 0.7.0. Exact act: choose the
+   still empty, and `pyproject.toml` is at 0.8.0. Exact act: choose the
    candidate commit and version, cut the signed `v*` tag, and let the release
    workflow run for the first time. Nothing in the repository authorizes this,
    by the issue's own boundary. This is the item most worth doing next, for

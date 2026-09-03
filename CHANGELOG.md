@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
-## [Unreleased]
+## [0.8.0] - 2026-09-02
 
 ### Added
 - **The matcher recognises a transposed name.** A duplicate filed with the
