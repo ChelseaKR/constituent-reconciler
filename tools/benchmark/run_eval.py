@@ -2,7 +2,7 @@
 
 This is the release-time counterpart to ``make eval`` for an external corpus,
 and it follows ``tools/corpusgen/run_large_eval.py`` rather than shelling out to
-``reconcile eval`` for the same reason that script does: ``reconcile eval``
+``constituent-reconcile eval`` for the same reason that script does: ``constituent-reconcile eval``
 also arms the fail-closed kappa gate for the LLM field judge, and no field judge
 runs here. FEBRL4 is CSV in, deterministic matcher, CSV out, with no extraction
 seam anywhere in the path, so a kappa verdict would be reporting on a component

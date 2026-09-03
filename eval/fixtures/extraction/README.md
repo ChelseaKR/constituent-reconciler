@@ -3,7 +3,7 @@
 This directory is the ground truth behind the extraction row of the metrics
 ledger in `docs/ROADMAP.md`. It holds four deterministic synthetic intake-form
 PDFs, hand-written labels for what a correct extractor should pull from each,
-and the script that regenerates the PDFs. `reconcile eval-extraction` (or
+and the script that regenerates the PDFs. `constituent-reconcile eval-extraction` (or
 `make eval-extraction`) runs the offline PDF extractor over the PDFs, scores it
 against `labels.json`, and writes `eval/extraction-report.md`. There is no real
 personal data here; every name, date, and number is invented.

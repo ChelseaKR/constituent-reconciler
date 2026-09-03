@@ -393,7 +393,7 @@ def test_a_broken_stream_latches_the_renderer_off_instead_of_raising() -> None:
 
 
 def test_apply_wires_the_renderer_exactly_like_run() -> None:
-    # Pins the CLI wiring for ``reconcile apply`` (the end-to-end stderr
+    # Pins the CLI wiring for ``constituent-reconcile apply`` (the end-to-end stderr
     # test above covers ``run``): both commands construct the stderr
     # renderer inside try/finally and pass it to the pipeline.
     from constituent_reconciler import cli

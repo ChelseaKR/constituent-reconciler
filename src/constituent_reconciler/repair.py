@@ -1,7 +1,7 @@
 """Read-only split repair planning (UC-03, ADR 0012).
 
 An administrator who discovers a bad merge after a batch was written needs to
-understand the repair before anyone touches the destination. ``reconcile
+understand the repair before anyone touches the destination. ``constituent-reconcile
 plan-split`` turns one written cluster into a local repair plan: the old
 external id, one proposed split record per member, the fields whose written
 value came from a member being split away, and the operations the destination
@@ -33,7 +33,7 @@ One honest limit: a correction that changes a field's value without changing
 which member supplied it is invisible to the lineage check, so operators pass
 the corrections file the written run applied (the CLI refuses an explicitly
 passed corrections path that does not exist, and otherwise loads the default
-location ``reconcile apply`` uses). Both reviewers regenerating and comparing
+location ``constituent-reconcile apply`` uses). Both reviewers regenerating and comparing
 plans, and the apply path's digest binding, are the controls the ADR places
 around that gap.
 """
@@ -552,7 +552,7 @@ def _bind_cannot_links(
 
     ``data`` is the file's content, loaded and validated by
     ``_load_decisions`` before any plan bytes were written. The rejected list
-    is what ``reconcile apply`` loads as ``force_drop``, and
+    is what ``constituent-reconcile apply`` loads as ``force_drop``, and
     ``decisions.enforce_cannot_links`` treats those pairs as binding: the next
     run cannot recreate the split cluster, and any surviving automatic edge in
     the group returns to review. A split pair found in ``approved`` is
@@ -1033,7 +1033,7 @@ def apply_repair_plan(
             f"applying cluster {cluster_id!r} to a remote destination requires "
             f"{MINIMUM_APPLY_APPROVERS} distinct reviewers' approval of this exact plan "
             f"(digest {digest}); {len(approvers)} recorded. Record approvals with "
-            "`reconcile approve-repair` before retrying with --execute."
+            "`constituent-reconcile approve-repair` before retrying with --execute."
         )
 
     if connector is not None:

@@ -227,7 +227,7 @@ def test_recipe_error_is_a_value_error(tmp_path: Path) -> None:
         load_recipe(path)
 
 
-# -- FIX-04: `reconcile validate` --------------------------------------------
+# -- FIX-04: `constituent-reconcile validate` --------------------------------------------
 
 
 def test_validate_command_accepts_a_good_recipe(capsys: object) -> None:

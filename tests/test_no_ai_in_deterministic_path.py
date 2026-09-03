@@ -10,7 +10,7 @@ Two complementary checks:
    module level -- see ``cli.py``'s own module docstring) confirms none of
    them names ``constituent_reconciler.assistant``, ``anthropic``, or
    ``boto3``.
-2. A subprocess runs ``reconcile run`` against the bundled demo recipe with
+2. A subprocess runs ``constituent-reconcile run`` against the bundled demo recipe with
    ``anthropic`` and ``boto3`` sabotaged out of ``sys.modules`` (the standard
    "assign None" trick, which makes any ``import anthropic`` raise
    ``ImportError``) and asserts the run still succeeds and produces the
@@ -60,7 +60,7 @@ def test_cli_module_level_imports_never_name_the_assistant_package_or_its_sdks()
     """Every AI import in cli.py must be inside a function body (a
     ``_cmd_ai_*`` command), never at module level -- this is what makes
     ``ai-explain``/``ai-ask``/``ai-propose-corrections`` opt-in rather than
-    something every ``reconcile`` invocation pays for.
+    something every ``constituent-reconcile`` invocation pays for.
     """
     names = _module_level_import_names(SRC / "cli.py")
     for forbidden in _FORBIDDEN_MODULES:

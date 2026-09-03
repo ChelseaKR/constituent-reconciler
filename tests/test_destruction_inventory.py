@@ -2,11 +2,11 @@
 
 ``destruction.PII_ARTIFACTS`` is a hand-maintained list, and a hand-maintained
 list of what to delete drifts the moment a new command writes a new file. It
-already had: ``reconcile ai-propose-corrections`` shipped writing
+already had: ``constituent-reconcile ai-propose-corrections`` shipped writing
 ``ai_ocr_proposals.json`` (raw field values, proposed values, and a verbatim
-quote out of the intake document) and ``reconcile run`` shipped writing
+quote out of the intake document) and ``constituent-reconcile run`` shipped writing
 ``household_suggestions.csv`` (a standardized street address and a surname per
-candidate household), and neither name reached the list, so ``reconcile
+candidate household), and neither name reached the list, so ``constituent-reconcile
 destroy`` exited 0 and issued destruction certificates while leaving both files
 on disk.
 

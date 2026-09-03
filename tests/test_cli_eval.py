@@ -1,4 +1,4 @@
-"""Exit-code behavior of `reconcile eval` with the kappa calibration gate.
+"""Exit-code behavior of `constituent-reconcile eval` with the kappa calibration gate.
 
 The gate is fail-closed: a missing, unreadable, or empty labels file exits 1
 the same way a kappa below 0.60 does. Passing labels leave the existing
@@ -86,6 +86,6 @@ def test_the_committed_eval_report_matches_a_fresh_run(tmp_path: Path) -> None:
     assert main(_eval_args(out, "--calibration", str(labels))) == 0
     committed = EXAMPLES.parents[1] / "eval" / "report.md"
     assert out.read_text(encoding="utf-8") == committed.read_text(encoding="utf-8"), (
-        "eval/report.md no longer matches what `reconcile eval` computes from the "
+        "eval/report.md no longer matches what `constituent-reconcile eval` computes from the "
         "committed demo; regenerate it with `make eval` and commit the diff"
     )

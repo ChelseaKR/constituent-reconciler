@@ -35,7 +35,7 @@ Run it:
 
 ```sh
 WEBHOOK_TOKEN=... WEBHOOK_SIGNING_SECRET=... \
-  reconcile run --config recipe-webhook.toml --out out
+  constituent-reconcile run --config recipe-webhook.toml --out out
 ```
 
 `--dry-run` reports what would be sent (`action: would-write`) and makes no
@@ -161,8 +161,8 @@ the signature).
   own side (a queue in front of the real endpoint) rather than this project
   guessing at a batch contract no vendor defined.
 * **No retry.** A failed POST raises `ConnectorError` and stops the export
-  step for that run; re-running `reconcile run` resends every record (or
-  `reconcile apply` after a review pass). A receiver that wants at-least-once
+  step for that run; re-running `constituent-reconcile run` resends every record (or
+  `constituent-reconcile apply` after a review pass). A receiver that wants at-least-once
   delivery semantics under partial failure should be idempotent on
   `external_id`, which this connector always sends.
 * **No inbound receiver.** This module only sends. It does not open a

@@ -15,7 +15,7 @@ The ethics of planting are handled by construction, not by trust:
   ("Calibration Sample" names, ``.invalid`` emails, ``555-01xx`` numbers), so
   a planted record can never be mistaken for a real constituent.
 * **Never applied.** The session excludes planted pairs from the decisions
-  file, so ``reconcile apply`` — which reads only that file — can never merge
+  file, so ``constituent-reconcile apply`` — which reads only that file — can never merge
   a synthetic record into real ones.
 """
 

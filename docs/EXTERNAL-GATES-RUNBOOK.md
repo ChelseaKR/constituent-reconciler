@@ -59,7 +59,7 @@ without seeing the screen."
 
 - [reviews/SCREEN-READER-WALKTHROUGH.md](./reviews/SCREEN-READER-WALKTHROUGH.md)
   is a complete tester-facing checklist: a four-step setup (clone,
-  `make install`, `reconcile run` and `reconcile review` against
+  `make install`, `constituent-reconcile run` and `constituent-reconcile review` against
   `examples/intake-demo/recipe.toml`, pick a screen reader matched to the OS),
   an eleven-step walkthrough script, and an intentionally unfilled Results
   table. Its status line reads "not yet performed" and it forbids filling the
@@ -125,8 +125,8 @@ without seeing the screen."
    funder-facing language about constituent data. The same outreach channels
    as part A apply. I18N.md rules out machine translation as the reviewer.
 3. Have the reviewer read the rendered pages, not the source table: run
-   `reconcile run --config examples/intake-demo/recipe-dv.toml --out out-dv`
-   then `reconcile report --run-dir out-dv --lang es` and `--lang en`, and
+   `constituent-reconcile run --config examples/intake-demo/recipe-dv.toml --out out-dv`
+   then `constituent-reconcile report --run-dir out-dv --lang es` and `--lang en`, and
    review the Spanish page against the English one for accuracy, register,
    and the plain-language bar (Grade 8 or lower, matching the English copy's
    bar per I18N.md).
@@ -376,9 +376,9 @@ which a fixture can stand in for.
 **Already in the repo.**
 
 - [ADOPTION-KIT.md](./ADOPTION-KIT.md) walks the full sequence the recording
-  should show: `reconcile validate`, a `--dry-run`, the review queue with
-  `--reviewer`, `reconcile apply`, the live write with the API key passed
-  through the environment, and `reconcile verify` over the provenance log.
+  should show: `constituent-reconcile validate`, a `--dry-run`, the review queue with
+  `--reviewer`, `constituent-reconcile apply`, the live write with the API key passed
+  through the environment, and `constituent-reconcile verify` over the provenance log.
 - `examples/intake-demo/recipe-civicrm.toml` is the demo recipe: connector
   `civicrm`, an API v4 endpoint (`.../civicrm/ajax/api4`), the key read from
   `CIVICRM_API_KEY` (its header comment says the key is "never stored in this
@@ -416,30 +416,30 @@ which a fixture can stand in for.
    contain no data you would not publish.
 5. Record the run end to end, narrating or captioning each step. The labels
    below state what each command does in the code: `validate`, the dry run,
-   `review`, and `verify` never contact the server, while `reconcile apply`
+   `review`, and `verify` never contact the server, while `constituent-reconcile apply`
    exports through the recipe's `civicrm` connector with dry run off and is
-   the live write. A plain `reconcile run` without `--dry-run` would also
+   the live write. A plain `constituent-reconcile run` without `--dry-run` would also
    write live, but it ignores the decisions file, so it has no place in this
    script; the point of the recording is that the reviewed decisions reach
    the CRM.
-   - `reconcile validate --config recipe-civicrm.toml` (local: shape-checks
+   - `constituent-reconcile validate --config recipe-civicrm.toml` (local: shape-checks
      the recipe without running the pipeline or building a connector)
-   - `reconcile run --config recipe-civicrm.toml --out out --dry-run` (local
+   - `constituent-reconcile run --config recipe-civicrm.toml --out out --dry-run` (local
      dry run: shows the summary of what would be written without contacting
      the server)
-   - `reconcile review --config recipe-civicrm.toml --reviewer "<name>" --out
+   - `constituent-reconcile review --config recipe-civicrm.toml --reviewer "<name>" --out
      out` (local: decide the lookalike pairs on camera; the decisions are
      saved to `out/decisions.json` and nothing reaches CiviCRM yet)
-   - `reconcile apply --config recipe-civicrm.toml --decisions
+   - `constituent-reconcile apply --config recipe-civicrm.toml --decisions
      out/decisions.json --out out` (live write: re-resolves with the
      on-camera decisions applied and writes the result into CiviCRM, using
      the key exported in step 4)
    - the CiviCRM UI showing the created contacts with `external_identifier`
      populated
-   - a second `reconcile apply` with the same decisions file (live write),
+   - a second `constituent-reconcile apply` with the same decisions file (live write),
      then the CiviCRM UI again, showing the same contacts updated rather
      than duplicated (the idempotence the recipe header promises)
-   - `reconcile verify --provenance out/provenance.jsonl` (local: checks the
+   - `constituent-reconcile verify --provenance out/provenance.jsonl` (local: checks the
      hash chain over the provenance entries the live writes appended)
 6. Publish the recording somewhere durable that the maintainer controls. A
    GitHub Release asset is a reasonable home once gate 2 exists; a video file
@@ -557,7 +557,7 @@ does.
   integers, each with its change history in a comment:
   `CONFIG_SCHEMA_VERSION = 1`, `CONNECTOR_INTERFACE_VERSION = 1`,
   `REPORT_SCHEMA_VERSION = 3`, and `DECISIONS_SCHEMA_VERSION = 2`.
-  `reconcile schema` prints them.
+  `constituent-reconcile schema` prints them.
 - docs/adr/0006-schema-stability.md states the contract: before 1.0 a surface
   may change with a MINOR bump and a CHANGELOG entry; additive changes (a new
   optional recipe key, a new connector, a new JSON field) are not breaking;
@@ -570,7 +570,7 @@ does.
 1. Complete gate 2 first. The window starts at the first published release.
 2. At each release, record the state of the declared surfaces where a later
    reader can find it: the CHANGELOG section for the release should note the
-   `reconcile schema` output (four integers) and either "no breaking change
+   `constituent-reconcile schema` output (four integers) and either "no breaking change
    to the declared surfaces" or the migration note ADR 0006 requires.
 3. Between releases, review every PR that touches the recipe shape, the
    `Connector` protocol, or the JSON artifacts against ADR 0006's

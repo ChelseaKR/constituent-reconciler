@@ -26,8 +26,8 @@ Source of truth for every claim here: `src/constituent_reconciler/assistant/`.
   same `Provider` protocol, never directly.
 * **Implementation status.** Implemented and opt-in, behind four CLI
   subcommands a reviewer must deliberately invoke. Not reachable from
-  `reconcile run`, `review`, or `apply`; not wired into the browser review
-  UI (`reconcile review`) as of this writing -- see docs/adr/0014
+  `constituent-reconcile run`, `review`, or `apply`; not wired into the browser review
+  UI (`constituent-reconcile review`) as of this writing -- see docs/adr/0014
   Consequences for that as explicit follow-up work.
 * **This project trains no model.** Same as MODEL-CARD.md: this card
   documents a third-party hosted model the pipeline can optionally call.
@@ -35,7 +35,7 @@ Source of truth for every claim here: `src/constituent_reconciler/assistant/`.
 ## Intended use
 
 A human reviewer, already looking at an uncertain pair or a garbled
-intake field in `reconcile review` or the CSV review queue, runs one of
+intake field in `constituent-reconcile review` or the CSV review queue, runs one of
 the four commands against the same run directory to get: a plain-language,
 citation-checked explanation of why Splink scored a pair the way it did
 (`ai-explain`); a grounded answer to a specific question about that pair

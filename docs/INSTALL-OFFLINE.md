@@ -61,7 +61,7 @@ With Python 3.11 on the offline machine:
 ```sh
 python3.11 -m venv .venv
 .venv/bin/pip install --no-index --find-links wheelhouse constituent-reconciler
-.venv/bin/reconcile --help
+.venv/bin/constituent-reconcile --help
 ```
 
 `--no-index` guarantees pip never attempts the network; everything resolves
@@ -102,5 +102,5 @@ working toolchain, not only a working wheel. The bundled demo then runs the
 same way it does anywhere:
 
 ```sh
-.venv/bin/reconcile run --config examples/intake-demo/recipe.toml --out out
+.venv/bin/constituent-reconcile run --config examples/intake-demo/recipe.toml --out out
 ```

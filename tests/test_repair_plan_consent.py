@@ -1,6 +1,6 @@
 """A repair plan must say what each split member's consent currently allows.
 
-`reconcile plan-split` proposes creating one destination record per member of
+`constituent-reconcile plan-split` proposes creating one destination record per member of
 a merged cluster. For every destination but the CiviCRM pilot the plan is
 manual: the tool executes none of it, and a person follows
 ``manual_instructions`` by hand. Those instructions said to create a record

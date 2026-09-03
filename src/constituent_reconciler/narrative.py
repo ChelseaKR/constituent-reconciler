@@ -1,7 +1,7 @@
 """Plain-language narrative run summary for boards and funders.
 
 Renders a one-page Markdown summary of a completed run from the artifacts
-``reconcile run`` writes: ``run_summary.json`` and, when the active policy pack
+``constituent-reconcile run`` writes: ``run_summary.json`` and, when the active policy pack
 produces one, ``aggregate_summary.json``. The page carries counts only. No
 name, field value, or record identifier appears in the output, so an executive
 director can hand it to a board without a privacy review of the page itself.

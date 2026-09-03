@@ -49,7 +49,7 @@ def _session_for(
     *,
     require_second_reviewer: bool = False,
 ) -> ReviewSession:
-    """The same session surface reconcile compare-review serves, headless."""
+    """The same session surface constituent-reconcile compare-review serves, headless."""
 
     left_side = compare.load_side(left, label="left")
     right_side = compare.load_side(right, label="right")

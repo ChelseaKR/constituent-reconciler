@@ -7,7 +7,7 @@ a disposable local civicrm/civicrm-docker Standalone instance, using only the
 repo's committed synthetic demo fixtures (examples/intake-demo/*.csv). No
 real client PII anywhere in this script or its inputs.
 
-Every `reconcile` invocation goes through the actual CLI entry point
+Every `constituent-reconcile` invocation goes through the actual CLI entry point
 (constituent_reconciler.cli.main) so this exercises the real, released code
 path, not a bespoke test harness. Live verification reads go straight to the
 CiviCRM API v4 endpoint with the standard library, mirroring exactly what
@@ -32,7 +32,7 @@ from pathlib import Path
 
 DEMO_DIR = Path(__file__).resolve().parent
 REPO = DEMO_DIR.parents[2]  # docs/connectors/<this dir>/ -> repo root
-RECONCILE_BIN = REPO / ".venv" / "bin" / "reconcile"
+RECONCILE_BIN = REPO / ".venv" / "bin" / "constituent-reconcile"
 RECIPE = DEMO_DIR / "recipe-live.toml"
 ENDPOINT = "http://127.0.0.1:8760/civicrm/ajax/api4"
 API_KEY = os.environ["CIVICRM_API_KEY"]  # never printed
@@ -63,7 +63,7 @@ def banner(title: str) -> None:
 
 
 def run_cli(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
-    """Invoke `reconcile` via subprocess -- the actual installed console_script."""
+    """Invoke `constituent-reconcile` via subprocess -- the actual installed console_script."""
     cmd = [str(RECONCILE_BIN), *args]
     log(f"$ {' '.join(cmd)}")
     result = subprocess.run(  # noqa: S603
@@ -123,14 +123,14 @@ def main() -> int:
         "sources:                examples/intake-demo/{existing,incoming}.csv (synthetic, planted ground truth)"
     )  # noqa: E501
 
-    banner("STEP 1: reconcile validate")
+    banner("STEP 1: constituent-reconcile validate")
     run_cli(["validate", "--config", str(RECIPE)])
 
-    banner("STEP 2: reconcile run --dry-run (preview, no write)")
+    banner("STEP 2: constituent-reconcile run --dry-run (preview, no write)")
     run_cli(["run", "--config", str(RECIPE), "--out", str(RUN1), "--dry-run"])
     assert not (RUN1 / "provenance.jsonl").exists(), "dry-run must write no provenance"
 
-    banner("STEP 3: reconcile run (first REAL write to live CiviCRM)")
+    banner("STEP 3: constituent-reconcile run (first REAL write to live CiviCRM)")
     run_cli(["run", "--config", str(RECIPE), "--out", str(RUN1)])
 
     banner("STEP 4: review the uncertain pairs, decided against the fixture's planted ground truth")  # noqa: E501
@@ -153,12 +153,12 @@ def main() -> int:
         log(f"  pair {pair.index}: {pair.left_id} / {pair.right_id} -> {verdict} (ground truth)")
     log(f"decisions written: {decisions_path}")
 
-    banner("STEP 5: reconcile apply (writes newly-confirmed merges to live CiviCRM)")
+    banner("STEP 5: constituent-reconcile apply (writes newly-confirmed merges to live CiviCRM)")
     apply1 = run_cli(
         ["apply", "--config", str(RECIPE), "--out", str(RUN1), "--decisions", str(decisions_path)]
     )
 
-    banner("STEP 6: reconcile verify (provenance hash chain)")
+    banner("STEP 6: constituent-reconcile verify (provenance hash chain)")
     run_cli(["verify", "--provenance", str(RUN1 / "provenance.jsonl")])
 
     banner("STEP 7: live verification reads against CiviCRM")
