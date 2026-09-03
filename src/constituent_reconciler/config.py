@@ -331,8 +331,23 @@ def load_recipe(
 
     recipe_path = Path(path)
     base = recipe_path.parent
-    with recipe_path.open("rb") as handle:
-        data = tomllib.load(handle)
+    # A path that cannot be opened is a recipe problem, reported the same
+    # way as a typo'd key, not a traceback. The README's first command points
+    # at examples/intake-demo/recipe.toml, which an installed wheel does not
+    # have until `reconcile demo` writes it, so the message says so.
+    try:
+        with recipe_path.open("rb") as handle:
+            data = tomllib.load(handle)
+    except FileNotFoundError:
+        raise RecipeError(
+            f"recipe not found: {recipe_path}. Pass --config the path to a "
+            "recipe.toml; for the bundled demo, run `reconcile demo` first, which "
+            "writes examples/intake-demo/recipe.toml under the current directory"
+        ) from None
+    except OSError as error:
+        raise RecipeError(f"recipe could not be read: {recipe_path} ({error.strerror})") from error
+    except tomllib.TOMLDecodeError as error:
+        raise RecipeError(f"recipe is not valid TOML: {recipe_path}: {error}") from error
     _validate_shape(data)
 
     input_section = data.get("input", {})

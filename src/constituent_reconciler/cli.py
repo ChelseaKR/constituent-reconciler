@@ -48,6 +48,7 @@ if TYPE_CHECKING:
 from constituent_reconciler.config import Recipe, RecipeError, load_recipe
 from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.consent import partition_by_consent
+from constituent_reconciler.demo import NEXT_STEP, DemoError, write_demo
 from constituent_reconciler.destruction import destroy, parse_retention
 from constituent_reconciler.evaluate import (
     KAPPA_GATE,
@@ -1447,6 +1448,31 @@ def _cmd_ai_triage(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_demo(args: argparse.Namespace) -> int:
+    """Write the bundled demos to disk so the README's ``--config`` paths exist.
+
+    The wheel carries ``examples/`` as package data (demo.py); this puts it
+    where the documented commands look. Idempotent over an identical tree
+    and fail-closed over a differing one, so running it inside a clone is a
+    no-op and running it over an edited demo stops before writing.
+    """
+
+    try:
+        report = write_demo(Path(args.dir))
+    except DemoError as error:
+        print(f"demo error: {error}", file=sys.stderr)
+        return 2
+    print(
+        f"demo: {len(report.written)} file(s) written to {report.target.as_posix()}, "
+        f"{len(report.present)} already present and identical"
+    )
+    for relative in report.written:
+        print(f"  {relative}")
+    print("next:")
+    print(f"  {NEXT_STEP.format(recipe=report.recipe.as_posix())}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="reconcile",
@@ -1809,6 +1835,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="override the recipe's policy pack (e.g. dv); fail-closed on unknown",
     )
     review_parser.set_defaults(func=_cmd_review)
+
+    demo_parser = sub.add_parser(
+        "demo",
+        help="write the bundled demos (examples/) to disk, so their recipes run from an "
+        "installed wheel the same as from a clone",
+    )
+    demo_parser.add_argument(
+        "--dir",
+        default="examples",
+        help="directory to write the demos into (default: examples, under the current "
+        "directory). A byte-identical file already there is left alone; one that "
+        "differs stops the command before anything is written",
+    )
+    demo_parser.set_defaults(func=_cmd_demo)
 
     validate_parser = sub.add_parser(
         "validate", help="check a recipe's shape and report its switches, without running"

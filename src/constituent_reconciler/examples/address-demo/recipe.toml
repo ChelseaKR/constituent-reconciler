@@ -1,0 +1,41 @@
+# recipe.toml — address-demo: shows address normalization in the match.
+#
+# Usage:
+#   reconcile run --config examples/address-demo/recipe.toml --out out
+#
+# The two source files write the same addresses two ways ("123 North Main
+# Street" versus "123 N Main St"). With address mapped and the deterministic
+# CASS-style backend, both reduce to "123 N MAIN ST", so the address becomes
+# agreement evidence in the match rather than a spurious mismatch.
+#
+# To use libpostal instead of the vendored ruleset, set:
+#   [normalize]
+#   address_backend = "libpostal"
+# which requires the libpostal C library and the 'postal' Python package.
+
+[input]
+existing = "existing.csv"
+incoming = "incoming.csv"
+id_column = "id"
+
+[mapping]
+first_name = "first"
+last_name  = "last"
+dob        = "dob"
+email      = "email"
+phone      = "phone"
+address    = "street"
+
+[normalize]
+address_backend = "deterministic"
+
+[consent]
+column = "consent"
+
+[thresholds]
+prior  = 0.01
+auto   = 0.97
+review = 0.80
+
+[output]
+connector = "csv"

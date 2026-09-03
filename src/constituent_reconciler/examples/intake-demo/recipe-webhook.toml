@@ -1,0 +1,40 @@
+# Push resolved, consented records to a generic webhook endpoint.
+#
+# For a destination with no dedicated connector (a Zapier/Make automation, an
+# org's own intake API). One POST per record, JSON body documented in
+# docs/connectors/webhook.md. The bearer token and HMAC signing secret are
+# read from the environment, never stored here.
+#
+#   WEBHOOK_TOKEN=your-token WEBHOOK_SIGNING_SECRET=your-secret \
+#     reconcile run --config recipe-webhook.toml --out out
+#
+# Use --dry-run to see what would be POSTed without contacting the endpoint.
+# Under the dv policy pack this connector is refused (non-local write target);
+# use civicrm_csv, salesforce_csv, or csv instead.
+
+[input]
+existing = "existing.csv"
+incoming = "incoming.csv"
+id_column = "id"
+
+[mapping]
+first_name = "First Name"
+last_name = "Last Name"
+dob = "DOB"
+email = "Email"
+phone = "Phone"
+
+[consent]
+column = "Consent"
+
+[thresholds]
+prior = 0.01
+auto = 0.97
+review = 0.80
+
+[output]
+connector = "webhook"
+endpoint = "https://example.org/hooks/constituent-reconciler"
+external_id_field = "external_identifier"
+auth_env = "WEBHOOK_TOKEN"
+signing_secret_env = "WEBHOOK_SIGNING_SECRET"

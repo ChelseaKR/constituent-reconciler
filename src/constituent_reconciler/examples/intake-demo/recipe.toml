@@ -1,0 +1,27 @@
+# Demo recipe: resolve an incoming intake batch against an existing record set.
+# Run from this directory:
+#   reconcile run --config recipe.toml --out out
+#   reconcile eval --config recipe.toml --truth ground_truth.json
+
+[input]
+existing = "existing.csv"
+incoming = "incoming.csv"
+id_column = "id"
+
+[mapping]
+first_name = "First Name"
+last_name = "Last Name"
+dob = "DOB"
+email = "Email"
+phone = "Phone"
+
+[consent]
+column = "Consent"
+
+[thresholds]
+prior = 0.01
+auto = 0.97
+review = 0.80
+
+[policy]
+pack = "default"
