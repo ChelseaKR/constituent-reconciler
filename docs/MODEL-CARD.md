@@ -98,7 +98,7 @@ PII-free telemetry are merge-blocking tests. The committed offline extraction
 fixture reports 100.0% precision and 94.1% recall in
 [`eval/extraction-report.md`](../eval/extraction-report.md), but that score does
 not measure Claude and is not presented as a hosted-model accuracy claim. The
-field-judge calibration gate is wired into `reconcile eval`: missing or drifting
+field-judge calibration gate is wired into `constituent-reconcile eval`: missing or drifting
 labels fail closed below Cohen's kappa 0.60. A deployer enabling Bedrock must
 benchmark its chosen model and document set before trusting refined fields.
 

@@ -3,7 +3,7 @@
 A non-technical reviewer steps through the uncertain candidate pairs, sees the
 two records side by side with their source spans, and approves or rejects each
 merge. The verdicts are written to ``decisions.json`` in the shape
-``reconcile apply`` consumes, so the web step replaces the hand-edited CSV
+``constituent-reconcile apply`` consumes, so the web step replaces the hand-edited CSV
 without changing the rest of the pipeline.
 
 Every verdict is attributed to a named reviewer with a timestamp, in the

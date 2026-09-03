@@ -8,7 +8,7 @@ of the package version.
 The contract: once the project reaches 1.0, a breaking change to any of these
 surfaces bumps the package MAJOR version and ships a migration note. Before 1.0,
 a surface may change with a MINOR bump and a CHANGELOG entry. A consumer can read
-these constants (or ``reconcile schema``) to check what it is integrating
+these constants (or ``constituent-reconcile schema``) to check what it is integrating
 against. The rationale is in docs/adr/0006-schema-stability.md.
 """
 
@@ -34,12 +34,12 @@ CONNECTOR_INTERFACE_VERSION = 1
 REPORT_SCHEMA_VERSION = 5
 
 # The decisions.json shape: approved/rejected lists of [left, right] record-id
-# pairs, written by the review session and consumed by ``reconcile apply``.
+# pairs, written by the review session and consumed by ``constituent-reconcile apply``.
 # Version 2 added the "audit" section (who decided each pair, and when) beside
 # the version-1 lists, which are kept as-is so ``apply`` reads both versions.
 DECISIONS_SCHEMA_VERSION = 2
 
-# The count-only migration_summary.json written by ``reconcile compare``:
+# The count-only migration_summary.json written by ``constituent-reconcile compare``:
 # matched, single-side, ambiguous, and conflicting identity counts, per-side
 # ingest accounting in count form, and the thresholds used. Never a field
 # value. Versioned on its own because the
@@ -48,7 +48,7 @@ DECISIONS_SCHEMA_VERSION = 2
 # run-report schema to parse it.
 MIGRATION_SUMMARY_SCHEMA_VERSION = 1
 
-# The reviewed correction file ``reconcile compare-apply`` writes for the
+# The reviewed correction file ``constituent-reconcile compare-apply`` writes for the
 # target side (target_corrections.csv) and the ``export`` section it adds to
 # compare_manifest.json. Version 1: one row per identity the target must add
 # or correct, columns from the chosen import field map plus the external-id
@@ -59,7 +59,7 @@ MIGRATION_SUMMARY_SCHEMA_VERSION = 1
 # column name still finds every column it had. A future column or manifest-key
 # change bumps this and ships a migration note.
 CUTOVER_CORRECTIONS_SCHEMA_VERSION = 2
-# The repair-plan artifact (repair_plan.json) that ``reconcile plan-split``
+# The repair-plan artifact (repair_plan.json) that ``constituent-reconcile plan-split``
 # writes: the old external id, the proposed split records, the fields needing
 # restoration, and the operations the destination supports. A versioned
 # surface from its first byte, per docs/adr/0012-connector-repair-capabilities.md.
@@ -76,7 +76,7 @@ REPAIR_PLAN_SCHEMA_VERSION = 2
 # vendor evidence fields.
 REPAIR_CAPABILITY_SCHEMA_VERSION = 1
 
-# The repair_approvals.json shape ``reconcile approve-repair`` writes: verdicts
+# The repair_approvals.json shape ``constituent-reconcile approve-repair`` writes: verdicts
 # keyed by the exact repair-plan digest they approved, reviewer name and
 # timestamp per verdict. Keying by digest, rather than overwriting a single
 # current approval, means a replanned cluster's new digest starts with zero
@@ -84,7 +84,7 @@ REPAIR_CAPABILITY_SCHEMA_VERSION = 1
 # still keeping every past digest's history for the audit trail.
 REPAIR_APPROVAL_SCHEMA_VERSION = 1
 
-# The repair_receipts.json shape ``reconcile apply-repair`` writes when it
+# The repair_receipts.json shape ``constituent-reconcile apply-repair`` writes when it
 # executes (never on a dry run): one entry per operation attempted, with the
 # before/after raw values a restoration or a split-create actually touched.
 # A PII-bearing artifact for the same reason repair_plan.json is: provenance

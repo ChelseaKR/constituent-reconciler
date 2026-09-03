@@ -92,7 +92,7 @@ src/constituent_reconciler`; docs/CLAIMS-AUDIT.md records the last audit.
 constituent-reconciler/
 ├── CLAUDE.md                      # this file
 ├── README.md                      # practitioner-facing
-├── pyproject.toml                 # PEP 621, console_scripts entry: reconcile
+├── pyproject.toml                 # PEP 621, console_scripts entry: constituent-reconcile (reconcile: deprecated alias until 0.9.0)
 ├── src/constituent_reconciler/
 │   ├── __init__.py                # public API surface, intentionally small
 │   ├── address.py                 # deterministic CASS-style standardizer, not USPS-certified
@@ -109,7 +109,7 @@ constituent-reconciler/
 │   │   ├── source_text.py         # reads real source-document text an OCR quote is checked against
 │   │   └── triage.py              # deterministic review-queue ordering; calls no model
 │   ├── cli.py                     # run/eval/compare(+-review/-apply)/review/apply/plan-split/approve-repair/apply-repair/report/validate/destroy/verify/schema/ai-explain/ai-ask/ai-propose-corrections/ai-triage
-│   ├── compare.py                 # read-only migration cutover comparison (reconcile compare)
+│   ├── compare.py                 # read-only migration cutover comparison (constituent-reconcile compare)
 │   ├── compare_apply.py           # reviewed, consent-gated local correction-file export (compare-apply)
 │   ├── config.py                  # recipe.toml loading: sources, connector, thresholds, policy pack
 │   ├── connectors/

@@ -29,10 +29,10 @@ imagining how it would sound.
 ## Setup
 
 1. `git clone` (or use a local checkout) and `make install`.
-2. `.venv/bin/reconcile run --config examples/intake-demo/recipe.toml --out out`
+2. `.venv/bin/constituent-reconcile run --config examples/intake-demo/recipe.toml --out out`
    to produce `out/decisions.json`'s prerequisites and a real review queue
    with the two known lookalike pairs from the demo fixture.
-3. `.venv/bin/reconcile review --config examples/intake-demo/recipe.toml --out out`
+3. `.venv/bin/constituent-reconcile review --config examples/intake-demo/recipe.toml --out out`
    and open the printed loopback URL.
 4. Pick one screen reader for the pass, matched to the OS in front of you:
    - macOS: VoiceOver (Cmd+F5), tested in Safari.
@@ -52,7 +52,7 @@ label that is technically present but confusing is worth recording.
    `aria-live="polite"`. Approve or reject a pair from a later step, then
    return to `/` — does the screen reader announce the updated count, or does
    the update pass silently?
-3. **The privacy banner** (DV pack). Re-run the setup's `reconcile review`
+3. **The privacy banner** (DV pack). Re-run the setup's `constituent-reconcile review`
    command with `--policy-pack dv` added. Does the screen reader announce the
    privacy banner (`role="status"`) without the user having to go looking for
    it, and without it interrupting whatever else is being read?

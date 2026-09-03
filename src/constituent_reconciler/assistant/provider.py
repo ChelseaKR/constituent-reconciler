@@ -15,7 +15,7 @@ Anthropic/``claude-sonnet-5`` for a deployer with normal API access.
 Both providers do a lazy import of their SDK (``anthropic`` or ``boto3``), so
 importing this module -- and therefore importing ``constituent_reconciler.
 assistant`` at all -- never requires either package installed.
-``reconcile run``, ``review``, and ``apply`` never import this module; the
+``constituent-reconcile run``, ``review``, and ``apply`` never import this module; the
 offline-first pipeline does not know it exists.
 
 Neither provider filters its input. Every caller is responsible for passing

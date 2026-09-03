@@ -40,7 +40,7 @@ outside and replays its failure accounting on a hit, so cached and uncached
 runs produce identical ingest reports.
 
 The cache directory holds normalized and extracted field values and is a PII
-artifact: ``reconcile destroy`` covers it (destruction.py), and the retention
+artifact: ``constituent-reconcile destroy`` covers it (destruction.py), and the retention
 inventory in docs/DATA-FLOW-AND-RETENTION.md lists it. Its location is the
 ``stage_cache`` directory under the run's output root unless the recipe's
 ``[cache]`` section names another local directory, which config.py validates
@@ -192,7 +192,7 @@ def resolve_cache_dir(recipe: Recipe, out_dir: Path) -> Path | None:
     Absent an explicit ``[cache] dir``, the cache lives under the run's local
     output root, which is what keeps the default DV posture intact: every
     retained artifact of a run, the cache included, sits inside one directory
-    the operator already controls and ``reconcile destroy`` already reaches.
+    the operator already controls and ``constituent-reconcile destroy`` already reaches.
     An explicit ``dir`` is the operator's own declared local retention
     boundary; config.py refuses non-local values at load time.
     """

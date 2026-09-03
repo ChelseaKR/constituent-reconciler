@@ -56,7 +56,7 @@ axe: axe-fixtures
 # Regenerate the committed eval report. Run after any change to matching.
 # The calibration flag arms the fail-closed kappa gate for the LLM field judge.
 eval:
-	.venv/bin/reconcile eval \
+	.venv/bin/constituent-reconcile eval \
 		--config examples/intake-demo/recipe.toml \
 		--truth examples/intake-demo/ground_truth.json \
 		--calibration examples/intake-demo/calibration_labels.json \
@@ -66,7 +66,7 @@ eval:
 # extractor or to eval/fixtures/extraction. Exits nonzero below the ledger
 # targets (precision 0.95, recall 0.90).
 eval-extraction:
-	.venv/bin/reconcile eval-extraction \
+	.venv/bin/constituent-reconcile eval-extraction \
 		--fixtures eval/fixtures/extraction \
 		--out eval/extraction-report.md
 
@@ -74,7 +74,7 @@ eval-extraction:
 # must be explicit in ground_truth.json; the report preserves misses rather
 # than reducing the fixture until every row looks green.
 eval-bias:
-	.venv/bin/reconcile eval \
+	.venv/bin/constituent-reconcile eval \
 		--config examples/bias-demo/recipe.toml \
 		--truth examples/bias-demo/ground_truth.json \
 		--calibration examples/bias-demo/calibration_labels.json \
@@ -175,7 +175,7 @@ perf-baseline-cached:
 
 # Run the demo end to end and write outputs to ./out.
 run:
-	.venv/bin/reconcile run --config examples/intake-demo/recipe.toml --out out
+	.venv/bin/constituent-reconcile run --config examples/intake-demo/recipe.toml --out out
 
 # Build the self-host image. See the Dockerfile header for run commands.
 docker:

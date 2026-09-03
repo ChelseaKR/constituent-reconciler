@@ -309,7 +309,7 @@ def test_render_pair_includes_the_cluster_preview_section(tmp_path: Path) -> Non
     _, _, session = _session(tmp_path)
     view = session.view(0)
     assert view is not None
-    html = render_pair(session, view, apply_command="reconcile apply --config r.toml")
+    html = render_pair(session, view, apply_command="constituent-reconcile apply --config r.toml")
     assert "What this creates" in html
     assert "golden record" in html
 
@@ -371,7 +371,7 @@ def test_two_person_mode_holds_a_single_approval(tmp_path: Path) -> None:
     counts = session.counts()
     assert counts.approved == 0 and counts.awaiting_second == 1
     # The held approval is in the audit trail but not in the approved list, so
-    # `reconcile apply` cannot merge it.
+    # `constituent-reconcile apply` cannot merge it.
     payload = json.loads((tmp_path / "decisions.json").read_text(encoding="utf-8"))
     assert payload["approved"] == []
     key = "|".join(sorted((view.left_id, view.right_id)))
@@ -748,7 +748,7 @@ def test_server_serves_over_loopback_and_records_a_decision(tmp_path: Path) -> N
     assert len(payload["approved"]) == 1
 
 
-# -- reconcile apply against the audit trail ----------------------------------
+# -- constituent-reconcile apply against the audit trail ----------------------------------
 
 
 def test_apply_refuses_a_file_awaiting_a_second_reviewer(
@@ -1117,6 +1117,6 @@ def test_correction_handler_validates_and_render_shows_attribution(tmp_path: Pat
     )
     assert bad.status == HTTPStatus.BAD_REQUEST
     session.correct(0, field="dob", side="right", value="1972-03-08")
-    html = render_pair(session, session.views()[0], apply_command="reconcile apply")
+    html = render_pair(session, session.views()[0], apply_command="constituent-reconcile apply")
     assert "Corrected to 1972-03-08 by casey" in html
     assert "corrections.json" in html

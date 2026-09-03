@@ -212,7 +212,7 @@ def test_cannot_links_keep_the_bad_cluster_from_re_forming(
 ) -> None:
     """Re-run reconciliation after planning: the split cluster must not return.
 
-    The decisions file's rejected pairs are exactly what ``reconcile apply``
+    The decisions file's rejected pairs are exactly what ``constituent-reconcile apply``
     loads as ``force_drop``, so this test replays them the way the next run
     would and asserts the two split members never share a cluster again.
     """

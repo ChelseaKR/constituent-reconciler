@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
+## [Unreleased]
+
+### Changed
+- **The command is `constituent-reconcile`.** The console script was named
+  `reconcile`, and PyPI already carries that name for an unrelated
+  distribution (`reconcile`, "a reconciliation loop system"), with a
+  `reconciler` beside it. Two packages that each install `bin/reconcile` do
+  not error on collision; whichever was installed last owns the name, and
+  nothing says so. Renaming before the first published release costs one
+  alias; renaming after it would cost every operator a broken script.
+  Subcommands, flags, recipes, and artifacts are unchanged:
+  `constituent-reconcile run --config recipe.toml` is the run it was.
+  `--help` and `--version` print the new name. The Makefile, the Docker
+  image's entrypoint, the README, the adoption kit, the offline-install
+  guide, the release runbook, and the retention and threat-model documents
+  say `constituent-reconcile`, and the committed eval reports credit it as
+  their generator. Dated records (`docs/reviews/`, the CiviCRM live
+  demonstration transcript, the ADRs, and this changelog's history) keep the
+  name they were written with.
+
+### Deprecated
+- **`reconcile` as a command name.** Installed alongside
+  `constituent-reconcile` and wired to the same entry function. Invoking it
+  prints one line to stderr naming the new command and the removal version;
+  stdout is untouched, so a script that captures the command's output sees no
+  change. Removed in 0.9.0.
+
 ## [0.8.0] - 2026-09-02
 
 ### Added

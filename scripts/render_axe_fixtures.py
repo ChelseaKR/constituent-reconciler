@@ -29,7 +29,7 @@ from constituent_reconciler.review.render import render_overview, render_pair  #
 from constituent_reconciler.review.session import APPROVED, REJECTED, ReviewSession  # noqa: E402
 
 EXAMPLE = REPO_ROOT / "examples" / "intake-demo" / "recipe.toml"
-APPLY_COMMAND = "reconcile apply --config recipe.toml --decisions decisions.json"
+APPLY_COMMAND = "constituent-reconcile apply --config recipe.toml --decisions decisions.json"
 
 
 def _session(tmp_path: Path, *, privacy: bool) -> ReviewSession:

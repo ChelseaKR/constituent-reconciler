@@ -40,17 +40,18 @@ from constituent_reconciler.stage_cache import CACHE_DIR_NAME, EXTRACT_STAGE, NO
 # construction, run_manifest.json and compare_manifest.json carry file digests
 # and configuration only, migration_summary.json carries counts only, and the
 # provenance log is the evidence of destruction itself). The cutover artifacts
-# come from ``reconcile compare`` and ``reconcile compare-apply`` (compare.py,
-# compare_apply.py) and hold field values, ids, or both, so they sort with the
-# record-bearing files. corrections.json holds reviewer-supplied replacement
-# values (review/session.py), which are field values, so it is listed too.
+# come from ``constituent-reconcile compare`` and ``constituent-reconcile
+# compare-apply`` (compare.py, compare_apply.py) and hold field values, ids,
+# or both, so they sort with the record-bearing files. corrections.json holds
+# reviewer-supplied replacement values (review/session.py), which are field
+# values, so it is listed too.
 # The stage cache is the one directory-shaped PII artifact; its files are
 # inventoried by ``_cache_entries`` below, bounded to the cache root the
 # pipeline wrote and to the exact entry shape the cache writes.
-# repair_plan.json is the split-repair plan ``reconcile plan-split`` writes:
+# repair_plan.json is the split-repair plan ``constituent-reconcile plan-split`` writes:
 # it holds raw field values for the members of one written cluster, so it is
 # destroyed here and the provenance log keeps only its digest. Its sibling
-# repair_receipts.json, written by ``reconcile apply-repair`` only on a real
+# repair_receipts.json, written by ``constituent-reconcile apply-repair`` only on a real
 # (non-dry-run) apply, holds the before/after raw values each operation
 # actually changed, so it is listed for the same reason; the provenance log
 # again keeps only each operation's receipt digest. repair_approvals.json is
@@ -62,7 +63,7 @@ from constituent_reconciler.stage_cache import CACHE_DIR_NAME, EXTRACT_STAGE, NO
 # whenever a recipe sets ``[household] enabled = true``: every row carries a
 # standardized street address and a surname for the members of one candidate
 # household, which are field values, so it destroys with the record-bearing
-# files. ai_ocr_proposals.json is written by ``reconcile
+# files. ai_ocr_proposals.json is written by ``constituent-reconcile
 # ai-propose-corrections`` (the write itself lives in cli.py, not in
 # assistant/ocr_propose.py, which only builds the proposal objects): each
 # entry carries the record's raw ``original_value``, the model's
@@ -120,7 +121,7 @@ NOT_DESTROYED: dict[str, str] = {
         "approved; the same content class as decisions.json's audit section"
     ),
     "run_manifest.json": "input file digests, column mappings, and thresholds; no field values",
-    "compare_manifest.json": "the same, for the two exports ``reconcile compare`` read",
+    "compare_manifest.json": "the same, for the two exports ``constituent-reconcile compare`` read",
     "run_summary.json": "per-stage counts and durations; content-free by construction",
     "run_report.json": (
         "counts plus the per-source data-quality aggregate (quality.py), already "
@@ -139,7 +140,7 @@ NOT_DESTROYED: dict[str, str] = {
         "call timestamps, carrying no record id, prompt, or field value"
     ),
     "labels.json": (
-        "an extraction-eval fixture ``reconcile eval-extraction`` reads; this "
+        "an extraction-eval fixture ``constituent-reconcile eval-extraction`` reads; this "
         "package never writes it, and it never lands in an out directory"
     ),
 }
@@ -199,7 +200,7 @@ def _cache_roots(out_dir: Path, cache_dir: Path | None) -> list[Path]:
     The ``stage_cache`` directory under the out root is always covered, since
     it is where the cache lives unless a recipe names another boundary. A
     recipe's explicit ``[cache] dir`` boundary is covered when the caller
-    passes it (the ``--cache-dir`` option on ``reconcile destroy``).
+    passes it (the ``--cache-dir`` option on ``constituent-reconcile destroy``).
     """
 
     default_root = out_dir / CACHE_DIR_NAME

@@ -93,7 +93,7 @@ def test_a_review_pair_inside_one_auto_glued_cluster_stays_reviewable(
     # The reviewer's threshold scenario: L1-L2 at 0.98 and L1-R1 at 0.99 are
     # confident merges that glue all three records into one cluster, while
     # L2-R1 at 0.85 lands in the review band. That uncertain pair must reach a
-    # human and mark the identity ambiguous, the way reconcile run routes
+    # human and mark the identity ambiguous, the way constituent-reconcile run routes
     # every review-band pair to review_queue.csv, instead of vanishing inside
     # a clean matched identity.
     left_csv = tmp_path / "scenario-left.csv"
@@ -271,7 +271,7 @@ def test_a_dv_pack_pdf_compare_side_fuses_the_cloud_seam_off(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Compare reuses the run pipeline's ingest, so a PDF side is subject to
-    # the same seam gating as reconcile run: under the dv pack the cloud seam
+    # the same seam gating as constituent-reconcile run: under the dv pack the cloud seam
     # is fused off before any page flows, even when the side's recipe asks
     # for the bedrock backend. The Bedrock seam class is replaced with a
     # refusal, so this test fails loudly if the compare path ever constructs

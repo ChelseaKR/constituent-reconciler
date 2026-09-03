@@ -1,4 +1,4 @@
-"""Tests for the ``reconcile`` command-line interface.
+"""Tests for the ``constituent-reconcile`` command-line interface.
 
 Exercised through ``main`` so argument parsing and command wiring are covered,
 not just the underlying pipeline functions tested elsewhere. The ``apply``

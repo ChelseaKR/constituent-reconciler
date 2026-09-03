@@ -77,7 +77,7 @@ The strongest claims live here and are enforced as tests.
   only, never with field values. Enforced by `tests/test_consent.py` and the
   DV-pack pipeline test in `tests/test_pipeline.py`.
 * Every write is recorded in an append-only, tamper-evident provenance log: a
-  BLAKE2b hash chain that `reconcile verify` checks. Timestamps come from a
+  BLAKE2b hash chain that `constituent-reconcile verify` checks. Timestamps come from a
   pluggable authority (the local clock by default; RFC 3161 trusted timestamping
   is the seam for production). Chain integrity and tamper detection are covered
   by `tests/test_provenance.py`.
@@ -143,7 +143,7 @@ extraction seam are published as [`docs/MODEL-CARD.md`](MODEL-CARD.md) and
 ## Accessibility
 
 The review queue is the human surface. As of v0.7 it is a local web UI
-(`reconcile review`) built to the WCAG 2.2 AA structural bar: a comparison table
+(`constituent-reconcile review`) built to the WCAG 2.2 AA structural bar: a comparison table
 with scoped headers, status carried by text and a symbol rather than colour
 alone, decision controls that work with the keyboard and with no JavaScript, and
 no external asset fetch. The axe AUTO-GATE now runs (`accessibility` job in

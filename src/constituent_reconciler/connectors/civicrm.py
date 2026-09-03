@@ -19,7 +19,7 @@ transport uses the standard library; no third-party HTTP dependency.
 
 This is also the pilot for ADR 0012's repair capabilities: ``inspect_repair``
 reads the live destination version, and ``apply_repair`` executes a
-``reconcile plan-split`` plan's ``field-restore`` and ``split-create``
+``constituent-reconcile plan-split`` plan's ``field-restore`` and ``split-create``
 operations, both idempotent by construction. Neither is reachable except
 through ``repair.apply_repair_plan``, which holds the second-reviewer gate;
 this module never checks reviewer counts itself.

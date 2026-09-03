@@ -1,7 +1,7 @@
 """constituent-reconciler: resolve and deduplicate nonprofit constituent records.
 
 Public API surface for v0.x is intentionally small. The supported entry points
-are the command-line interface (``reconcile``) and the functions re-exported
+are the command-line interface (``constituent-reconcile``) and the functions re-exported
 here. Everything else is internal and may change between minor releases until
 v1.0.
 """
