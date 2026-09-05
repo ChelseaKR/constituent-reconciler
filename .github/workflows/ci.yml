@@ -23,6 +23,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       # Actions are pinned to a full commit SHA per the portfolio supply-chain
       # standard; the trailing comment records the human-readable version.
@@ -34,6 +35,8 @@ jobs:
       - uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
       # Drive CI through the Makefile so it runs byte for byte the same path as
       # `make verify` does locally.
+        with:
+          enable-cache: true
       - name: Install
         run: make install
       - name: Verify (ruff format --check, ruff check, mypy --strict, pytest)
@@ -54,11 +57,14 @@ jobs:
   # docs/reviews/SCREEN-READER-WALKTHROUGH.md.
   accessibility:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
+        with:
+          enable-cache: true
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "22"
@@ -74,11 +80,14 @@ jobs:
   # `verify` so it is its own required status check and its own log/timeout.
   security:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
+        with:
+          enable-cache: true
       - name: Install
         run: make install
       # osv-scanner has no first-party step-style action with a pinnable SHA
@@ -101,6 +110,7 @@ jobs:
   # https://github.com/gitleaks/gitleaks-action.
   secrets:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -117,6 +127,7 @@ jobs:
   # than a marketplace action (Semgrep ships no SHA-pinnable step action).
   sast:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     container:
       image: semgrep/semgrep@sha256:59fbed6127ea7c5dde3ba6a85142733bb20ea9aaa36120c953904f1539aaf66e # 1.168.0
     steps:
@@ -135,6 +146,7 @@ jobs:
   # expected; verified locally before this job was added.
   zizmor:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       security-events: write # to upload the SARIF report to Code Scanning
@@ -150,6 +162,7 @@ jobs:
   # daemon was available in that environment; verify on the first real PR.
   container-scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -169,6 +182,7 @@ jobs:
   # air-gapped environments.
   bundle:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       id-token: write # required for Sigstore keyless signing on main pushes
@@ -201,6 +215,7 @@ jobs:
   # data download are too heavy — and advisory — for the merge path.
   libpostal:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     continue-on-error: true
     env:
@@ -210,6 +225,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
+        with:
+          enable-cache: true
       - name: Restore libpostal build and data
         id: cache-libpostal
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
