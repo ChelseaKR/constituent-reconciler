@@ -187,17 +187,18 @@ pip install -e ".[extract]"
 a registry install. See [docs/ROADMAP.md](docs/ROADMAP.md) for the Trusted
 Publishing plan.)
 
-To install a tagged release without cloning, use the Git ref directly — this
-repository's `release.yml` publishes a GitHub Release with a wheel and sdist,
-and there is deliberately no PyPI publish stage, so there is no
-`pip install constituent-reconciler` to run:
+To install without cloning, use the Git ref directly — there is deliberately
+no PyPI publish stage, so there is no `pip install constituent-reconciler` to
+run:
 
 ```sh
-uvx --from git+https://github.com/ChelseaKR/constituent-reconciler@v0.8.0 constituent-reconcile --help
+uvx --from git+https://github.com/ChelseaKR/constituent-reconciler@main constituent-reconcile --help
 ```
 
-The wheel and sdist attached to that GitHub Release are the same artifacts,
-if you would rather install a downloaded file.
+No `v*` tag has been cut yet, so there is no tagged release to pin to and no
+GitHub Release artifacts to download; `release.yml` is tag-triggered and still
+unexercised (the Release & Versioning row below says the same). Substitute a
+commit SHA for `main` if you need a fixed input.
 
 The bundled demos below need the repository, not just the wheel: `examples/`
 is committed at the repository root and ships in the sdist, but a wheel
