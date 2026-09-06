@@ -135,11 +135,24 @@ def _render_markdown(results: dict[str, Any]) -> str:
     lines.append("")
     lines.append(f"`{provenance_line(leak)}`")
     lines.append("")
+    # `checks_run` counts pack iterations, and every assertion this eval makes
+    # is inside `for field_name in withheld`. Publishing only the iteration
+    # count let a run that asserted nothing read as a clean one, so the count
+    # of field assertions is printed beside it as the real denominator.
     lines.append(
         f"Deterministic (no model call): {leak['checks_run']} checks across "
-        f"{leak['fixture_cases']} fixtures x {len(leak['policy_packs_checked'])} policy packs. "
+        f"{leak['fixture_cases']} fixtures x {len(leak['policy_packs_checked'])} policy packs, "
+        f"making {leak['fields_asserted']} field-level assertions. "
         f"**Leaks found: {leak['leaks_found']}.** Gate: **{'PASS' if leak['pass'] else 'FAIL'}**."
     )
+    if leak["cases_with_nothing_withheld"]:
+        lines.append("")
+        lines.append(
+            "Fixture cases withholding no field under any policy pack: "
+            f"{leak['cases_with_nothing_withheld']}. Each fixture is built so consent does "
+            "not clear the gate for at least one field, so this run tested less than it "
+            "was written to test."
+        )
     lines.append("")
 
     lines.append("## 5. Unanswerable / query-structuring (refused to guess)")

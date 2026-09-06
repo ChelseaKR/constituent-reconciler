@@ -47,6 +47,25 @@ def _build_consent(case: dict[str, object]) -> Consent:
 def run() -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
     checked = 0
+    # The real denominator. `checked` counts pack iterations; every assertion
+    # this eval makes is inside `for field_name in withheld`, so a run where
+    # nothing is withheld makes none of them and `checked` does not move.
+    # Measured 2026-09-06 on the committed fixtures: 15 pack iterations,
+    # 28 field assertions. With `filter_record` replaced by one that withholds
+    # nothing and passes every sentinel value through to the payload, the eval
+    # reported `checks_run: 15, leaks_found: 0, pass: True`. That is the same
+    # defect `evaluate.rate` was given `None` for in #160: a measurement over an
+    # empty denominator read as a clean result.
+    fields_asserted = 0
+    # Each fixture is built so consent does not clear the gate for at least one
+    # field, under at least one pack. The module docstring has always said so
+    # and nothing checked it, so a fixture that stopped withholding, or a filter
+    # that stopped withholding for it, was silent. Scoped to the case and not to
+    # the case-and-pack pair on purpose: `default` is the permissive pack and a
+    # fixture written for `hipaa` may clear it legitimately. Measured on the
+    # committed fixtures, all five clear `default` and none clears `dv` or
+    # `hipaa`, so five of the fifteen published "checks" assert nothing today.
+    cases_with_nothing_withheld: list[int] = []
 
     for index, case in enumerate(CONSENT_LEAKAGE_CASES):
         fields = cast(tuple[str, ...], case["fields"])
@@ -60,11 +79,14 @@ def run() -> dict[str, Any]:
             consent=consent,
         )
 
+        withheld_for_case: set[str] = set()
         for pack in ("default", "dv", "hipaa"):
             policy = policy_for(pack)
             filtered = filter_record(record, policy=policy, fields=fields, as_of=date(2026, 1, 1))
             checked += 1
             withheld = set(filtered.withheld_fields())
+            withheld_for_case |= withheld
+            fields_asserted += len(withheld)
             payload_text = json.dumps({f.name: f.value for f in filtered.fields}, sort_keys=True)
             for field_name in withheld:
                 sentinel = _SENTINEL_VALUES[field_name]
@@ -103,6 +125,7 @@ def run() -> dict[str, Any]:
             prompt_payload = json.dumps(
                 evidence_payload(evidence, withheld_fields=tuple(withheld)), sort_keys=True
             )
+            fields_asserted += len(withheld)
             for field_name in withheld:
                 sentinel = _SENTINEL_VALUES[field_name]
                 if sentinel in prompt_payload:
@@ -115,6 +138,9 @@ def run() -> dict[str, Any]:
                         }
                     )
 
+        if not withheld_for_case:
+            cases_with_nothing_withheld.append(index)
+
     provenance = Provenance.stamp(
         provider="none (deterministic, no model call)", model="n/a", status="deterministic"
     )
@@ -124,7 +150,19 @@ def run() -> dict[str, Any]:
         "policy_packs_checked": ["default", "dv", "hipaa"],
         "fixture_cases": len(CONSENT_LEAKAGE_CASES),
         "checks_run": checked,
+        # The real denominator, published beside the iteration count rather
+        # than gated on. `fields_asserted > 0` would be implied by the premise
+        # condition below, so gating on it too would put a clause in the pass
+        # condition that no sabotage can reach on its own: a control that
+        # cannot go red is the defect this eval exists to catch, and it should
+        # not be in the fix for it. Both clauses below fail independently.
+        "fields_asserted": fields_asserted,
+        "cases_with_nothing_withheld": cases_with_nothing_withheld,
         "leaks_found": len(findings),
-        "pass": len(findings) == 0,
+        # Two conditions, not one. A leak is a finding. So is a run that could
+        # not have found one: every fixture is built so consent does not clear
+        # the gate for at least one field, and a run where some fixture
+        # withholds nothing under any pack tested less than it was written to.
+        "pass": len(findings) == 0 and not cases_with_nothing_withheld,
         "findings": findings,
     }
