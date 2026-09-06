@@ -39,6 +39,47 @@ See `docs/CLAIMS-AUDIT.md`'s repair row for what shipped and where the tests
 live. The recurring-maintenance consequence the option named is now real:
 CiviCRM releases after 6.17.2 are unsupported for repair until re-verified.
 
+**Update 2026-09-06.** The table above is the 2026-08-15 snapshot and is kept
+as one; this is where it stands now. Four of the original ten have closed:
+#78 and #79 (both recorded on this page), and #83 and #84, whose pull requests
+merged. Six remain open -- #66, #67, #68, #69, #70, #80 -- and every one is
+still blocked for the reason its section below gives.
+
+Five issues were imported from the roadmaps on 2026-09-05 and are not covered
+above. Triaged into the same categories:
+
+| Issue | Category | Holding it |
+| --- | --- | --- |
+| #134, UC-03 reviewed remote repair | **closed 2026-09-06, already done** | nothing -- the live run of 2026-08-21 is the evidence |
+| #135, DPG registry nomination | Needs an act only the maintainer can perform | filing it; the preparation is finished |
+| #136, UC-08 human-gate kernel | Conditional, not deferred | a second shipping consumer whose decision object is not a constituent pair |
+| #137, UC-07 outreach synchronization | Needs a real outreach partner | partner validation, which the roadmap puts *before* the design work |
+| #138, remove the `reconcile` alias | Code-only, but **timed** | nothing; it lands at 0.9.0 |
+
+#138 is the one item on this page that no one else is holding, and it is still
+not doable now. The 0.8.0 changelog published a deprecation notice naming
+0.9.0 as the removal version, and the alias prints that same version at
+runtime (`cli.DEPRECATED_PROG_REMOVED_IN`). Removing it earlier would make the
+notice untrue for the release that shipped it. So it is scheduled work, not
+available work, and it should stay open until the 0.9.0 branch.
+
+One correction to the #67 section below, which was written before the live
+instance existed. It says the exercise has not happened. Most of it has: on
+2026-08-21 a disposable CiviCRM 6.17.2 instance was stood up and the
+demonstration was driven end to end against it, including the rerun showing
+updates rather than duplicates, email and phone landing in dedicated entities,
+a revoked-consent record never reaching CiviCRM, and `verify` passing over
+both runs (`docs/reviews/CIVICRM-LIVE-DEMONSTRATION-2026-08-21.md`). What is
+still missing is the one thing that evidence note says it is not: a published,
+dated *recording*. That is the whole of what #67 now waits on, which makes it
+smaller than this page currently implies -- but not closed, and the note is
+careful not to claim otherwise.
+
+So: of eleven issues open this morning, one closed as already done, and the
+remaining ten are unchanged in kind. Nine wait on the maintainer, on people
+she has to recruit, or on organizations that have not adopted the tool yet.
+The tenth waits on a version number.
+
 ## Code, doable now
 
 **#83, a merged identity's consent.** Implemented. Merging took the survivor's
