@@ -167,6 +167,17 @@ class ConstantScoreBackend:
         return emitted
 
 
+def _num(value: float | None) -> str:
+    """Format a rate for a control's expectation or observation line.
+
+    ``None`` means the rate had no denominator, so there is nothing to compare.
+    It is spelled out rather than printed as a number, because every constant a
+    control could substitute here reads as a result.
+    """
+
+    return "no evidence" if value is None else f"{value:.4f}"
+
+
 def _base_rate(n_true_pairs: int, n_records: int) -> float:
     """Chance that an arbitrary pair of records is a true duplicate."""
 
@@ -224,21 +235,45 @@ def shuffled_labels_control(
         ).precision_coverage
         for _ in range(rounds)
     ]
-    mean = sum(observed) / len(observed) if observed else 0.0
+    # A permutation that surfaced nothing has an undefined coverage precision.
+    # Averaging it in as a zero would drag the mean under the bound and pass the
+    # control on rounds that measured nothing, so undefined rounds are counted
+    # and any of them fails the control instead.
+    measured = [value for value in observed if value is not None]
+    unmeasured = len(observed) - len(measured)
+    mean = sum(measured) / len(measured) if measured else None
+    worst = max(measured, default=None)
     return ControlOutcome(
         name="shuffled-labels",
         rules_out="a ground-truth file that is not actually being read",
         expectation=(
             f"mean coverage precision over {rounds} seeded permutations falls to at most "
             f"{tolerance:g}x the base rate ({bound:.4f}); real precision is "
-            f"{real.precision_coverage:.4f}"
+            f"{_num(real.precision_coverage)}"
         ),
         observed=(
-            f"mean {mean:.4f}, worst permutation {max(observed, default=0.0):.4f}, "
+            f"mean {_num(mean)}, worst permutation {_num(worst)}, "
             f"base rate {base_rate:.4f}"
+            + (f", {unmeasured} permutations surfaced nothing to score" if unmeasured else "")
         ),
-        passed=mean <= bound,
+        passed=unmeasured == 0 and mean is not None and mean <= bound,
     )
+
+
+def _rate_rose(baseline: float | None, sabotaged: float | None) -> bool:
+    """Did the gated rate move up under the sabotage?
+
+    ``sabotaged`` being ``None`` fails: a control that produced no measurement
+    has not shown the metric can move. A ``None`` baseline means the real run
+    auto-merged nothing, so there is no number to rise above; the sabotage then
+    has to produce a rate above zero for the comparison to say anything.
+    """
+
+    if sabotaged is None:
+        return False
+    if baseline is None:
+        return sabotaged > 0.0
+    return sabotaged > baseline
 
 
 def null_matcher_control(
@@ -283,8 +318,8 @@ def null_matcher_control(
             f"{review_threshold:.4f}: auto recall and coverage recall must both be 0"
         ),
         observed=(
-            f"auto recall {low.recall_auto:.4f} over {low.n_auto} auto pairs, "
-            f"coverage recall {low.recall_coverage:.4f}"
+            f"auto recall {_num(low.recall_auto)} over {low.n_auto} auto pairs, "
+            f"coverage recall {_num(low.recall_coverage)}"
         ),
         passed=low.n_auto == 0 and low.recall_coverage == 0.0,
         scope=(
@@ -311,13 +346,16 @@ def null_matcher_control(
         expectation=(
             f"every candidate rescored at the auto threshold {auto_threshold:.4f}: all of "
             f"them auto-merge, and the gated false-merge rate must rise above the real "
-            f"run's {real.false_merge_rate:.4f}"
+            f"run's {_num(real.false_merge_rate)}"
         ),
         observed=(
-            f"{high.n_auto} auto pairs, false-merge rate {high.false_merge_rate:.4f}, "
-            f"auto precision {high.precision_auto:.4f}, all-pairs base rate {base_rate:.4f}"
+            f"{high.n_auto} auto pairs, false-merge rate {_num(high.false_merge_rate)}, "
+            f"auto precision {_num(high.precision_auto)}, all-pairs base rate {base_rate:.4f}"
         ),
-        passed=high.n_auto == len(candidates) and high.false_merge_rate > real.false_merge_rate,
+        passed=(
+            high.n_auto == len(candidates)
+            and _rate_rose(real.false_merge_rate, high.false_merge_rate)
+        ),
         scope=(
             "re-scores the candidate pairs the real run produced; blocking is held fixed "
             "and is not what this control tests"

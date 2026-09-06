@@ -55,7 +55,7 @@ from pathlib import Path
 
 from constituent_reconciler import decisions, pipeline
 from constituent_reconciler.config import load_recipe
-from constituent_reconciler.evaluate import EvalReport, evaluate
+from constituent_reconciler.evaluate import EvalReport, evaluate, format_rate, gate_holds
 from constituent_reconciler.models import Pair, Record
 from constituent_reconciler.report import render_eval_markdown
 from tools.benchmark.febrl4 import UPSTREAM_BASE, UPSTREAM_COMMIT, compose_address
@@ -336,8 +336,8 @@ def render_sweep_table(sweep: list[tuple[float, EvalReport]]) -> list[str]:
     ]
     for threshold, report in sweep:
         lines.append(
-            f"| {threshold:.3f} | {report.precision_auto * 100:.1f}% "
-            f"| {report.recall_auto * 100:.1f}% | {report.f1_auto * 100:.1f}% "
+            f"| {threshold:.3f} | {format_rate(report.precision_auto)} "
+            f"| {format_rate(report.recall_auto)} | {format_rate(report.f1_auto)} "
             f"| {report.false_merges} | {report.n_auto} |"
         )
     return lines
@@ -402,7 +402,7 @@ def run(
     lines += render_sweep_table(sweep)
 
     full = markdown + "\n".join(lines) + "\n"
-    return full, report, report.false_merge_rate <= gate
+    return full, report, gate_holds(report.false_merge_rate, gate)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -422,12 +422,13 @@ def main(argv: list[str] | None = None) -> int:
     report_out.write_text(markdown, encoding="utf-8")
     print(f"wrote benchmark eval report: {report_out}")
     print(
-        f"false-merge rate {report.false_merge_rate * 100:.2f}% "
+        f"false-merge rate {format_rate(report.false_merge_rate, digits=2)} "
         f"({report.false_merges}/{report.n_auto}), gate {'PASS' if gate_pass else 'FAIL'}"
     )
     print(
-        f"coverage precision {report.precision_coverage * 100:.1f}%, "
-        f"recall {report.recall_coverage * 100:.1f}%, F1 {report.f1_coverage * 100:.1f}%"
+        f"coverage precision {format_rate(report.precision_coverage)}, "
+        f"recall {format_rate(report.recall_coverage)}, "
+        f"F1 {format_rate(report.f1_coverage)}"
     )
     return 0 if gate_pass else 1
 

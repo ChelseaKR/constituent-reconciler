@@ -12,9 +12,12 @@ from collections.abc import Sequence
 from constituent_reconciler.controls import ControlsReport
 from constituent_reconciler.evaluate import (
     KAPPA_GATE,
+    UNMEASURED,
     CalibrationReport,
     EvalReport,
     ExtractionReport,
+    format_rate,
+    gate_holds,
 )
 from constituent_reconciler.models import IngestReport, RunResult
 from constituent_reconciler.quality import SourceQuality
@@ -134,8 +137,8 @@ def _render_ingest(ingest: IngestReport) -> list[str]:
     return lines
 
 
-def _pct(value: float) -> str:
-    return f"{value * 100:.1f}%"
+def _pct(value: float | None) -> str:
+    return format_rate(value)
 
 
 def _ci(interval: tuple[float, float]) -> str:
@@ -285,8 +288,18 @@ def render_eval_markdown(
     a sabotage result and a measurement are different claims, and mixing them
     would make the report's own numbers ambiguous.
     """
-    gate_pass = report.false_merge_rate <= gate_threshold
+    # A rate with no denominator is not a rate that came out well. The gate is
+    # fail-closed on it, the same way the kappa gate below is fail-closed on an
+    # empty label set: a run that auto-merged nothing has not demonstrated a
+    # false-merge rate of zero, it has demonstrated nothing.
+    gate_pass = gate_holds(report.false_merge_rate, gate_threshold)
     gate_word = "PASS" if gate_pass else "FAIL"
+    if report.false_merge_rate is None:
+        gate_observation = (
+            f"{UNMEASURED}: {report.n_auto} auto-merged pairs, so the rate has no denominator"
+        )
+    else:
+        gate_observation = f"observed {_pct(report.false_merge_rate)}"
     provenance_text = (
         provenance.strip() if provenance and provenance.strip() else DEFAULT_PROVENANCE
     )
@@ -337,7 +350,7 @@ def render_eval_markdown(
         "## Gate",
         "",
         f"False-merge gate at threshold {_pct(gate_threshold)}: **{gate_word}** "
-        f"(observed {_pct(report.false_merge_rate)}).",
+        f"({gate_observation}).",
         "",
         "Recall at the auto level is intentionally below 100%: pairs the matcher "
         "is unsure about are not auto-merged, they are sent to review. The "
@@ -380,8 +393,10 @@ def render_extraction_markdown(
     precision_target: float = 0.95,
     recall_target: float = 0.90,
 ) -> str:
-    precision_ok = report.precision >= precision_target
-    recall_ok = report.recall >= recall_target
+    # None means the denominator was empty, so the target was not demonstrated.
+    # Fail closed: an unmeasured extractor has not met a ledger target.
+    precision_ok = report.precision is not None and report.precision >= precision_target
+    recall_ok = report.recall is not None and report.recall >= recall_target
     verdict = "MET" if precision_ok and recall_ok else "NOT MET"
 
     lines = [

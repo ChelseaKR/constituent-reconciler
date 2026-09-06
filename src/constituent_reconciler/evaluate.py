@@ -9,6 +9,15 @@ and a normal-approximation interval would understate the uncertainty.
 Ground truth is given as clusters of record ids. All within-cluster pairs are the
 true duplicates; everything else is a true non-duplicate.
 
+Every rate here is ``float | None``. ``None`` means the denominator was zero, so
+the quantity was never measured. It is deliberately not ``0.0`` and not ``1.0``:
+both of those are the *best possible* value for one of these metrics, so
+substituting either publishes an absent measurement as a good one. That is what
+let a run whose matcher had been replaced by a constant -- nothing auto-merged,
+so the false-merge denominator was zero -- report a 0.0% false-merge rate and
+pass the gate. :func:`wilson_interval` already followed this rule by returning
+the widest honest ``(0, 1)`` on no trials; the point estimates now do too.
+
 Extraction is scored separately by ``extraction_metrics``: field-level precision
 and recall of the PDF extractor against a hand-labeled fixture set, compared on
 normalized values so that formatting differences do not count as errors.
@@ -53,8 +62,49 @@ def wilson_interval(successes: int, trials: int, z: float = 1.96) -> tuple[float
     return (max(0.0, center - margin), min(1.0, center + margin))
 
 
-def f1_score(precision: float, recall: float) -> float:
+#: What a report prints where a rate would go when the rate has no denominator.
+#: A phrase and not a number, so an unmeasured cell cannot be read, sorted, or
+#: compared as though it were a result.
+UNMEASURED = "no evidence"
+
+
+def format_rate(value: float | None, *, digits: int = 1) -> str:
+    """A rate as a percentage string, or :data:`UNMEASURED` when it is undefined."""
+
+    if value is None:
+        return UNMEASURED
+    return f"{value * 100:.{digits}f}%"
+
+
+def gate_holds(value: float | None, ceiling: float) -> bool:
+    """Is ``value`` a measured rate at or under ``ceiling``?
+
+    ``None`` never holds. A gate whose metric was not measured has not been
+    satisfied; it has not been evaluated, and the two must not read alike.
+    """
+
+    return value is not None and value <= ceiling
+
+
+def rate(numerator: int, denominator: int) -> float | None:
+    """A proportion, or ``None`` when there were no cases to measure.
+
+    Returning ``None`` rather than a number is the whole point: a rate over an
+    empty denominator is undefined, and every constant that could stand in for
+    it here (0.0 for an error rate, 1.0 for a precision) is the value that reads
+    as success.
+    """
+
+    if denominator <= 0:
+        return None
+    return numerator / denominator
+
+
+def f1_score(precision: float | None, recall: float | None) -> float | None:
     """Harmonic mean of precision and recall; 0.0 when both are 0.
+
+    ``None`` when either input is undefined: an F1 built from a metric that was
+    never measured is not a measurement.
 
     Reported alongside, never instead of, the false-merge rate. F1 weighs a
     false merge and a missed match equally, and this pipeline does not: a false
@@ -64,6 +114,8 @@ def f1_score(precision: float, recall: float) -> float:
     benchmark result can be read against published ones.
     """
 
+    if precision is None or recall is None:
+        return None
     if precision <= 0.0 and recall <= 0.0:
         return 0.0
     return 2.0 * precision * recall / (precision + recall)
@@ -102,20 +154,22 @@ class EvalReport:
     n_auto: int
     n_review: int
 
+    #: ``None`` when no pairs were auto-merged: the gated rate has no
+    #: denominator and was not measured. See the module docstring.
     false_merges: int
-    false_merge_rate: float
+    false_merge_rate: float | None
     false_merge_ci: tuple[float, float]
 
     missed: int
-    missed_match_rate: float
+    missed_match_rate: float | None
     missed_match_ci: tuple[float, float]
 
-    precision_auto: float
-    recall_auto: float
-    precision_coverage: float
-    recall_coverage: float
-    f1_auto: float
-    f1_coverage: float
+    precision_auto: float | None
+    recall_auto: float | None
+    precision_coverage: float | None
+    recall_coverage: float | None
+    f1_auto: float | None
+    f1_coverage: float | None
 
     #: True pairs that never reached the scorer's output at all. The name is
     #: historical and reads narrower than the number is: a pair lands here
@@ -250,12 +304,12 @@ def evaluate(
     coverage = auto | review
 
     false_merges = len(auto - truth)
-    fmr = false_merges / len(auto) if auto else 0.0
+    fmr = rate(false_merges, len(auto))
 
     caught_auto = len(auto & truth)
     caught_cov = len(coverage & truth)
     missed = truth - coverage
-    missed_rate = len(missed) / len(truth) if truth else 0.0
+    missed_rate = rate(len(missed), len(truth))
     segment_scores: list[SegmentScore] = []
     if segments:
         for name, segment_truth in sorted(_segment_truth_pairs(segments, truth).items()):
@@ -272,10 +326,10 @@ def evaluate(
                 )
             )
 
-    precision_auto = (caught_auto / len(auto)) if auto else 1.0
-    recall_auto = (caught_auto / len(truth)) if truth else 1.0
-    precision_coverage = (caught_cov / len(coverage)) if coverage else 1.0
-    recall_coverage = (caught_cov / len(truth)) if truth else 1.0
+    precision_auto = rate(caught_auto, len(auto))
+    recall_auto = rate(caught_auto, len(truth))
+    precision_coverage = rate(caught_cov, len(coverage))
+    recall_coverage = rate(caught_cov, len(truth))
 
     return EvalReport(
         n_records=n_records,
@@ -341,14 +395,12 @@ class FieldScore:
     fn: int
 
     @property
-    def precision(self) -> float:
-        denom = self.tp + self.fp
-        return self.tp / denom if denom else 1.0
+    def precision(self) -> float | None:
+        return rate(self.tp, self.tp + self.fp)
 
     @property
-    def recall(self) -> float:
-        denom = self.tp + self.fn
-        return self.tp / denom if denom else 1.0
+    def recall(self) -> float | None:
+        return rate(self.tp, self.tp + self.fn)
 
 
 @dataclass(frozen=True)
@@ -363,8 +415,8 @@ class ExtractionReport:
     fp: int
     fn: int
 
-    precision: float
-    recall: float
+    precision: float | None
+    recall: float | None
     precision_ci: tuple[float, float]
     recall_ci: tuple[float, float]
 
@@ -387,9 +439,10 @@ def extraction_metrics(
     once as a false positive. Unmatched predictions are false positives and
     unmatched labels are false negatives. Documents present on only one side
     still count: predictions without labels are all false positives, labels
-    without predictions are all false negatives. Precision and recall follow
-    the convention above of 1.0 on an empty denominator, with Wilson intervals
-    (which return the widest honest (0, 1) in that case).
+    without predictions are all false negatives. Precision and recall are
+    ``None`` on an empty denominator rather than the 1.0 they used to report,
+    for the reason in the module docstring, and the Wilson intervals return the
+    widest honest (0, 1) in that case.
     """
 
     tp_by_field: Counter[str] = Counter()
@@ -425,8 +478,8 @@ def extraction_metrics(
         tp=tp,
         fp=fp,
         fn=fn,
-        precision=tp / (tp + fp) if tp + fp else 1.0,
-        recall=tp / (tp + fn) if tp + fn else 1.0,
+        precision=rate(tp, tp + fp),
+        recall=rate(tp, tp + fn),
         precision_ci=wilson_interval(tp, tp + fp),
         recall_ci=wilson_interval(tp, tp + fn),
         per_field={

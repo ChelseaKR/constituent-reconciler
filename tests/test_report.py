@@ -138,3 +138,46 @@ def test_calibration_section_says_not_applicable_when_no_field_judge_ran() -> No
 
 def test_calibration_section_still_fails_closed_when_the_judge_was_in_the_path() -> None:
     assert "**FAIL** (no labels)" in render_eval_markdown(_eval_report(), dataset="intake-demo")
+
+
+def _no_auto_eval_report() -> EvalReport:
+    """A run whose matcher scored every pair into review and nothing into auto."""
+
+    banded = band_pairs(
+        [("a", "b", 0.90), ("x", "y", 0.90)],
+        auto_threshold=0.97,
+        review_threshold=0.80,
+    )
+    return evaluate(banded, [["a", "b"], ["x", "y"]], n_records=4)
+
+
+def test_eval_markdown_reports_an_unmeasured_gated_rate_as_absent_not_as_zero() -> None:
+    report = _no_auto_eval_report()
+    assert report.n_auto == 0
+    markdown = render_eval_markdown(report, dataset="demo")
+    # The headline row must not carry a percentage it did not measure.
+    assert "| **False-merge rate (gated)** | **no evidence** (0/0) |" in markdown
+    assert "**0.0%** (0/0)" not in markdown
+
+
+def test_eval_markdown_gate_fails_when_the_gated_rate_was_never_measured() -> None:
+    markdown = render_eval_markdown(_no_auto_eval_report(), dataset="demo")
+    assert "False-merge gate at threshold 0.0%: **FAIL**" in markdown
+    assert "no evidence: 0 auto-merged pairs" in markdown
+    assert "**PASS** (observed" not in markdown
+
+
+def test_eval_markdown_gate_still_passes_on_a_measured_zero() -> None:
+    """The complement: a real zero over a real denominator is still a pass."""
+
+    banded = band_pairs(
+        [("a", "b", 0.99), ("x", "y", 0.99)],
+        auto_threshold=0.97,
+        review_threshold=0.80,
+    )
+    report = evaluate(banded, [["a", "b"], ["x", "y"]], n_records=4)
+    assert report.n_auto == 2
+    markdown = render_eval_markdown(report, dataset="demo")
+    assert "| **False-merge rate (gated)** | **0.0%** (0/2) |" in markdown
+    assert "False-merge gate at threshold 0.0%: **PASS** (observed 0.0%)." in markdown
+    assert "no evidence" not in markdown

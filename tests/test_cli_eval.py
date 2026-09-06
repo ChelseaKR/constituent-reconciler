@@ -101,8 +101,8 @@ def test_eval_exits_one_when_a_control_fails(tmp_path: Path, monkeypatch: object
 
     The scorer is replaced with a constant 0.9: above the review threshold and
     below the auto threshold, so nothing auto-merges and the gated false-merge
-    rate is `0/0`, which renders as **0.0%** and reads as a PASS. Every gate
-    that existed before the controls is green on this run.
+    rate has no denominator. Until #159 that `0/0` rendered as **0.0%** and read
+    as a PASS, and every gate that predated the controls was green on this run.
     """
 
     from _pytest.monkeypatch import MonkeyPatch
@@ -119,10 +119,42 @@ def test_eval_exits_one_when_a_control_fails(tmp_path: Path, monkeypatch: object
     labels = EXAMPLES / "calibration_labels.json"
     code = main(_eval_args(out, "--calibration", str(labels), "--controls"))
     markdown = out.read_text(encoding="utf-8")
-    assert "| **False-merge rate (gated)** | **0.0%** (0/0) |" in markdown
+    assert "| **False-merge rate (gated)** | **no evidence** (0/0) |" in markdown
+    assert "**0.0%** (0/0)" not in markdown
     assert "Kappa gate at 0.60: **PASS**" in markdown
     assert "Controls gate: **FAIL**." in markdown
     assert code == 1, "a report carrying a failed control exited 0"
+
+
+def test_eval_exits_one_on_the_same_sabotage_without_controls(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    """The negative control for #159, held as a test.
+
+    Same constant-0.9 scorer, but `--controls` is not passed, so the only thing
+    that can catch it is the headline metric. It must not report a rate it did
+    not measure, and it must not exit 0.
+    """
+
+    from _pytest.monkeypatch import MonkeyPatch
+
+    from constituent_reconciler import matching
+    from constituent_reconciler.controls import ConstantScoreBackend
+
+    assert isinstance(monkeypatch, MonkeyPatch)
+    backend = ConstantScoreBackend(0.9)
+    monkeypatch.setattr(matching, "_default_backend", backend)
+    assert matching.default_backend() is backend, "the sabotage did not land"
+
+    out = tmp_path / "report.md"
+    labels = EXAMPLES / "calibration_labels.json"
+    code = main(_eval_args(out, "--calibration", str(labels)))
+    markdown = out.read_text(encoding="utf-8")
+    assert "## Controls" not in markdown
+    assert "| **False-merge rate (gated)** | **no evidence** (0/0) |" in markdown
+    assert "False-merge gate at threshold 0.0%: **FAIL**" in markdown
+    assert "no evidence: 0 auto-merged pairs" in markdown
+    assert code == 1, "a run whose matcher was replaced by a constant exited 0"
 
 
 def test_eval_without_controls_renders_no_controls_section(tmp_path: Path) -> None:

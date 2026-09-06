@@ -393,8 +393,20 @@ Wilson interval is the only honest thing on the row, and nothing gates on it.
 The identity control is what catches this: `recall 0.0000 (0/27 twin pairs
 auto-merged)`.
 
-That the gated metric renders an unmeasured `0/0` as a passing `0.0%` is a
-separate defect from the one this section fixes, and it is not fixed here.
+That the gated metric rendered an unmeasured `0/0` as a passing `0.0%` was a
+separate defect from the one this section fixes. It is fixed: every rate in
+`evaluate.py` is `float | None`, an undefined rate renders as `no evidence`
+rather than a percentage, and the false-merge gate is fail-closed on one, so the
+run above now exits 1 with
+
+```
+| **False-merge rate (gated)** | **no evidence** (0/0) | [0.0%, 100.0%] |
+False-merge gate at threshold 0.0%: **FAIL** (no evidence: 0 auto-merged pairs,
+so the rate has no denominator).
+```
+
+even without `--controls`. The identity control and the headline metric now
+catch this case independently of each other.
 
 ### What the controls do not cover
 
@@ -413,6 +425,14 @@ Stated so a partial control is not read as a whole one:
 * The controls are wired into `constituent-reconcile eval`. The FEBRL runners in
   `tools/benchmark/` do not yet pass them through, so the numbers at the top of
   this page have no committed control run behind them.
+* **Every control builds its own backend and scores through it directly, so none
+  of them exercises the path `pipeline.run` actually takes.** Measured on
+  2026-09-06: substituting the same constant `0.9` one layer up, at the
+  `matching.score_pairs` call in `pipeline.py` rather than inside the backend,
+  leaves all four controls passing (`identity` reports `recall 1.0000 (27/27)`,
+  because it re-scores its twins with the real matcher). What catches that case
+  is the headline metric, which reports `no evidence` and fails the gate. The
+  two layers are complementary and neither is redundant.
 
 ## Known gaps in this measurement
 

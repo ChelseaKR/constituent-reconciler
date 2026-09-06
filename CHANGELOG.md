@@ -7,6 +7,34 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Fixed
+- **The false-merge gate passed on zero evidence: a `0/0` rate published as a
+  passing `0.0%`.** The gated metric was `false_merges / len(auto)` with a
+  literal `0.0` substituted when nothing auto-merged. Zero is the best possible
+  value for this metric, so a run that measured nothing was published as a run
+  that came out perfectly. Measured on 2026-09-06 by replacing
+  `SplinkBackend.score_pairs` with a constant `0.9` — above the review
+  threshold, below the auto threshold, so no pair auto-merges: `constituent-reconcile
+  eval` exited 0 and wrote `**False-merge rate (gated)** | **0.0%** (0/0)` and
+  `False-merge gate at threshold 0.0%: **PASS**`. The matcher had been deleted
+  and every gate that predates the negative controls was green.
+
+  Every rate in `evaluate.py` is now `float | None`, and `None` means the
+  denominator was zero. The same substitution was present eight more times, in
+  each case substituting the *best* value: `0.0` for the two error rates and
+  `1.0` for auto precision, auto recall, coverage precision, coverage recall,
+  and both extraction precision and recall. `wilson_interval` was already
+  honest about it, returning the widest interval `(0, 1)` on no trials; the
+  point estimates now agree with the interval printed beside them. Reports
+  render `no evidence` rather than a percentage, the false-merge gate is
+  fail-closed on an unmeasured rate in the same shape the kappa gate already
+  used for an empty label set, and `constituent-reconcile eval` exits 1. Two
+  gate comparisons read `args.gate` and `args.precision_target` off an argparse
+  namespace, so they are typed `Any` and `mypy --strict` could not have flagged
+  them; both are now explicit. Two tests asserted the old behaviour as intended
+  (`recall == 1.0` over zero labeled fields, and `false_merge_rate == 0.0` as
+  "the premise of this test: the headline gate is green") and now assert the
+  absence. Every committed eval report regenerates byte-identical, because none
+  of them has an empty denominator. (#159)
 - **`CITATION.cff` dated a release that was never cut, and the README's Status
   line was a minor version behind.** The citation file carried
   `date-released: "2026-09-02"` while `git tag -l` printed nothing here:

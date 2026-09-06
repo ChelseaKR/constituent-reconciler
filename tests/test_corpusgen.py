@@ -134,6 +134,9 @@ def test_generated_corpus_scores_well_on_the_matcher(tmp_path) -> None:  # type:
     report = evaluate(result.pairs, truth["clusters"], n_records=len(result.records))
 
     assert report.n_true_pairs > 0
+    # An unmeasured rate is not a rate under the ceiling.
+    assert report.false_merge_rate is not None
+    assert report.recall_coverage is not None
     assert report.false_merge_rate <= 0.10
     assert report.recall_coverage >= 0.85
 
