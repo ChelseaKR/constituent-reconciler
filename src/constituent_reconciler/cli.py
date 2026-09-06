@@ -48,6 +48,8 @@ if TYPE_CHECKING:
 from constituent_reconciler.config import Recipe, RecipeError, load_recipe
 from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.consent import partition_by_consent
+from constituent_reconciler.controls import DEFAULT_SEED as CONTROLS_DEFAULT_SEED
+from constituent_reconciler.controls import run_controls
 from constituent_reconciler.demo import NEXT_STEP, DemoError, write_demo
 from constituent_reconciler.destruction import destroy, parse_retention
 from constituent_reconciler.evaluate import (
@@ -296,6 +298,21 @@ def _cmd_eval(args: argparse.Namespace) -> int:
         segments=segments,
     )
     calibration = _load_calibration(Path(args.calibration) if args.calibration else None)
+    # Negative controls, opt-in because they re-run the matcher over a duplicated
+    # sample. They are computed from this same run, so a report that carries them
+    # is describing the run above it, not a separate measurement.
+    controls_report = None
+    if args.controls:
+        controls_report = run_controls(
+            result.records,
+            result.pairs,
+            clusters,
+            recipe.fields,
+            prior=recipe.prior,
+            auto_threshold=recipe.auto_threshold,
+            review_threshold=recipe.review_threshold,
+            seed=args.controls_seed,
+        )
     # resolve() first: a relative --config like "recipe.toml" has an empty parent,
     # which rendered the report's dataset label as an empty backtick pair.
     markdown = render_eval_markdown(
@@ -309,14 +326,22 @@ def _cmd_eval(args: argparse.Namespace) -> int:
         # claim from where the scored records came from, and silently promoting
         # one to the other would rewrite every committed report.
         provenance=truth.get("provenance"),
+        controls=controls_report,
     )
     if args.out:
         Path(args.out).write_text(markdown, encoding="utf-8")
         print(f"wrote eval report: {args.out}")
     else:
         print(markdown)
+    # A failed control is a failed run. The point of the controls is that the
+    # gated metric can be wrong in a way the metric itself cannot show, so a
+    # report that carries a failing control must not exit 0.
+    controls_pass = controls_report is None or controls_report.passed
     gates_pass = (
-        report.false_merge_rate <= args.gate and calibration is not None and calibration.passed
+        report.false_merge_rate <= args.gate
+        and calibration is not None
+        and calibration.passed
+        and controls_pass
     )
     return 0 if gates_pass else 1
 
@@ -1536,6 +1561,17 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument(
         "--calibration",
         help="calibration labels JSON for the fail-closed kappa gate",
+    )
+    eval_parser.add_argument(
+        "--controls",
+        action="store_true",
+        help="run the negative controls and render them in their own report section",
+    )
+    eval_parser.add_argument(
+        "--controls-seed",
+        type=int,
+        default=CONTROLS_DEFAULT_SEED,
+        help=f"RNG seed for the negative controls (default {CONTROLS_DEFAULT_SEED})",
     )
     eval_parser.set_defaults(func=_cmd_eval)
 

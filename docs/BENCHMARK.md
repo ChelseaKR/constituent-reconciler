@@ -349,6 +349,71 @@ recorded here so the recall figures above are read with it in mind: some share o
 the missed matches is address normalization declining to canonicalize a street
 type it was never given.
 
+## Negative controls: what the numbers would look like if they measured nothing
+
+Every number above is produced by the same code that would produce a number if
+the matcher were broken. That is the ordinary condition of a benchmark, and it
+is why a good one is accompanied by controls: deliberate sabotages with known
+correct answers, so a reader can see that the metric moves when the thing it
+claims to measure changes.
+
+Run them with:
+
+```sh
+constituent-reconcile eval --config ... --truth ... --controls
+```
+
+`make eval` passes `--controls`, so
+[`../eval/report.md`](../eval/report.md) carries a **Controls** section and CI's
+`git diff --exit-code eval/report.md` covers it. They render in their own
+section and are never blended into the headline: a sabotage result and a
+measurement are different claims. A failing control exits 1, whatever the
+headline says.
+
+| Control | The sabotage | What it rules out |
+|---------|--------------|-------------------|
+| `shuffled-labels` | Ground-truth cluster membership is permuted across the run's record ids under a seeded RNG, keeping the cluster-size profile, and the *same* pairs are rescored against it. | That the ground-truth file is being read at all. Under a random permutation the expected pairwise precision is the base rate. Precision that stays high against shuffled labels means the number is not coming from the labels. |
+| `null-matcher (below review)` | Every candidate pair is rescored at a constant below the review threshold, through a real `MatcherBackend`, and rebanded by the pipeline's own `band_pairs`. | Banding that ignores the score. Nothing may be surfaced at all. |
+| `null-matcher (at auto threshold)` | The same, at the auto threshold. | A gated false-merge rate that cannot rise. Everything must auto-merge and the gated rate must go up. |
+| `identity` | Every record in a seeded sample is given an exact twin and the real matcher is asked to find them. | A scorer that never fires. Exact duplicates must auto-merge. |
+
+### The case that motivated the identity control
+
+Replace the scorer with a constant `0.9` — above the review threshold, below the
+auto threshold. Nothing auto-merges. The gated metric is then `0 / 0`, and the
+report renders it as:
+
+```
+| **False-merge rate (gated)** | **0.0%** (0/0) | [0.0%, 100.0%] |
+```
+
+`False-merge gate at threshold 0.0%: **PASS**`. The matcher has been replaced by
+a constant and every gate that existed before these controls is green. The
+Wilson interval is the only honest thing on the row, and nothing gates on it.
+The identity control is what catches this: `recall 0.0000 (0/27 twin pairs
+auto-merged)`.
+
+That the gated metric renders an unmeasured `0/0` as a passing `0.0%` is a
+separate defect from the one this section fixes, and it is not fixed here.
+
+### What the controls do not cover
+
+Stated so a partial control is not read as a whole one:
+
+* The null-matcher controls hold **blocking fixed**. They rescore the candidate
+  pairs the real run produced rather than regenerating candidates, because the
+  question is "does the score drive the outcome", not "does blocking work" — and
+  because an all-pairs null matcher is quadratic and cannot run at benchmark
+  scale (FEBRL4's 10,000 records are 50 million pairs; the 50,000-record corpus
+  is 1.25 billion).
+* The identity control runs on a **seeded sample capped at 250 records**,
+  because it runs the real matcher over twice the sample. The report states the
+  sample size next to the population it was drawn from, so a control that
+  covered 250 of 50,000 never reads as one that covered all of them.
+* The controls are wired into `constituent-reconcile eval`. The FEBRL runners in
+  `tools/benchmark/` do not yet pass them through, so the numbers at the top of
+  this page have no committed control run behind them.
+
 ## Known gaps in this measurement
 
 * The corpus is Australian, and both the address standardizer and the nickname

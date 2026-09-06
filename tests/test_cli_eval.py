@@ -83,9 +83,52 @@ def test_the_committed_eval_report_matches_a_fresh_run(tmp_path: Path) -> None:
     """
     out = tmp_path / "report.md"
     labels = EXAMPLES / "calibration_labels.json"
-    assert main(_eval_args(out, "--calibration", str(labels))) == 0
+    # `--controls` mirrors the Makefile `eval` recipe, which is what writes the
+    # committed file. Dropping it here would compare a report without the
+    # controls section against one with it and fail for the wrong reason -- and
+    # a version of this test that passed by not asking for the controls would be
+    # a drift check with a hole exactly the shape of the thing it now covers.
+    assert main(_eval_args(out, "--calibration", str(labels), "--controls")) == 0
     committed = EXAMPLES.parents[1] / "eval" / "report.md"
     assert out.read_text(encoding="utf-8") == committed.read_text(encoding="utf-8"), (
         "eval/report.md no longer matches what `constituent-reconcile eval` computes from the "
         "committed demo; regenerate it with `make eval` and commit the diff"
     )
+
+
+def test_eval_exits_one_when_a_control_fails(tmp_path: Path, monkeypatch: object) -> None:
+    """A failing control must not exit 0, whatever the headline says.
+
+    The scorer is replaced with a constant 0.9: above the review threshold and
+    below the auto threshold, so nothing auto-merges and the gated false-merge
+    rate is `0/0`, which renders as **0.0%** and reads as a PASS. Every gate
+    that existed before the controls is green on this run.
+    """
+
+    from _pytest.monkeypatch import MonkeyPatch
+
+    from constituent_reconciler import matching
+    from constituent_reconciler.controls import ConstantScoreBackend
+
+    assert isinstance(monkeypatch, MonkeyPatch)
+    backend = ConstantScoreBackend(0.9)
+    monkeypatch.setattr(matching, "_default_backend", backend)
+    assert matching.default_backend() is backend, "the sabotage did not land"
+
+    out = tmp_path / "report.md"
+    labels = EXAMPLES / "calibration_labels.json"
+    code = main(_eval_args(out, "--calibration", str(labels), "--controls"))
+    markdown = out.read_text(encoding="utf-8")
+    assert "| **False-merge rate (gated)** | **0.0%** (0/0) |" in markdown
+    assert "Kappa gate at 0.60: **PASS**" in markdown
+    assert "Controls gate: **FAIL**." in markdown
+    assert code == 1, "a report carrying a failed control exited 0"
+
+
+def test_eval_without_controls_renders_no_controls_section(tmp_path: Path) -> None:
+    """The flag is opt-in: without it the report is exactly what it was."""
+
+    out = tmp_path / "report.md"
+    labels = EXAMPLES / "calibration_labels.json"
+    assert main(_eval_args(out, "--calibration", str(labels))) == 0
+    assert "## Controls" not in out.read_text(encoding="utf-8")
