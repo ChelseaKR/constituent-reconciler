@@ -5,7 +5,7 @@ package in editable mode, so a file that exists in the tree is found whether
 or not the wheel carries it. That is the one path no other test can see, and
 it is where ``examples/`` was missing until 2026-09-02: the sdist and the
 Docker image copied it, the wheel did not, and an operator who installed a
-release got ``reconcile --help`` and then a ``FileNotFoundError`` traceback
+release got ``constituent-reconcile --help`` and then a ``FileNotFoundError`` traceback
 from the Quickstart's first real command.
 
 So this test builds the wheel, installs it into a fresh virtual environment,
@@ -33,7 +33,7 @@ from pathlib import Path
 
 import pytest
 
-from constituent_reconciler.cli import main
+from constituent_reconciler.cli import PROG, main
 
 ROOT = Path(__file__).resolve().parents[1]
 README = ROOT / "README.md"
@@ -87,12 +87,14 @@ def _harness(argv: list[str], cwd: Path | None = None) -> str:
 
 
 def quickstart_commands(readme_text: str) -> list[list[str]]:
-    """The ``reconcile`` invocations in the README's Quickstart, as argv tails.
+    """The console script's invocations in the README's Quickstart, as argv tails.
 
     Reads the first ``sh`` block under ``## Quickstart``, drops ``#`` comments
     and the ``make`` line, and requires every remaining line to start with
-    ``reconcile``: a line this test does not understand is a failure, not a
-    silent omission.
+    :data:`~constituent_reconciler.cli.PROG` -- read from the code, so the
+    rename that made ``reconcile`` a deprecated alias cannot leave this test
+    asserting a stale name. A line this test does not understand is a
+    failure, not a silent omission.
     """
 
     heading = readme_text.find("\n## Quickstart\n")
@@ -108,11 +110,11 @@ def quickstart_commands(readme_text: str) -> list[list[str]]:
         tokens = shlex.split(line, comments=True)
         if not tokens or tokens[0] == "make":
             continue
-        if tokens[0] != "reconcile":
-            pytest.fail(f"Quickstart line is not a `reconcile` command: {line!r}")
+        if tokens[0] != PROG:
+            pytest.fail(f"Quickstart line is not a `{PROG}` command: {line!r}")
         commands.append(tokens[1:])
     if not commands:
-        pytest.fail(f"README.md Quickstart names no reconcile command; {NOT_EXAMINED}")
+        pytest.fail(f"README.md Quickstart names no `{PROG}` command; {NOT_EXAMINED}")
     return commands
 
 
@@ -120,8 +122,8 @@ def test_quickstart_parser_drops_comments_and_the_make_line() -> None:
     text = (
         "# Title\n\n## Quickstart\n\n```sh\n"
         "make install    # uv sync\n"
-        "reconcile demo  # the bundled examples/\n"
-        "reconcile review --config examples/intake-demo/recipe.toml "
+        f"{PROG} demo  # the bundled examples/\n"
+        f"{PROG} review --config examples/intake-demo/recipe.toml "
         '--reviewer "your name" --out out\n'
         "```\n"
     )
@@ -180,7 +182,7 @@ def test_the_documented_quickstart_runs_from_an_installed_wheel(tmp_path: Path) 
         f"the fresh venv imported {located}, not the installed wheel; {NOT_EXAMINED}"
     )
 
-    reconcile = bin_dir / ("reconcile.exe" if os.name == "nt" else "reconcile")
+    reconcile = bin_dir / (f"{PROG}.exe" if os.name == "nt" else PROG)
     commands = quickstart_commands(README.read_text(encoding="utf-8"))
     ran: list[str] = []
     for argv in commands:
@@ -196,7 +198,7 @@ def test_the_documented_quickstart_runs_from_an_installed_wheel(tmp_path: Path) 
             check=False,
         )
         assert result.returncode == 0, (
-            f"`reconcile {' '.join(argv)}` exited {result.returncode} from an installed "
+            f"`{PROG} {' '.join(argv)}` exited {result.returncode} from an installed "
             f"wheel, outside the repository:\n{result.stderr}"
         )
         ran.append(argv[0])
