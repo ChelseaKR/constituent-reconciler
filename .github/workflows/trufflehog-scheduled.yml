@@ -1,8 +1,40 @@
 name: trufflehog-scheduled
 
 # Weekly full-history secret scan, independent of the per-push/PR gitleaks job
-# in ci.yml (SEC-19). Verified-credentials only (--results=verified) so this
-# stays a signal worth acting on, not noise from high-entropy false positives.
+# in ci.yml (SEC-19).
+#
+# This job ran with --results=verified until 2026-09-06, on the reasoning that
+# verified-only keeps it a signal worth acting on rather than noise from
+# high-entropy false positives. That reasoning is sound for a scan of new code
+# and wrong for a scan of history, which is what this job is.
+#
+# TruffleHog sorts a finding three ways. `verified`: it authenticated against
+# the live service. `unverified`: it asked, and the service said no. `unknown`:
+# it could not ask. A credential that was committed and then revoked -- the
+# normal end state of a real leak, and the exact thing a history scan exists to
+# find -- comes back `unverified`, because the revocation is what makes the
+# check fail. Verified-only therefore cannot fail on the incident it is here
+# for; it can only catch a credential that is still live, which the per-push
+# gitleaks job would have caught when it was committed.
+#
+# Measured 2026-09-06 on a throwaway clone of this repository with an AWS key
+# planted in one commit and deleted in the next:
+#
+#   --results=verified                     exit 0,   0 reported
+#   --results=verified,unknown             exit 0,   0 reported
+#   --results=verified,unknown,unverified  exit 183, unverified_secrets: 1
+#
+# The false-positive cost was measured rather than assumed: this repository's
+# full history scans clean under all three tiers (3,479 chunks, 4.8 MB, 0
+# findings), so widening adds no noise today. If a committed placeholder ever
+# does fire, exclude that detector by name rather than narrowing back to a
+# whole tier.
+#
+# The pinned action passes --fail and, on `schedule` and `workflow_dispatch`,
+# sets BASE and HEAD empty so the scan is the whole history rather than a
+# commit range (checked in the action definition at the pinned SHA). Combined
+# with fetch-depth: 0 below, that is what makes this a history scan and not a
+# one-commit scan reporting clean on a history it never opened.
 on:
   schedule:
     - cron: "0 6 * * 1" # Monday 06:00 UTC
@@ -23,4 +55,4 @@ jobs:
       - uses: trufflesecurity/trufflehog@00155c9dc586f34d189adc83d3ac2698c2ec551f # v3.95.8
         with:
           version: 3.95.8
-          extra_args: --results=verified
+          extra_args: --results=verified,unknown,unverified
