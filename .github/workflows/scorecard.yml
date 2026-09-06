@@ -18,11 +18,14 @@ on:
 # Least-privilege default token; the job widens only what it needs.
 permissions: {}
 
-# Cancel superseded pull-request runs only; a push to main keeps its verdict.
-# See the longer note in ci.yml — every push to main shares one concurrency
-# group, so cancelling on push loses a commit's result silently.
+# Cancel superseded pull-request runs only, and give every non-pull-request run
+# its own group. See the longer note in ci.yml: a group keyed on `github.ref`
+# alone puts every push to main together, where the third run in flight evicts
+# the pending one with zero jobs dispatched — a `cancelled` verdict that reads
+# the same as "not failed". This workflow has no `pull_request` trigger, so in
+# practice the key is always the commit.
 concurrency:
-  group: scorecard-${{ github.ref }}
+  group: scorecard-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
