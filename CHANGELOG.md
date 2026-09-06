@@ -6,6 +6,33 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 ## [Unreleased]
 
+### Fixed
+- **`CITATION.cff` dated a release that was never cut, and the README's Status
+  line was a minor version behind.** The citation file carried
+  `date-released: "2026-09-02"` while `git tag -l` printed nothing here:
+  `release.yml` has never fired, there is no GitHub Release, and nothing was
+  published on that date. The README says so — "No `v*` tag has been cut yet" —
+  but that sentence is four hundred lines from the claim, and `date-released` is
+  the field GitHub's "Cite this repository" panel and Zenodo actually read, so a
+  stranger citing this project cited a release that does not exist. The field is
+  gone until a tag exists. Separately, the Status line under the title still read
+  `Beta (v0.7)` after the manifest, the changelog and the citation file had all
+  moved to 0.8.0.
+
+  `tests/test_release_versions.py` holds all of it to the repository rather than
+  to another copy of the number: no tag is a legitimate state and passes, but
+  README.md must then say so; a tag that exists must be the declared version, and
+  the no-tag sentence must go when one is cut; `date-released` must be absent
+  while no tag exists and present once one is; the Status line must name the
+  declared version; and `CITATION.cff`, the installed distribution metadata and
+  the changelog heading must all agree with `pyproject.toml`. Because a missing
+  tag and an unfetched tag look identical from inside a checkout, the tag checks
+  skip with the reason on a shallow or tagless clone instead of reading absence
+  as evidence, and the CI `verify` job now checks out with `fetch-depth: 0` and
+  `fetch-tags: true` — a further test asserts that it does, so the checks cannot
+  become a gate that always skips. No tag was created; cutting the first one is
+  still the maintainer's decision (#68).
+
 ### Added
 - **`constituent-reconcile demo`, and the bundled demos ship in the wheel.** `examples/`
   is committed at the repository root and was copied into the sdist and the
