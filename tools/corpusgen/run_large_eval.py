@@ -29,7 +29,13 @@ from pathlib import Path
 
 from constituent_reconciler import pipeline
 from constituent_reconciler.config import load_recipe
-from constituent_reconciler.evaluate import EvalReport, evaluate, wilson_interval
+from constituent_reconciler.evaluate import (
+    EvalReport,
+    evaluate,
+    format_rate,
+    gate_holds,
+    wilson_interval,
+)
 from constituent_reconciler.models import Band
 from constituent_reconciler.report import render_eval_markdown
 from tools.corpusgen.generate import generate, write_corpus
@@ -175,7 +181,7 @@ def run(
     )
 
     full_markdown = markdown + "\n".join([*perf_lines, *breakdown_lines]) + "\n"
-    gate_pass = report.false_merge_rate <= gate
+    gate_pass = gate_holds(report.false_merge_rate, gate)
     return full_markdown, report, gate_pass
 
 
@@ -215,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
     report_out.write_text(markdown, encoding="utf-8")
     print(f"wrote large-corpus eval report: {report_out}")
     print(
-        f"false-merge rate {report.false_merge_rate * 100:.2f}% "
+        f"false-merge rate {format_rate(report.false_merge_rate, digits=2)} "
         f"({report.false_merges}/{report.n_auto}), gate {'PASS' if gate_pass else 'FAIL'}"
     )
     return 0 if gate_pass else 1

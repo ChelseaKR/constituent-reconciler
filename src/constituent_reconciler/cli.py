@@ -59,6 +59,7 @@ from constituent_reconciler.evaluate import (
     cohen_kappa,
     evaluate,
     extraction_metrics,
+    gate_holds,
 )
 from constituent_reconciler.matching.evidence import PairEvidence, comparison_evidence
 from constituent_reconciler.models import Correction, RunResult
@@ -337,8 +338,13 @@ def _cmd_eval(args: argparse.Namespace) -> int:
     # gated metric can be wrong in a way the metric itself cannot show, so a
     # report that carries a failing control must not exit 0.
     controls_pass = controls_report is None or controls_report.passed
+    # gate_holds, not <=: the gated rate is None when no pairs auto-merged, and
+    # a comparison against None here used to be a comparison against a
+    # substituted 0.0, which is the best possible value. A run that measured
+    # nothing must not exit 0. `args.gate` is an argparse attribute and so
+    # typed Any, which is why mypy could not have caught this one.
     gates_pass = (
-        report.false_merge_rate <= args.gate
+        gate_holds(report.false_merge_rate, float(args.gate))
         and calibration is not None
         and calibration.passed
         and controls_pass
@@ -384,7 +390,13 @@ def _cmd_eval_extraction(args: argparse.Namespace) -> int:
         print(f"wrote extraction eval report: {args.out}")
     else:
         print(markdown)
-    met = report.precision >= args.precision_target and report.recall >= args.recall_target
+    # None means an empty denominator, so the target was never demonstrated.
+    met = (
+        report.precision is not None
+        and report.recall is not None
+        and report.precision >= args.precision_target
+        and report.recall >= args.recall_target
+    )
     return 0 if met else 1
 
 

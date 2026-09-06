@@ -160,19 +160,24 @@ def test_an_empty_control_set_is_not_a_pass() -> None:
 def test_the_identity_control_fails_when_the_scorer_cannot_auto_merge_a_twin(
     monkeypatch: pytest.MonkeyPatch, recipe: Recipe, truth_clusters: list[list[str]]
 ) -> None:
-    """The case every existing gate misses.
+    """The case that motivated this control.
 
     A constant 0.9 is above the review threshold and below the auto threshold,
-    so nothing auto-merges, the gated false-merge rate is ``0/0``, and the
-    report renders **0.0%** and calls the gate a PASS on a matcher that has been
-    replaced by a constant.
+    so nothing auto-merges and the gated metric has no denominator. Until issue
+    159 that ``0/0`` rendered as **0.0%** and the gate read PASS on a matcher
+    that had been replaced by a constant. The headline now reports the absence,
+    and this control catches the matcher independently of it, so both layers are
+    asserted here.
     """
 
     result = _sabotaged_run(monkeypatch, recipe, 0.9)
 
     report = evaluate(result.pairs, truth_clusters, n_records=len(result.records))
     assert report.n_auto == 0
-    assert report.false_merge_rate == 0.0, "the premise of this test: the headline gate is green"
+    assert report.false_merge_rate is None, "0/0 must not report as a rate of zero"
+    markdown = render_eval_markdown(report, dataset="intake-demo", gate_threshold=0.0)
+    assert "False-merge gate at threshold 0.0%: **FAIL**" in markdown
+    assert "**0.0%** (0/0)" not in markdown
 
     controls = _controls(result, recipe, truth_clusters)
     identity = next(o for o in controls.outcomes if o.name == "identity")

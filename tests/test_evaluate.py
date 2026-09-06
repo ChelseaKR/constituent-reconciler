@@ -7,13 +7,18 @@ import pytest
 
 from constituent_reconciler.decisions import band_pairs
 from constituent_reconciler.evaluate import (
+    UNMEASURED,
+    EvalReport,
     ExtractionReport,
     calibrate,
     cohen_kappa,
     evaluate,
     extraction_metrics,
     f1_score,
+    format_rate,
+    gate_holds,
     normalize_extracted_value,
+    rate,
     truth_pairs,
     wilson_interval,
 )
@@ -239,17 +244,21 @@ def test_extraction_metrics_empty_truth_makes_all_predictions_fp() -> None:
     report = extraction_metrics(predicted, {})
     assert (report.tp, report.fp, report.fn) == (0, 1, 0)
     assert report.precision == 0.0
-    # No truth fields: recall is 1.0 by the empty-denominator convention, and
-    # the Wilson interval is the widest honest (0, 1).
-    assert report.recall == 1.0
+    # No truth fields, so recall was never measured. It used to report 1.0 here,
+    # a perfect score for a document set nothing was labeled in. The Wilson
+    # interval already said the honest thing, (0, 1); the point estimate now
+    # agrees with it.
+    assert report.recall is None
     assert report.recall_ci == (0.0, 1.0)
 
 
 def test_extraction_metrics_no_docs_at_all() -> None:
+    # The complement of every extraction assertion: an empty run must not be
+    # able to satisfy a precision or recall target. Both used to report 1.0.
     report = extraction_metrics({}, {})
     assert report.n_docs == 0
-    assert report.precision == 1.0
-    assert report.recall == 1.0
+    assert report.precision is None
+    assert report.recall is None
     assert report.precision_ci == (0.0, 1.0)
     assert report.recall_ci == (0.0, 1.0)
 
@@ -297,6 +306,10 @@ def test_committed_fixture_meets_ledger_targets() -> None:
     assert n_pdfs >= 3
     assert report.n_docs == n_pdfs
     # The metrics-ledger REVIEW targets: keep the committed fixture honest.
+    # The `is not None` assertions are part of the target, not a type dance: an
+    # unmeasured precision is not a met target.
+    assert report.precision is not None
+    assert report.recall is not None
     assert report.precision >= 0.95
     assert report.recall >= 0.90
     # The planted worded-date miss keeps recall measurably below 100%.
@@ -340,5 +353,85 @@ def test_evaluate_reports_f1_consistent_with_its_precision_and_recall() -> None:
     )
     # One of two auto/review pairs is a true duplicate at the auto band, and the
     # third true pair was never surfaced, so neither F1 is degenerate.
+    assert report.f1_auto is not None
+    assert report.f1_coverage is not None
     assert 0.0 < report.f1_auto < 1.0
     assert 0.0 < report.f1_coverage < 1.0
+
+
+# --- zero denominators: a rate over no cases is not a good rate (issue 159) ---
+
+
+def _no_auto_report() -> EvalReport:
+    """One run where every scored pair lands in review and nothing auto-merges.
+
+    This is the shape a matcher replaced by a constant produces: a score above
+    the review threshold and below the auto threshold, on every pair.
+    """
+
+    banded = band_pairs(
+        [("a", "b", 0.90), ("a", "c", 0.90), ("x", "y", 0.90)],
+        auto_threshold=0.97,
+        review_threshold=0.80,
+    )
+    return evaluate(banded, [["a", "b"], ["a", "c"]], n_records=5)
+
+
+def test_rate_over_no_cases_is_undefined_not_zero() -> None:
+    assert rate(0, 0) is None
+    assert rate(3, 0) is None
+    assert rate(0, 4) == 0.0
+    assert rate(2, 4) == 0.5
+
+
+def test_a_run_that_auto_merges_nothing_has_no_false_merge_rate() -> None:
+    report = _no_auto_report()
+    assert report.n_auto == 0
+    assert report.false_merges == 0
+    # The defect: 0 / 0 used to render as 0.0, the best possible value for this
+    # metric, so a matcher that had been deleted scored perfectly.
+    assert report.false_merge_rate is None
+    # Precision over an empty auto set is not 1.0 either.
+    assert report.precision_auto is None
+    # The Wilson interval was already honest about it and stays that way.
+    assert report.false_merge_ci == (0.0, 1.0)
+
+
+def test_rates_with_a_real_denominator_are_unchanged() -> None:
+    """The complement: nothing about a run that did measure something moves."""
+
+    banded = band_pairs(
+        [("a", "b", 0.99), ("a", "c", 0.85), ("x", "y", 0.99)],
+        auto_threshold=0.97,
+        review_threshold=0.80,
+    )
+    report = evaluate(banded, [["a", "b"], ["a", "c"]], n_records=5)
+    assert report.false_merge_rate == pytest.approx(0.5)
+    assert report.precision_auto == pytest.approx(0.5)
+    assert report.recall_coverage == 1.0
+    assert report.missed_match_rate == 0.0
+
+
+def test_the_gate_does_not_hold_on_an_unmeasured_rate() -> None:
+    # A ceiling of 0.0 is the repo's default false-merge gate. An undefined rate
+    # must not satisfy it, however generous the ceiling.
+    assert gate_holds(None, 0.0) is False
+    assert gate_holds(None, 1.0) is False
+    assert gate_holds(0.0, 0.0) is True
+    assert gate_holds(0.5, 0.4) is False
+
+
+def test_f1_of_an_unmeasured_input_is_unmeasured() -> None:
+    assert f1_score(None, 0.9) is None
+    assert f1_score(0.9, None) is None
+    assert f1_score(None, None) is None
+    # Genuine zeroes still give a genuine zero, not None.
+    assert f1_score(0.0, 0.0) == 0.0
+
+
+def test_format_rate_names_the_absence_instead_of_printing_a_number() -> None:
+    assert format_rate(None) == UNMEASURED
+    assert UNMEASURED != "0.0%"
+    assert format_rate(0.0) == "0.0%"
+    assert format_rate(0.12345) == "12.3%"
+    assert format_rate(0.12345, digits=2) == "12.35%"
