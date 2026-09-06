@@ -72,6 +72,57 @@ through the offline extractor.
 
 A recipe is a small TOML file that names your two CSVs, maps their columns onto
 the fields the matcher reasons over, and points at the column that holds consent.
+
+### Start from your own column headers
+
+```sh
+constituent-reconcile init --existing existing.csv --incoming incoming.csv --out recipe.toml
+```
+
+`init` reads the header row of your files and writes a starter recipe from what
+it finds. Point `--incoming` at a folder and it reads every `.csv` directly
+inside it, and tells you which other file types it found and did not inspect.
+
+Three things it does not do, which is most of why it is safe to run on a real
+export:
+
+* **It never reads past the header.** No value is inspected, so nothing is
+  inferred from your data. Two files with the same headers and completely
+  different contents produce the same recipe.
+* **It maps a field only on an exact alias from the table below**, compared
+  case-insensitively with runs of spaces collapsed, and in no other way.
+  `Client Given` is not `first name`. Anything unrecognised becomes a `CHOOSE`
+  line with your real column names printed beside it, and every column the
+  recipe does not use is listed at the bottom of the file so nothing is dropped
+  without you seeing it. If two of your columns both match one field, it maps
+  neither and names both.
+* **It does not choose a policy pack.** `[policy] pack` is written empty, which
+  is not a valid pack, so the recipe will not load until you have made that
+  decision in Step 3. Run `constituent-reconcile validate --config recipe.toml`
+  and it lists every outstanding `CHOOSE`.
+
+`init` will not overwrite a file that already exists. To re-scaffold, write it
+somewhere else with `--out` and merge by hand.
+
+#### The alias table
+
+| Recipe field | Column headers recognised |
+|---|---|
+| `first_name` | `first name`, `firstname`, `fname`, `first`, `given name`, `givenname` |
+| `last_name` | `last name`, `lastname`, `lname`, `last`, `surname`, `family name` |
+| `dob` | `dob`, `date of birth`, `birth date`, `birthdate`, `birthday` |
+| `email` | `email`, `e-mail`, `email address`, `emailaddress` |
+| `phone` | `phone`, `phone number`, `telephone`, `mobile`, `cell`, `cell phone` |
+| `address` | `address`, `street`, `street address`, `address line 1`, `address1` |
+| `[consent] column` | `consent`, `consent status`, `consent flag`, `opt in`, `optin` |
+| `[input] id_column` | `id`, `record id`, `recordid`, `client id`, `constituent id` |
+
+An alias earns its place only if the header means that field and nothing else in
+a human-services export. `name` is deliberately absent: it is a full name at
+least as often as a first name.
+
+### Or write it by hand
+
 Copy `examples/intake-demo/recipe.toml` and change the names to match your export.
 
 ```toml

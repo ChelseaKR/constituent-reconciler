@@ -36,7 +36,7 @@ import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TextIO
 
 from constituent_reconciler import __version__, compare, compare_apply, pipeline, stage_cache
 
@@ -76,6 +76,9 @@ from constituent_reconciler.report import (
     render_source_quality,
 )
 from constituent_reconciler.review import session as review_session
+from constituent_reconciler.scaffold import ScaffoldError, unfilled_stubs
+from constituent_reconciler.scaffold import build as build_scaffold
+from constituent_reconciler.scaffold import write as write_scaffold
 from constituent_reconciler.schema import REPORT_SCHEMA_VERSION
 from constituent_reconciler.suppression import render_comparable, render_summary
 
@@ -1054,6 +1057,51 @@ def _cmd_review(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_init(args: argparse.Namespace) -> int:
+    """Write a starter recipe from the operator's own column headers.
+
+    Reads header rows only, maps a canonical field only on an exact documented
+    alias, and leaves everything else as a named CHOOSE line. The file it writes does not
+    load: ``[policy] pack`` is empty, so a person has to choose a policy pack
+    before anything can run. See :mod:`constituent_reconciler.scaffold`.
+    """
+
+    out = Path(args.out)
+    try:
+        scaffold = build_scaffold(
+            incoming=Path(args.incoming),
+            existing=Path(args.existing) if args.existing else None,
+            recipe_dir=out.parent if str(out.parent) else Path(),
+        )
+        write_scaffold(scaffold, out)
+    except ScaffoldError as error:
+        print(f"init: {error}", file=sys.stderr)
+        return 2
+
+    print(f"wrote scaffold: {out}")
+    for inspection in scaffold.inspections:
+        if inspection.files:
+            names = ", ".join(f.name for f in inspection.files)
+            print(f"  read headers from: {names}")
+        else:
+            print(f"  no .csv found in {inspection.path}; no headers read from it")
+    if scaffold.mapping:
+        mapped = ", ".join(f"{k} <- {v!r}" for k, v in scaffold.mapping.items())
+        print(f"  mapped: {mapped}")
+    else:
+        print("  mapped: nothing; no column header matched a documented alias")
+    for field, reason in scaffold.stubs.items():
+        print(f"  left for you to choose: {field} ({reason})")
+    if scaffold.unmapped_columns:
+        print(f"  not used by this recipe: {', '.join(scaffold.unmapped_columns)}")
+    print(
+        "\nThis recipe does not run yet. Choose a policy pack and fill in every "
+        "CHOOSE line, "
+        f"then check it with:\n  constituent-reconcile validate --config {out}"
+    )
+    return 0
+
+
 def _cmd_validate(args: argparse.Namespace) -> int:
     """Load and shape-check a recipe, and report its active switches.
 
@@ -1063,13 +1111,19 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     """
 
     config_path = Path(args.config)
+    # Read the raw text first. A scaffold's unchosen policy pack makes load_recipe
+    # raise before anything could look at the rest of the file, so an operator who
+    # ran `init` would otherwise be told about one CHOOSE line at a time.
+    outstanding = _scaffold_todos(config_path)
     try:
         recipe = load_recipe(config_path, policy_pack=args.policy_pack)
     except RecipeError as error:
         print(f"invalid recipe: {error}", file=sys.stderr)
+        _print_scaffold_todos(outstanding)
         return 2
     except PolicyViolation as error:
         print(f"policy error: {error}", file=sys.stderr)
+        _print_scaffold_todos(outstanding)
         return 2
 
     problems: list[str] = []
@@ -1112,10 +1166,51 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         print("\nproblems:", file=sys.stderr)
         for problem in problems:
             print(f"  - {problem}", file=sys.stderr)
+        _print_scaffold_todos(outstanding)
         return 2
 
     print("\nrecipe is valid.")
+    # Not a problem, and deliberately not counted as one: a canonical field the
+    # data has no column for is a normal end state, and failing on it would mean a
+    # scaffolded recipe could never become valid. It is still worth naming, because
+    # an unmapped field is a field the matcher will not reason over.
+    _print_scaffold_todos(outstanding, stream=sys.stdout)
     return 0
+
+
+def _scaffold_todos(path: Path) -> list[str]:
+    """Outstanding CHOOSE lines in a recipe `constituent-reconcile init` wrote, if any.
+
+    An unreadable file is not this function's problem to report: load_recipe says
+    so in its own words a moment later.
+    """
+
+    try:
+        return unfilled_stubs(path.read_text(encoding="utf-8"))
+    except OSError:
+        return []
+
+
+def _print_scaffold_todos(outstanding: list[str], *, stream: TextIO | None = None) -> None:
+    """Name the decisions a generated recipe still leaves open.
+
+    ``stream`` defaults to ``None`` and is resolved to ``sys.stderr`` here rather
+    than in the signature: a default argument binds once, at import, so the
+    written-to stream would be whatever ``sys.stderr`` was then and not whatever
+    it is at the call. Anything that replaces the stream -- a test harness, a
+    caller redirecting output -- would silently lose these lines.
+    """
+
+    if not outstanding:
+        return
+    out = sys.stderr if stream is None else stream
+    print(
+        "\nThis file was written by `constituent-reconcile init` and still carries "
+        "decisions it would not make for you:",
+        file=out,
+    )
+    for item in outstanding:
+        print(f"  - {item}", file=out)
 
 
 def _cmd_destroy(args: argparse.Namespace) -> int:
@@ -1926,6 +2021,19 @@ def build_parser() -> argparse.ArgumentParser:
         "differs stops the command before anything is written",
     )
     demo_parser.set_defaults(func=_cmd_demo)
+
+    init_parser = sub.add_parser(
+        "init",
+        help="scaffold a starter recipe.toml from your CSV column headers",
+    )
+    init_parser.add_argument(
+        "--incoming", required=True, help="the new batch: a CSV file, or a directory of CSVs"
+    )
+    init_parser.add_argument(
+        "--existing", default=None, help="the record set to match against (CSV file or directory)"
+    )
+    init_parser.add_argument("--out", default="recipe.toml", help="where to write the scaffold")
+    init_parser.set_defaults(func=_cmd_init)
 
     validate_parser = sub.add_parser(
         "validate", help="check a recipe's shape and report its switches, without running"
