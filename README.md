@@ -206,12 +206,15 @@ commit SHA for `main` if you need a fixed input.
 
 The bundled demos below run from an installed wheel as well as from a clone.
 `examples/` is committed at the repository root, and the same tree ships
-inside the package: `reconcile demo` writes it to `./examples` (or `--dir`),
-leaves a byte-identical file alone, and refuses to overwrite one that differs.
-`tests/test_wheel_quickstart.py` builds the wheel, installs it into a fresh
-virtual environment, and runs the Quickstart from outside the repository. The
-0.8.0 wheel predates `reconcile demo`; with that tag, clone the repository (or
-unpack the sdist) to run anything whose `--config` points into `examples/`.
+inside the package: `constituent-reconcile demo` writes it to `./examples` (or
+`--dir`), leaves a byte-identical file alone, and refuses to overwrite one that
+differs. `tests/test_wheel_quickstart.py` builds the wheel, installs it into a
+fresh virtual environment, and runs the Quickstart from outside the repository.
+
+Every wheel that exists is one someone built — from a clone, from the sdist, or
+from the Git ref above — and every one of them carries the packaged examples.
+There is no published 0.8.0 wheel and no `v0.8.0` tag to install instead; as
+the paragraph above says, no `v*` tag has been cut at all.
 
 Before pointing the tool at your own data, check a recipe's shape without
 resolving anything:

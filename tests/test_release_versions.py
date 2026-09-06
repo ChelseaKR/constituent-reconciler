@@ -255,3 +255,50 @@ def test_ci_fetches_the_tags_these_checks_read() -> None:
         assert "fetch-tags: true" in body, (
             f"job {name!r} does not fetch tags, so tests/test_release_versions.py skips there"
         )
+
+
+#: A ``git+<url>@<ref>`` install pin, capturing the ref it pins to. This is the
+#: form the README and the package docstrings use to tell someone how to
+#: install without cloning, so the ref has to be one that resolves.
+GIT_PIN = re.compile(r"git\+https?://[^\s`'\"]+?@([A-Za-z0-9._-]+)")
+
+#: Which of those pinned refs are claims about a *release*. ``@main`` is a
+#: branch and always resolves; a commit SHA is checked by whoever wrote it.
+#: A version-shaped ref is a claim that a tag of that name was cut.
+VERSION_REF = re.compile(r"^v?\d+\.\d+\.\d+(?:[-+.].+)?$")
+
+#: Where an install instruction can reach a reader from.
+DOCUMENTED = ("README.md", "src/constituent_reconciler/demo.py")
+
+
+def test_no_documented_install_pins_a_tag_that_does_not_exist() -> None:
+    """An install command naming a tag nobody cut is absence rendered as a value.
+
+    ``demo.py`` explained itself with ``uvx --from git+...@v0.8.0``, and the
+    README told a reader that "the 0.8.0 wheel predates `reconcile demo`; with
+    that tag, clone the repository". Neither artifact exists: `git tag -l`
+    prints nothing. Someone following either instruction does not get the
+    documented behaviour and then a helpful error — they get
+    ``Could not find a version that satisfies`` from a ref that was never
+    created, several steps before the sentence they were reading applies.
+
+    The pin is the falsifiable half of that class, so it is what is checked
+    here: every version-shaped ref in a documented install command has to name
+    a tag this repository actually carries. ``@main`` and commit SHAs are not
+    release claims and are out of scope.
+    """
+    tags = _require_readable_tags()
+    carried = {tag.strip() for tag in tags} | {_tag_version(tag) for tag in tags}
+
+    phantom: list[str] = []
+    for relative in DOCUMENTED:
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        for ref in GIT_PIN.findall(text):
+            if VERSION_REF.match(ref) and ref not in carried:
+                phantom.append(f"{relative}: git+...@{ref}")
+
+    assert not phantom, (
+        "these documented install commands pin a tag that does not exist "
+        f"({', '.join(phantom)}). Tags carried: {', '.join(tags) or 'none'}. "
+        "Either cut the tag or stop telling a reader to install it."
+    )
