@@ -250,7 +250,7 @@ def test_stage_cache_writes_only_under_its_configured_local_directory(tmp_path: 
 def test_dv_pack_cache_defaults_under_the_local_output_root(tmp_path: Path) -> None:
     # Absent an explicit boundary, the DV pack's cache lives inside the run's
     # own output root: the one directory the operator already controls and
-    # `reconcile destroy` already reaches.
+    # `constituent-reconcile destroy` already reaches.
     out_dir = tmp_path / "out"
     recipe = load_recipe(_write_dv_cache_recipe(tmp_path))
     cache = stage_cache.for_recipe(recipe, out_dir)

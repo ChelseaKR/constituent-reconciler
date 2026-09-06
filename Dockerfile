@@ -54,5 +54,5 @@ COPY examples ./examples
 RUN useradd --create-home runner && chown -R runner:runner /work
 USER runner
 
-ENTRYPOINT ["reconcile"]
+ENTRYPOINT ["constituent-reconcile"]
 CMD ["--help"]

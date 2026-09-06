@@ -410,7 +410,7 @@ def _refuse_incomplete_review(
     back unless it was itself in two-person mode, so a decisions file reviewed
     under a permissive pack (or written by hand, or carried over from
     schema version 1) lists every single approval as fully approved and gives
-    the first check nothing to notice. Without this count, ``reconcile apply
+    the first check nothing to notice. Without this count, ``constituent-reconcile apply
     --policy-pack dv`` would merge pairs one person approved.
     """
 
@@ -425,7 +425,7 @@ def _refuse_incomplete_review(
             print(f"  {key.replace('|', ' and ')}", file=sys.stderr)
         print(
             "Have a second reviewer finish the review "
-            "(reconcile review --reviewer <other-name>), or reject the pairs.",
+            "(constituent-reconcile review --reviewer <other-name>), or reject the pairs.",
             file=sys.stderr,
         )
         return True
@@ -444,7 +444,7 @@ def _refuse_incomplete_review(
         print(f"  {key.replace('|', ' and ')}", file=sys.stderr)
     print(
         "Have a second reviewer review these pairs under this pack "
-        "(reconcile review --config <this recipe> --reviewer <other-name>). "
+        "(constituent-reconcile review --config <this recipe> --reviewer <other-name>). "
         "A decisions file that records no reviewer attribution cannot be "
         "applied under this pack at all.",
         file=sys.stderr,
@@ -570,9 +570,9 @@ def _cmd_compare(args: argparse.Namespace) -> int:
 def _cmd_compare_review(args: argparse.Namespace) -> int:
     """Serve the local review queue over a comparison's undecided pairs.
 
-    The session, queue, and server are the same surfaces ``reconcile review``
+    The session, queue, and server are the same surfaces ``constituent-reconcile review``
     uses; only the pairs come from the comparison. Verdicts save to the
-    compare decisions file so ``reconcile compare-apply`` can enforce that
+    compare decisions file so ``constituent-reconcile compare-apply`` can enforce that
     every uncertain pair was decided before the correction file exists.
     """
 
@@ -593,7 +593,7 @@ def _cmd_compare_review(args: argparse.Namespace) -> int:
     if not result.review_pairs:
         print(
             "\nno undecided pairs: this comparison has nothing to review, and "
-            "reconcile compare-apply may export without a review step"
+            "constituent-reconcile compare-apply may export without a review step"
         )
         return 0
     out_dir = Path(args.out)
@@ -723,7 +723,7 @@ def _cmd_plan_split(args: argparse.Namespace) -> int:
 
     Everything printed here is ids, counts, paths, and hashes. The raw field
     values a restoration needs live only in the local plan file, which
-    ``reconcile destroy`` covers and the provenance log references by digest.
+    ``constituent-reconcile destroy`` covers and the provenance log references by digest.
     """
 
     from constituent_reconciler import repair
@@ -902,7 +902,7 @@ def _cmd_apply_repair(args: argparse.Namespace) -> int:
         print("dry run: no network call was made; nothing was written to the destination.")
         print(
             "re-run with --execute once two distinct reviewers have approved this plan "
-            f"digest ({applied.plan_digest}) via `reconcile approve-repair`."
+            f"digest ({applied.plan_digest}) via `constituent-reconcile approve-repair`."
         )
     else:
         print(f"  approvers: {', '.join(applied.approvers)}")
@@ -1448,6 +1448,35 @@ def _cmd_ai_triage(args: argparse.Namespace) -> int:
     return 0
 
 
+#: The console script's name (pyproject.toml ``[project.scripts]``). The
+#: original name, ``reconcile``, is one PyPI already carries for two unrelated
+#: distributions (``reconcile`` and ``reconciler``); two packages that each
+#: install ``bin/reconcile`` never error, the later install silently owns the
+#: name. Both names point at :func:`main`; the old one prints a notice.
+PROG = "constituent-reconcile"
+DEPRECATED_PROG = "reconcile"
+DEPRECATED_PROG_REMOVED_IN = "0.9.0"
+
+
+def deprecated_alias_notice(argv0: str) -> str | None:
+    """The one-line notice for an invocation through the ``reconcile`` alias.
+
+    Both console scripts resolve to :func:`main`, so the only trace of which
+    name was used is the script the interpreter was started from. ``argv0`` is
+    that script's path: the notice is returned when its basename (``.exe``
+    stripped, for the Windows launcher) is the deprecated name, else ``None``.
+    """
+    name = argv0.replace("\\", "/").rsplit("/", 1)[-1]
+    if name.lower().endswith(".exe"):
+        name = name[:-4]
+    if name != DEPRECATED_PROG:
+        return None
+    return (
+        f"{DEPRECATED_PROG}: this command name is deprecated and will be removed in "
+        f"{DEPRECATED_PROG_REMOVED_IN}; use `{PROG}` instead."
+    )
+
+
 def _cmd_demo(args: argparse.Namespace) -> int:
     """Write the bundled demos to disk so the README's ``--config`` paths exist.
 
@@ -1475,10 +1504,10 @@ def _cmd_demo(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="reconcile",
+        prog=PROG,
         description="Resolve and deduplicate nonprofit constituent records.",
     )
-    parser.add_argument("--version", action="version", version=f"reconcile {__version__}")
+    parser.add_argument("--version", action="version", version=f"{PROG} {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     run_parser = sub.add_parser("run", help="resolve records and write a review queue")
@@ -1990,6 +2019,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    # stderr, never stdout: a pipeline capturing this command's output must see
+    # exactly what it saw under the old name.
+    notice = deprecated_alias_notice(sys.argv[0] if sys.argv else "")
+    if notice is not None:
+        print(notice, file=sys.stderr)
     parser = build_parser()
     args = parser.parse_args(argv)
     func = args.func

@@ -1,6 +1,6 @@
 """Run the matcher against a large synthetic corpus and render a full report.
 
-Unlike `reconcile eval` (which the demo fixture uses, and which CI reruns on
+Unlike `constituent-reconcile eval` (which the demo fixture uses, and which CI reruns on
 every push), this script also reports:
 
 * wall-clock time and records-per-minute, so E9 (incremental re-resolution)

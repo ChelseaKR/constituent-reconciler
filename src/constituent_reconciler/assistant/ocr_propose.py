@@ -17,7 +17,7 @@ A proposal is always a draft. Nothing here writes to a record, to
 accepted proposal into an applied correction is the same human, reviewer-
 attributed path every other correction already goes through
 (``models.Correction``, the review server's correct action, or
-``reconcile apply --decisions``) -- this module does not shortcut it.
+``constituent-reconcile apply --decisions``) -- this module does not shortcut it.
 """
 
 from __future__ import annotations

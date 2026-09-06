@@ -6,7 +6,7 @@
 # read from the environment, never stored here.
 #
 #   WEBHOOK_TOKEN=your-token WEBHOOK_SIGNING_SECRET=your-secret \
-#     reconcile run --config recipe-webhook.toml --out out
+#     constituent-reconcile run --config recipe-webhook.toml --out out
 #
 # Use --dry-run to see what would be POSTed without contacting the endpoint.
 # Under the dv policy pack this connector is refused (non-local write target);

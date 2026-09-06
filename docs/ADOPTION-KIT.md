@@ -142,7 +142,7 @@ treat that as a question for your counsel before the pilot, not after.
 Before the first real run, check the recipe's shape without resolving anything:
 
 ```sh
-reconcile validate --config recipe.toml
+constituent-reconcile validate --config recipe.toml
 ```
 
 It loads the recipe, rejects an unknown section or a misspelled key by name
@@ -154,7 +154,7 @@ eyeball them before anything runs.
 Run the pipeline without writing anything:
 
 ```sh
-reconcile run --config recipe.toml --out out --dry-run
+constituent-reconcile run --config recipe.toml --out out --dry-run
 ```
 
 The summary tells you how many records were read, how many candidate pairs the
@@ -166,7 +166,7 @@ look at.
 Open the queue in a browser:
 
 ```sh
-reconcile review --config recipe.toml --reviewer "your name" --out out
+constituent-reconcile review --config recipe.toml --reviewer "your name" --out out
 ```
 
 Each uncertain pair shows the two records side by side, with a plain-language line
@@ -182,7 +182,7 @@ approves it.
 Carry the decisions back in:
 
 ```sh
-reconcile apply --config recipe.toml --decisions out/decisions.json --out out
+constituent-reconcile apply --config recipe.toml --decisions out/decisions.json --out out
 ```
 
 ## Step 5: Calibrate how far to trust it
@@ -199,7 +199,7 @@ your own pilot, write a small ground-truth file of the duplicates you already
 know about and run:
 
 ```sh
-reconcile eval --config recipe.toml --truth ground_truth.json
+constituent-reconcile eval --config recipe.toml --truth ground_truth.json
 ```
 
 A run with zero false merges and every known duplicate surfaced to a human, at
@@ -212,7 +212,7 @@ write a file mapped to your CRM's own import schema, plus an external-id column
 keyed on the resolved cluster:
 
 ```sh
-reconcile run --config recipe-civicrm-csv.toml --out out
+constituent-reconcile run --config recipe-civicrm-csv.toml --out out
 # writes out/civicrm_import.csv for CiviCRM's Import Contacts
 ```
 
@@ -225,7 +225,7 @@ connector in the recipe's `[output]` section and pass the credential through the
 environment, never the recipe:
 
 ```sh
-CIVICRM_API_KEY=your-key reconcile run --config recipe-civicrm.toml --out out
+CIVICRM_API_KEY=your-key constituent-reconcile run --config recipe-civicrm.toml --out out
 ```
 
 Use `--dry-run` first to see what would be written without contacting the server.
@@ -237,7 +237,7 @@ Every write records an entry in an append-only, tamper-evident log
 hash before it. Check the chain at any time:
 
 ```sh
-reconcile verify --provenance out/provenance.jsonl
+constituent-reconcile verify --provenance out/provenance.jsonl
 ```
 
 This is what lets you show a funder or an auditor what was written, when, and

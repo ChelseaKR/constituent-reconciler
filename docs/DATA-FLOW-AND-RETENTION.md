@@ -12,7 +12,7 @@ destroyable and in what order, not how long anything is kept. Retention windows
 depend on funding stream, state law, and the adopting organization's own
 policies, and are the organization's and its counsel's to set.
 
-Status: model and executor implemented. `reconcile destroy --older-than
+Status: model and executor implemented. `constituent-reconcile destroy --older-than
 <window>` previews or deletes the inventory below and appends content-free
 destruction certificates to the provenance chain. No default retention window
 ships; the operator and counsel still set it.
@@ -49,12 +49,12 @@ Two classes of paths can move data off the machine, and both are policy-gated:
   push resolved records to a remote system. Under a pack that requires local
   targets (`dv`), `pipeline.build_connector` refuses them fail-closed.
 
-The review UI (`reconcile review`) serves field values over loopback HTTP for
+The review UI (`constituent-reconcile review`) serves field values over loopback HTTP for
 display, and under the `dv` pack a non-loopback bind is refused. Its only
 side effect on disk is `decisions.json`, which carries record ids and verdicts
 and no field values (`review/session.py`).
 
-`reconcile compare` (`compare.py`) reads two exports as read-only sources and
+`constituent-reconcile compare` (`compare.py`) reads two exports as read-only sources and
 writes only into `--out`: the cutover report and review-pair artifacts below
 plus a count-only summary and a digest manifest. The command constructs no
 connector on any path, so a recipe's `[output]` section cannot cause a write
@@ -66,11 +66,11 @@ backend may route low-confidence pages through the policy-gated seam, and the
 pin the fused-off seam under the `dv` pack alongside the no-connector
 invariant.
 
-Two follow-on commands complete the comparison flow. `reconcile
+Two follow-on commands complete the comparison flow. `constituent-reconcile
 compare-review` serves the same loopback review UI over the comparison's
 undecided pairs; its disk side effects are `compare_decisions.json` (pair ids
 and verdicts, no field values) and, when a reviewer corrects a value,
-`corrections.json` (which does hold the replacement values). `reconcile
+`corrections.json` (which does hold the replacement values). `constituent-reconcile
 compare-apply` (`compare_apply.py`) then writes `target_corrections.csv`, a
 local, import-ready correction file for the target side, only after every
 review pair is decided and after the consent gate withholds any identity
@@ -105,7 +105,7 @@ came from.
 
 The table was incomplete once, and the omission was not harmless. Two
 artifacts reached the `--out` directory with no row here and no entry in
-`destruction.PII_ARTIFACTS`, so `reconcile destroy` exited 0 and issued
+`destruction.PII_ARTIFACTS`, so `constituent-reconcile destroy` exited 0 and issued
 destruction certificates while leaving both on disk. Completeness is a test
 now rather than a habit: `tests/test_destruction_inventory.py` reads the
 package's own source for every filename it builds a path to and fails unless
@@ -126,34 +126,34 @@ appear in them, and they are checked by being written and then deleted.
 | Artifact | Written by | Where it lives | Holds individual records? | Notes |
 | --- | --- | --- | --- | --- |
 | Source CSVs and intake PDFs | the operator; read by `pipeline._ingest_source` | wherever the operator keeps them | Yes | Read in place. Destruction of inputs is the operator's procedure, not the tool's. |
-| `review_queue.csv` | `pipeline._write_review_queue` | the `--out` directory | Yes: field values of both records in every uncertain pair, plus source spans when extracted | Written on every `reconcile run`, including `--dry-run`. |
+| `review_queue.csv` | `pipeline._write_review_queue` | the `--out` directory | Yes: field values of both records in every uncertain pair, plus source spans when extracted | Written on every `constituent-reconcile run`, including `--dry-run`. |
 | `household_suggestions.csv` | `pipeline._write_household_suggestions` | the `--out` directory | Yes: the standardized street address and surname shared by one candidate household, plus its member cluster ids | Written only when a recipe sets `[household] enabled = true`; the grouping step is off by default. A suggestion, never a match decision. In the destruction inventory (`destruction.PII_ARTIFACTS`). |
 | `resolved.csv` | `connectors/csv_out.py` | the `--out` directory | Yes: golden-record field values, member ids, consent | The default write target. Skipped on `--dry-run`. |
 | `civicrm_import.csv`, `salesforce_import.csv` | `connectors/crm_csv.py` | the `--out` directory | Yes: import-shaped field values | Local files, so permitted under the `dv` pack. Skipped on `--dry-run`. |
 | Live CRM records | `connectors/civicrm.py`, `connectors/salesforce.py` | the remote CRM | Yes | Non-local; refused fail-closed under the `dv` pack (`pipeline.build_connector`). |
-| `repair_plan.json` | `repair.py` via `reconcile plan-split` | the run's `--out` directory, beside the manifest | Yes: proposed split records and restoration values for the members of one written cluster | Local only, never sent anywhere. The provenance log stores its digest, not its content. Regenerable at will from the manifest and sources, so destroying it loses nothing. |
-| `repair_receipts.json` | `repair.py` via `reconcile apply-repair` | the run's `--out` directory, beside the manifest | Yes: the before/after raw values of every operation an apply actually performed | Written only on a real (`--execute`) apply, never on a dry run. Unlike the plan file it is not freely regenerable -- it is the record of what was actually written to a live CiviCRM instance -- so it should follow the destination's own retention window rather than being deleted as soon as the repair looks done. The provenance log stores each operation's receipt digest, not its content. |
-| `repair_approvals.json` | `repair.py` via `reconcile approve-repair` | the run's `--out` directory, beside the manifest | Ids and names only | Reviewer names, verdicts, and timestamps keyed by the plan digest they approved. The same content class as `decisions.json`'s audit section; not in the destruction inventory for the same reason. |
+| `repair_plan.json` | `repair.py` via `constituent-reconcile plan-split` | the run's `--out` directory, beside the manifest | Yes: proposed split records and restoration values for the members of one written cluster | Local only, never sent anywhere. The provenance log stores its digest, not its content. Regenerable at will from the manifest and sources, so destroying it loses nothing. |
+| `repair_receipts.json` | `repair.py` via `constituent-reconcile apply-repair` | the run's `--out` directory, beside the manifest | Yes: the before/after raw values of every operation an apply actually performed | Written only on a real (`--execute`) apply, never on a dry run. Unlike the plan file it is not freely regenerable -- it is the record of what was actually written to a live CiviCRM instance -- so it should follow the destination's own retention window rather than being deleted as soon as the repair looks done. The provenance log stores each operation's receipt digest, not its content. |
+| `repair_approvals.json` | `repair.py` via `constituent-reconcile approve-repair` | the run's `--out` directory, beside the manifest | Ids and names only | Reviewer names, verdicts, and timestamps keyed by the plan digest they approved. The same content class as `decisions.json`'s audit section; not in the destruction inventory for the same reason. |
 | `withheld.csv` | `pipeline._write_withheld` | the `--out` directory | Ids only | Cluster id, member record ids, reason. No field values, but ids resolve to people through the organization's own systems. |
 | `decisions.json` | `review/session.py` | the `--out` directory | Ids only | Pair ids and verdicts. No field values, by design. |
-| `stage_cache/` entry files | `stage_cache.py` via `pipeline.run` | `<out>/stage_cache`, or the recipe's explicit `[cache] dir` boundary | Yes: extracted and normalized field values, keyed by content digest | Written only when a recipe opts in. Covered by `reconcile destroy`; an explicit boundary is covered via `--cache-dir`. |
+| `stage_cache/` entry files | `stage_cache.py` via `pipeline.run` | `<out>/stage_cache`, or the recipe's explicit `[cache] dir` boundary | Yes: extracted and normalized field values, keyed by content digest | Written only when a recipe opts in. Covered by `constituent-reconcile destroy`; an explicit boundary is covered via `--cache-dir`. |
 | `provenance.jsonl` | `provenance.py` | the `--out` directory | No field values | Each entry: BLAKE2b hash of the written payload, record and member ids, consent flag, timestamp, chain hashes. Payloads are referenced by hash, never stored. |
 | `aggregate_summary.json` | `pipeline._write_aggregate_summary` over `suppression.py` | the `--out` directory | No | Total and suppressed category counts. Written only under a pack with `aggregate_export` (the `dv` pack), and not on `--dry-run`. |
-| `cutover_report.csv` | `compare.write_cutover_report` | the `--out` directory | Yes: per-identity field values from both compared exports, with conflict flags | Written by `reconcile compare` only. In the destruction inventory (`destruction.PII_ARTIFACTS`). |
-| `cutover_review.csv` | `compare.write_cutover_review` | the `--out` directory | Yes: field values of the undecided cross-export pairs | Written by `reconcile compare` only. In the destruction inventory. |
+| `cutover_report.csv` | `compare.write_cutover_report` | the `--out` directory | Yes: per-identity field values from both compared exports, with conflict flags | Written by `constituent-reconcile compare` only. In the destruction inventory (`destruction.PII_ARTIFACTS`). |
+| `cutover_review.csv` | `compare.write_cutover_review` | the `--out` directory | Yes: field values of the undecided cross-export pairs | Written by `constituent-reconcile compare` only. In the destruction inventory. |
 | `migration_summary.json` | `compare.write_migration_summary` | the `--out` directory | No | Identity and conflict counts under the versioned `migration_summary` schema; no field values, asserted by `tests/test_compare.py`. |
-| `compare_manifest.json` | `compare.write_compare_manifest` | the `--out` directory | No field values | Digests of both recipes and every input file, both column mappings, thresholds. `reconcile compare-apply` adds an `export` section binding the correction and decisions files by digest, with row and withheld counts only. |
-| `compare_decisions.json` | `review/session.py` via `reconcile compare-review` | the `--out` directory | Ids only | Pair ids, verdicts, reviewer names, timestamps: the same shape as `decisions.json`. |
+| `compare_manifest.json` | `compare.write_compare_manifest` | the `--out` directory | No field values | Digests of both recipes and every input file, both column mappings, thresholds. `constituent-reconcile compare-apply` adds an `export` section binding the correction and decisions files by digest, with row and withheld counts only. |
+| `compare_decisions.json` | `review/session.py` via `constituent-reconcile compare-review` | the `--out` directory | Ids only | Pair ids, verdicts, reviewer names, timestamps: the same shape as `decisions.json`. |
 | `corrections.json` | `review/session.py` (either review surface) | the `--out` directory | Yes: reviewer-supplied replacement field values | Written only when a reviewer corrects a value during review. In the destruction inventory (`destruction.PII_ARTIFACTS`). |
-| `target_corrections.csv` | `compare_apply.export_corrections` | the `--out` directory | Yes: import-shaped golden field values for the target side, plus the target export's own record ids in `target_record_ids` | Written by `reconcile compare-apply` only, after review completeness and the consent gate. In the destruction inventory. |
+| `target_corrections.csv` | `compare_apply.export_corrections` | the `--out` directory | Yes: import-shaped golden field values for the target side, plus the target export's own record ids in `target_record_ids` | Written by `constituent-reconcile compare-apply` only, after review completeness and the consent gate. In the destruction inventory. |
 | `cutover_withheld.csv` | `compare_apply._write_cutover_withheld` | the `--out` directory | Ids only | Identity id, member record ids, withhold reason. Written only when consent withholds an identity from the correction file. In the destruction inventory. |
-| `ai_ocr_proposals.json` | `cli._cmd_ai_propose_corrections`, over proposals built by `assistant/ocr_propose.py` | the `--out` directory | Yes: each entry carries the record's raw `original_value`, the model's `proposed_value`, and a `quote` copied verbatim out of the real intake document | Written by `reconcile ai-propose-corrections` only, and never under `dv` or `hipaa`, which disable the assistant package outright. A draft: nothing in it is applied to any record. In the destruction inventory (`destruction.PII_ARTIFACTS`). |
+| `ai_ocr_proposals.json` | `cli._cmd_ai_propose_corrections`, over proposals built by `assistant/ocr_propose.py` | the `--out` directory | Yes: each entry carries the record's raw `original_value`, the model's `proposed_value`, and a `quote` copied verbatim out of the real intake document | Written by `constituent-reconcile ai-propose-corrections` only, and never under `dv` or `hipaa`, which disable the assistant package outright. A draft: nothing in it is applied to any record. In the destruction inventory (`destruction.PII_ARTIFACTS`). |
 | `ai_usage.json` | `assistant/rate_limit.py`, via any `ai-*` command that calls a provider | the `--out` directory | No | A list of call timestamps backing the per-minute and daily caps. No record id, prompt, or field value. Not in the destruction inventory. |
-| `run_manifest.json` | `manifest.py` via `reconcile run` | the `--out` directory | No field values | Input file digests, column mappings, thresholds, and versions, for reproducing a run. |
+| `run_manifest.json` | `manifest.py` via `constituent-reconcile run` | the `--out` directory | No field values | Input file digests, column mappings, thresholds, and versions, for reproducing a run. |
 | `run_summary.json` | `pipeline._write_run_summary` | the `--out` directory | No | Per-stage counts, cache hit counts, and durations; content-free by construction. |
 | `run_report.json` | `cli._write_run_report` over `quality.py` | the `--out` directory | No | Run counts plus the per-source data-quality aggregate (completeness, normalization failure rates, consent coverage, duplicate density), already small-cell suppressed under the active policy. |
 | `comparable_report.json` | `pipeline._write_comparable_report` over `suppression.py` | the `--out` directory | No | The comparable-database posture's suppressed aggregate. Cell values are integers or the string `suppressed`, never a record id or a field value. |
-| `eval/report.md` | `report.py` via `reconcile eval` | the path given to `--out` | No | Match-quality rates on seeded synthetic fixtures; the fixtures contain no real personal data. |
+| `eval/report.md` | `report.py` via `constituent-reconcile eval` | the path given to `--out` | No | Match-quality rates on seeded synthetic fixtures; the fixtures contain no real personal data. |
 | Terminal output | `report.render_run_summary`, `suppression.render_summary` | the operator's terminal | No | Per-stage counts and the suppressed aggregate. |
 | Cloud seam egress | `extract/seam.py` | Amazon Bedrock | Yes, when enabled | Low-confidence PDF pages only. A no-op under `dv` and `hipaa`, asserted by `tests/test_no_egress.py`. |
 
@@ -183,7 +183,7 @@ organization's existing records schedule. The model:
   retain it on the destination's own records schedule rather than deleting it
   as soon as the repair looks done.
 * `household_suggestions.csv` (written only when a recipe enables household
-  grouping) and `ai_ocr_proposals.json` (written only by `reconcile
+  grouping) and `ai_ocr_proposals.json` (written only by `constituent-reconcile
   ai-propose-corrections`) belong in the same bucket. The suggestions file
   carries a standardized street address and a surname per candidate household;
   the proposals file carries raw field values and text quoted verbatim out of
@@ -266,7 +266,7 @@ VOCA funding and across states. The pack defines the destroy/retain sort and
 the order of operations; the window is counsel-gated, consistent with the
 jurisdiction note in [RESEARCH-ROADMAP.md](./RESEARCH-ROADMAP.md).
 
-**Execution.** Run `reconcile destroy --out <directory> --older-than <window>`;
+**Execution.** Run `constituent-reconcile destroy --out <directory> --older-than <window>`;
 add `--dry-run` first to inspect the eligible inventory. The command deletes
 record-bearing artifacts older than the stated policy, including every
 stage-cache entry under `<out>/stage_cache`, and appends destruction entries

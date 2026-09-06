@@ -5,7 +5,7 @@
 # Contact (an External ID text field, here External_Id__c) before the first run.
 # Pass the OAuth access token through the environment, never the recipe:
 #
-#   SF_TOKEN=your-access-token reconcile run \
+#   SF_TOKEN=your-access-token constituent-reconcile run \
 #     --config examples/intake-demo/recipe-salesforce.toml --out out
 #
 # Use --dry-run to see what would be written without contacting the org. Under the

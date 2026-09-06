@@ -9,7 +9,7 @@
 #   - aggregate, suppressed sharing: an aggregate_summary.json of non-identifying
 #     counts with small cells suppressed is written as the only shareable artifact.
 #
-#   reconcile run --config recipe-dv.toml --out out-dv
+#   constituent-reconcile run --config recipe-dv.toml --out out-dv
 
 [input]
 existing = "existing.csv"

@@ -2,7 +2,7 @@
 
 A nonprofit moving between case systems needs to know whether the target
 system's export describes the same people as the legacy system's export,
-before anyone changes the live system. ``reconcile compare`` answers that
+before anyone changes the live system. ``constituent-reconcile compare`` answers that
 question with the pieces the run pipeline already trusts: each side's recipe
 maps its columns onto the canonical fields, normalization and the matcher
 backend score cross-export candidate pairs, and the fail-closed banding from
@@ -383,7 +383,7 @@ def run_compare(
     the accounting guard confirms every record landed exactly once.
 
     ``corrections`` carries reviewer field fixes back in, the way
-    ``pipeline.run`` accepts them from ``reconcile apply``: each replaces one
+    ``pipeline.run`` accepts them from ``constituent-reconcile apply``: each replaces one
     raw value after ingest (record ids stay stable) and before normalization,
     so the corrected value flows through matching and into the identity
     outcomes. A correction naming an uncompared field or an unknown record is
@@ -434,7 +434,7 @@ def run_compare(
         for member in cluster.members:
             cluster_of[member] = cluster.cluster_id
 
-    # Every review-band pair reaches a human, the same routing reconcile run
+    # Every review-band pair reaches a human, the same routing constituent-reconcile run
     # gives review_queue.csv. That includes a pair whose endpoints confident
     # merges already glued into one cluster: the low-confidence evidence
     # against that transitive merge is exactly what a reviewer needs to see,

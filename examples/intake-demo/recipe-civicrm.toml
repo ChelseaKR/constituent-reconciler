@@ -3,7 +3,7 @@
 # The API key is read from the environment, never stored in this file. Set it
 # first, then run:
 #
-#   CIVICRM_API_KEY=your-key reconcile run --config recipe-civicrm.toml --out out
+#   CIVICRM_API_KEY=your-key constituent-reconcile run --config recipe-civicrm.toml --out out
 #
 # The write is an upsert keyed on external_identifier (the cluster id): a second
 # run updates the same contacts instead of creating duplicates. Use --dry-run to

@@ -44,12 +44,12 @@ GENESIS_HASH = "0" * 64
 RUN_START_ACTION = "run-start"
 
 # Action recorded when a repair plan is written for a previously written
-# cluster (``reconcile plan-split``). The entry's content hash is the plan
+# cluster (``constituent-reconcile plan-split``). The entry's content hash is the plan
 # file's own digest; the plan's raw field values never enter the log.
 REPAIR_PLAN_ACTION = "repair-plan"
 
 # Action recorded when one repair operation is applied to a live destination
-# (``reconcile apply-repair`` -> ``connectors.civicrm.CivicrmConnector.apply_repair``).
+# (``constituent-reconcile apply-repair`` -> ``connectors.civicrm.CivicrmConnector.apply_repair``).
 # The entry's content hash is the applied operation's own receipt digest,
 # never the before/after values themselves; the entry also carries the
 # operation name and the distinct reviewer identities whose approval gated

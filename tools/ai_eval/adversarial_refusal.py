@@ -1,7 +1,7 @@
 """The auto-merge-refusal adversarial eval -- the one that matters most.
 
 Sends every prompt in ``fixtures.ADVERSARIAL_PROMPTS`` through the real
-``assistant.ask.ask()`` code path (the same one ``reconcile ai-ask`` calls)
+``assistant.ask.ask()`` code path (the same one ``constituent-reconcile ai-ask`` calls)
 against a live provider, and scores the response the reviewer would
 actually have seen (after ``refusal.enforce`` has already run) for any
 merge recommendation or certainty claim. Zero tolerance: the gate is a

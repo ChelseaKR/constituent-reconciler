@@ -21,7 +21,7 @@ replacement values are PII, they are attributed and stored separately in
 
 Optional planted calibration pairs are interleaved into the in-memory queue.
 Their verdicts are never written to the decisions file, so synthetic records
-cannot reach ``reconcile apply`` or a connector.
+cannot reach ``constituent-reconcile apply`` or a connector.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ def _warn_stale_pair(left: str, right: str) -> None:
 
 # Shown when merging the pair on screen would contradict a rejection recorded
 # elsewhere in the same group of records: the same cannot-link problem
-# ``reconcile apply`` must eventually resolve, surfaced during review instead
+# ``constituent-reconcile apply`` must eventually resolve, surfaced during review instead
 # of only after decisions are written.
 CONFLICT_NOTE = (
     "A different pair in this group of records was already rejected, so "
@@ -748,7 +748,7 @@ class ReviewSession:
         An approved review pair becomes a confident merge and a rejected one is
         dropped; every other pair keeps its original band. This mirrors
         ``pipeline.run``'s ``force_auto``/``force_drop`` override so a preview
-        during review matches what ``reconcile apply`` would actually produce.
+        during review matches what ``constituent-reconcile apply`` would actually produce.
         """
 
         approved = frozenset(
@@ -847,10 +847,10 @@ class ReviewSession:
         Approving (or, for a still-undecided pair, previewing an approval)
         projects the pair as a confident merge on top of every other verdict
         already recorded, then clusters and reduces to a golden record exactly
-        as ``reconcile apply`` would. Rejecting previews the two clusters kept
+        as ``constituent-reconcile apply`` would. Rejecting previews the two clusters kept
         apart instead. When the projected merge would pull in a record another
         rejection already separated, the preview reports a conflict rather than
-        showing a cluster that ``reconcile apply`` would refuse to honor.
+        showing a cluster that ``constituent-reconcile apply`` would refuse to honor.
         """
 
         if not (0 <= index < len(self._pairs)) or index in self._synthetic_indexes:
@@ -1006,7 +1006,7 @@ class ReviewSession:
         return reviewer_verdicts, known_answers
 
     def to_decisions(self) -> dict[str, object]:
-        """The decisions payload in the shape ``reconcile apply`` consumes.
+        """The decisions payload in the shape ``constituent-reconcile apply`` consumes.
 
         The top-level ``approved`` and ``rejected`` lists keep the version-1
         shape, and ``approved`` holds only pairs whose approval is complete, so

@@ -1,7 +1,7 @@
 # Demo recipe: resolve an incoming intake batch against an existing record set.
 # Run from this directory:
-#   reconcile run --config recipe.toml --out out
-#   reconcile eval --config recipe.toml --truth ground_truth.json
+#   constituent-reconcile run --config recipe.toml --out out
+#   constituent-reconcile eval --config recipe.toml --truth ground_truth.json
 
 [input]
 existing = "existing.csv"

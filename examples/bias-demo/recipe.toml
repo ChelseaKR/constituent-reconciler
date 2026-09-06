@@ -1,6 +1,6 @@
 # Synthetic, disaggregated matching evaluation for documented risk classes.
 # Run from the repository root:
-#   reconcile eval --config examples/bias-demo/recipe.toml \
+#   constituent-reconcile eval --config examples/bias-demo/recipe.toml \
 #     --truth examples/bias-demo/ground_truth.json \
 #     --calibration examples/bias-demo/calibration_labels.json \
 #     --out docs/audits/bias-report.md

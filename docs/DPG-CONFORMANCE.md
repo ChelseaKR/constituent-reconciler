@@ -65,7 +65,7 @@ synthetic.
 **Met.** The project holds a consistent engineering bar: `ruff`, `mypy --strict`,
 and `pytest` as merge-blocking CI gates; a committed, regenerated eval report
 with Wilson confidence intervals; declared config, connector, and report schema
-versions (`reconcile schema`); conventional commits and a Keep a Changelog
+versions (`constituent-reconcile schema`); conventional commits and a Keep a Changelog
 history. Actions are SHA-pinned; secret, dependency, SAST, workflow, and
 container scans run in CI; the release workflow generates a CycloneDX SBOM and
 keyless build-provenance attestation. It has not yet been exercised on a real

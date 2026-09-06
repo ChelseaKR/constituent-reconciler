@@ -31,17 +31,23 @@ hosted model on purpose and say so plainly, not as a buried caveat.
 
 ```sh
 make install                                                      # uv sync, Python 3.12+
-reconcile demo                                                    # the bundled examples/, from the package
-reconcile run --config examples/intake-demo/recipe.toml --out out # bundled demo, offline
-reconcile review --config examples/intake-demo/recipe.toml --reviewer "your name" --out out
+constituent-reconcile demo                                        # the bundled examples/, from the package
+constituent-reconcile run --config examples/intake-demo/recipe.toml --out out # bundled demo, offline
+constituent-reconcile review --config examples/intake-demo/recipe.toml --reviewer "your name" --out out
 ```
 
-`reconcile demo` writes the bundled `examples/` tree from the installed package
+`constituent-reconcile demo` writes the bundled `examples/` tree from the installed package
 (in a clone the files are already there, byte-identical, and it leaves them
 alone), `run` resolves the intake demo, and `review` opens the browser review
 queue over the uncertain pairs. The full walkthrough, including PDF
 extraction, CRM write-back, and the DV policy pack, is under [Usage](#usage)
 below.
+
+The command was named `reconcile` before 0.8.0. That name still runs, wired
+to the same entry point, and prints one line to stderr pointing here; it is
+removed in 0.9.0. It changed because PyPI already carries unrelated
+`reconcile` and `reconciler` distributions, and two packages that each install
+a `bin/reconcile` do not error; whichever was installed last owns the name.
 
 ## The problem
 
@@ -152,7 +158,7 @@ aggregate reporting from its comparable database. One command emits exactly
 that and nothing else — no CRM write, no resolved records on disk:
 
 ```sh
-reconcile export-comparable --config examples/intake-demo/recipe-dv.toml --out out-dv
+constituent-reconcile export-comparable --config examples/intake-demo/recipe-dv.toml --out out-dv
 ```
 
 It writes `comparable_report.json` (profile `coc-comparable`): a report-period
@@ -162,7 +168,7 @@ small-cell suppression as `aggregate_summary.json` (counts of 1-10 suppressed,
 complementary suppression within each breakdown, true zeros preserved), and no
 record id, member list, or field value appears in the file. A recipe can opt
 into extra breakdowns over non-identifying categorical fields, and into writing
-the report during a normal `reconcile run`, with a `[comparable]` section
+the report during a normal `constituent-reconcile run`, with a `[comparable]` section
 (`export`, `breakdown_fields`, `period`); the identifying canonical fields
 (name, DOB, email, phone, address) are refused as breakdown fields,
 fail-closed, at recipe load.
@@ -191,7 +197,7 @@ and there is deliberately no PyPI publish stage, so there is no
 `pip install constituent-reconciler` to run:
 
 ```sh
-uvx --from git+https://github.com/ChelseaKR/constituent-reconciler@v0.8.0 reconcile --help
+uvx --from git+https://github.com/ChelseaKR/constituent-reconciler@v0.8.0 constituent-reconcile --help
 ```
 
 The wheel and sdist attached to that GitHub Release are the same artifacts,
@@ -210,19 +216,19 @@ Before pointing the tool at your own data, check a recipe's shape without
 resolving anything:
 
 ```sh
-reconcile validate --config recipe.toml
+constituent-reconcile validate --config recipe.toml
 ```
 
 An unknown section or a misspelled key (a typo'd `[consnet]`, an `auto_threshold`
 that should be `auto`) is rejected by name instead of silently running at a
-default; `reconcile validate` also checks that the input files it points at
+default; `constituent-reconcile validate` also checks that the input files it points at
 exist and prints the active policy pack and switches.
 
 Run the bundled demo, which resolves an incoming intake batch against an existing
 record set:
 
 ```sh
-reconcile run --config examples/intake-demo/recipe.toml --out out
+constituent-reconcile run --config examples/intake-demo/recipe.toml --out out
 ```
 
 ```text
@@ -237,18 +243,18 @@ It writes `out/resolved.csv` (the deduplicated records) and
 `out/review_queue.csv` (the uncertain pairs, with the two source values side by
 side for a human to approve or reject). Review the uncertain pairs in a
 browser (see below) or edit the CSV by hand, then carry decisions back in with
-`reconcile apply --decisions decisions.json`, which treats approved pairs as
+`constituent-reconcile apply --decisions decisions.json`, which treats approved pairs as
 merges and re-resolves.
 
 ### Reviewing matches in the browser
 
-`reconcile review` opens a local web queue over the uncertain pairs. A reviewer
+`constituent-reconcile review` opens a local web queue over the uncertain pairs. A reviewer
 steps through each candidate, sees the two records side by side with their
 source spans, and approves, corrects, or rejects it, with no jargon and no
 spreadsheet:
 
 ```sh
-reconcile review --config examples/intake-demo/recipe.toml --reviewer "your name" --out out
+constituent-reconcile review --config examples/intake-demo/recipe.toml --reviewer "your name" --out out
 ```
 
 It runs the pipeline, starts a server on `http://127.0.0.1:8765/`, and opens a
@@ -257,17 +263,17 @@ the `--reviewer` name with a timestamp, so you can stop and resume and so who
 decided each pair is answerable later. When you are done, apply the decisions:
 
 ```sh
-reconcile apply --config examples/intake-demo/recipe.toml --decisions out/decisions.json --out out
+constituent-reconcile apply --config examples/intake-demo/recipe.toml --decisions out/decisions.json --out out
 ```
 
 With `--require-second-reviewer` (on by default under the `dv` policy pack) a
 merge takes effect only after two different reviewers approve the same pair: the
 first approval is held as awaiting a second reviewer, a second reviewer resumes
 the same decisions file under their own `--reviewer` name to confirm or reject,
-and `reconcile apply` refuses a file that still holds half-approved pairs. Any
+and `constituent-reconcile apply` refuses a file that still holds half-approved pairs. Any
 rejection keeps the records separate immediately. The requirement belongs to the
-pack, not to the file: under a pack that requires two reviewers, `reconcile apply`
-and `reconcile compare-apply` count the distinct approvers recorded for every pair
+pack, not to the file: under a pack that requires two reviewers, `constituent-reconcile apply`
+and `constituent-reconcile compare-apply` count the distinct approvers recorded for every pair
 they are about to merge, so a decisions file reviewed earlier under a permissive
 pack, or one carrying no reviewer attribution at all, is refused rather than
 applied.
@@ -305,7 +311,7 @@ generated deterministically from obviously fake values (`Calibration Sample`
 names, `.invalid` email domains) and never from real data. Disclosure is part of
 the design: every page carries a banner saying planted pairs are present, though
 the individual pairs are not pointed out. Decisions on planted pairs are never
-written to the decisions file, so `reconcile apply` cannot merge a synthetic
+written to the decisions file, so `constituent-reconcile apply` cannot merge a synthetic
 record into real ones by construction. When the review server stops, the CLI
 reports how many planted pairs were decided in agreement with the known answers,
 with Cohen's kappa once at least two are decided.
@@ -313,7 +319,7 @@ with Cohen's kappa once at least two are decided.
 Score a run against known answers:
 
 ```sh
-reconcile eval --config examples/intake-demo/recipe.toml \
+constituent-reconcile eval --config examples/intake-demo/recipe.toml \
   --truth examples/intake-demo/ground_truth.json
 ```
 
@@ -343,7 +349,7 @@ for the comparison table.
 
 ### A one-page summary for a board or funder
 
-`reconcile report` renders the artifacts of a completed run as a one-page,
+`constituent-reconcile report` renders the artifacts of a completed run as a one-page,
 plain-language Markdown summary an executive director can hand to a board:
 what came in, what merged automatically, what a person reviewed, and what was
 withheld and why. The page carries counts only, with small groups suppressed
@@ -351,9 +357,9 @@ the same way `aggregate_summary.json` suppresses them; no name or record
 identifier appears. English and Spanish render from the same data:
 
 ```sh
-reconcile run --config examples/intake-demo/recipe-dv.toml --out out-dv
-reconcile report --run-dir out-dv --lang en --out out-dv/narrative-en.md
-reconcile report --run-dir out-dv --lang es --out out-dv/narrative-es.md
+constituent-reconcile run --config examples/intake-demo/recipe-dv.toml --out out-dv
+constituent-reconcile report --run-dir out-dv --lang en --out out-dv/narrative-en.md
+constituent-reconcile report --run-dir out-dv --lang es --out out-dv/narrative-es.md
 ```
 
 Omit `--out` to print to stdout. The command reads `run_summary.json` (counts
@@ -380,7 +386,7 @@ documented in [docs/MODEL-CARD-ASSISTANT.md](docs/MODEL-CARD-ASSISTANT.md).
 pip install -e ".[ai]"
 export ANTHROPIC_API_KEY=your-key   # or --ai-provider bedrock with AWS credentials
 
-reconcile ai-explain --config examples/intake-demo/recipe.toml --out out \
+constituent-reconcile ai-explain --config examples/intake-demo/recipe.toml --out out \
   --pair existing:E002 incoming:N004
 ```
 
@@ -503,10 +509,10 @@ upsert on that external id, so a re-run updates rather than duplicates. Nothing
 leaves the machine:
 
 ```sh
-reconcile run --config examples/intake-demo/recipe-salesforce-csv.toml --out out
+constituent-reconcile run --config examples/intake-demo/recipe-salesforce-csv.toml --out out
 # writes out/salesforce_import.csv
 
-reconcile run --config examples/intake-demo/recipe-civicrm-csv.toml --out out
+constituent-reconcile run --config examples/intake-demo/recipe-civicrm-csv.toml --out out
 # writes out/civicrm_import.csv
 ```
 
@@ -517,7 +523,7 @@ into a running CiviCRM instance instead, select the connector in the recipe's
 `[output]` section and pass the API key through the environment:
 
 ```sh
-CIVICRM_API_KEY=your-key reconcile run \
+CIVICRM_API_KEY=your-key constituent-reconcile run \
   --config examples/intake-demo/recipe-civicrm.toml --out out
 ```
 
@@ -530,7 +536,7 @@ endpoint. Configure it the same way and pass the access token through the
 environment:
 
 ```sh
-SF_TOKEN=your-access-token reconcile run \
+SF_TOKEN=your-access-token constituent-reconcile run \
   --config examples/intake-demo/recipe-salesforce.toml --out out
 ```
 
@@ -539,7 +545,7 @@ connector -- a Zapier or Make automation, an org's own intake API -- point
 the `webhook` connector at any endpoint that accepts a JSON POST:
 
 ```sh
-WEBHOOK_TOKEN=your-token WEBHOOK_SIGNING_SECRET=your-secret reconcile run \
+WEBHOOK_TOKEN=your-token WEBHOOK_SIGNING_SECRET=your-secret constituent-reconcile run \
   --config examples/intake-demo/recipe-webhook.toml --out out
 ```
 
@@ -554,7 +560,7 @@ Salesforce, this is a network target the `dv` policy pack refuses.
 resolved cluster id:
 
 ```sh
-AIRTABLE_TOKEN=your-personal-access-token reconcile run \
+AIRTABLE_TOKEN=your-personal-access-token constituent-reconcile run \
   --config examples/intake-demo/recipe-airtable.toml --out out
 ```
 
@@ -577,7 +583,7 @@ and the hash of the previous entry, so altering any past entry breaks the chain.
 Check it at any time:
 
 ```sh
-reconcile verify --provenance out/provenance.jsonl
+constituent-reconcile verify --provenance out/provenance.jsonl
 ```
 
 Each non-dry-run export also stamps `out/run_manifest.json`: BLAKE2b digests
@@ -594,11 +600,11 @@ The out directory accumulates files that carry constituent field values:
 `resolved.csv`, `review_queue.csv`, `withheld.csv`, and the CRM import files.
 The HUD comparable-database guidance the DV pack is modeled on expects
 individual records to be routinely destroyed once they are no longer needed.
-`reconcile destroy` executes that destruction over a stated retention window:
+`constituent-reconcile destroy` executes that destruction over a stated retention window:
 
 ```sh
-reconcile destroy --out out --older-than 30d --dry-run   # list what would go
-reconcile destroy --out out --older-than 30d             # delete and certify
+constituent-reconcile destroy --out out --older-than 30d --dry-run   # list what would go
+constituent-reconcile destroy --out out --older-than 30d             # delete and certify
 ```
 
 Only the known PII-bearing artifacts are eligible (an explicit list, not a
@@ -606,7 +612,7 @@ glob), and the provenance log is never touched. Each deleted file is hashed
 with SHA-256 before deletion and one `destroyed` certificate per file is
 appended to `out/provenance.jsonl`, so the chain proves what was destroyed,
 when, and under which policy without retaining any content. Check it with
-`reconcile verify` as usual.
+`constituent-reconcile verify` as usual.
 
 Two limits are stated rather than hidden. No retention window ships as a
 default, because how long records may live is a decision for the adopting
@@ -626,7 +632,7 @@ docker run --rm -v "$PWD/out:/work/out" constituent-reconciler \
 ```
 
 Mount your own recipe and data at `/work/data` to run against real input. The
-`reconcile schema` command prints the config, connector, and report schema
+`constituent-reconcile schema` command prints the config, connector, and report schema
 versions the build commits to (see `docs/adr/0006-schema-stability.md`).
 
 ### Installing without internet access
@@ -686,7 +692,7 @@ locally (this table plus the linked doc) pending a filed issue. Last reviewed:
 | Security & Supply-Chain | Applies — ASVS L2 (handles DV-survivor PII) | Partial — secret scan, dependency-vuln scan, SAST (Semgrep + CodeQL + zizmor), and a release-time CycloneDX SBOM + keyless build-provenance attestation (`release.yml`) enforced; container scan (Trivy) is enforced in CI; VEX is still a gap | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Security |
 | CI/CD | Applies | Partial — SHA-pinned actions, least-privilege tokens, `make verify` parity, `secrets`+`security` jobs, CODEOWNERS, and a solo-maintainer review waiver (ADR 0008) all in place; a live `protect-main` branch ruleset has been active since 2026-07-09 (force-push and deletion blocked, nine required check contexts, and the repository owner's standing bypass and no other, deliberately), though it does not yet carry the committed profile's pull-request and linear-history rules (parity delta recorded in [docs/rulesets/README.md](docs/rulesets/README.md)) | `.github/workflows/ci.yml`, [docs/adr/0008-solo-maintainer-review-waiver.md](docs/adr/0008-solo-maintainer-review-waiver.md), [docs/rulesets/](docs/rulesets/) |
 | Release & Versioning | Applies (release-producing: 0.1.0-0.8.0) | Partial — `.github/workflows/release.yml` is tag-triggered (`v*`), re-verifies at the tagged commit, checks tag/`pyproject.toml` version consistency, builds sdist+wheel, generates a CycloneDX SBOM, attests build provenance (keyless OIDC), and publishes a GitHub Release with the matching CHANGELOG section; gap — no `v*` tag has been cut yet, so the workflow is unexercised, and there is no PyPI publish stage (not yet published to PyPI) | [.github/workflows/release.yml](.github/workflows/release.yml), [CHANGELOG.md](CHANGELOG.md) |
-| Accessibility | Applies (`reconcile review` web UI) | Partial — structural WCAG 2.2 AA design and automated axe gate in place; manual screen-reader walkthrough remains | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Accessibility |
+| Accessibility | Applies (`constituent-reconcile review` web UI) | Partial — structural WCAG 2.2 AA design and automated axe gate in place; manual screen-reader walkthrough remains | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Accessibility |
 | Observability | Applies — Tier C plus model-call telemetry | Canonical GenAI spans/logs record tokens, duration, finish reason, and estimated cost; PII/content absence is enforced by tests | [docs/ROADMAP.md](docs/ROADMAP.md) § Observability |
 | Internationalization | Applies — deferred to 1.0 | Declared — EN/ES parity is a real commitment, not yet built (no catalog infra) | [docs/I18N.md](docs/I18N.md) |
 | AI Evaluation | Applies to opt-in extraction seams and the AI assistant package | Model/data cards, fail-closed kappa, mocked contract/fallback tests, and PII-free token/cost telemetry landed for the extraction seam; the assistant package adds a live, committed adversarial-refusal/OCR-precision/citation-grounding/consent-leakage/unanswerable-query eval suite with full provenance ([eval/ai/report.md](eval/ai/report.md)); live model quality remains deployer-specific either way | [docs/ROADMAP.md](docs/ROADMAP.md) § AI Evaluation Standard applicability, [docs/adr/0014-runtime-ai-at-the-edges.md](docs/adr/0014-runtime-ai-at-the-edges.md) |
@@ -695,7 +701,7 @@ locally (this table plus the linked doc) pending a filed issue. Last reviewed:
 | Incident Response | Applies | Adopted; no incident has been recorded for this repo to date, so `docs/incidents/` does not exist yet. The vulnerability-reporting channel and acknowledgement SLA are in SECURITY.md; an incident would follow the portfolio severity ladder and `incident` label convention with a committed postmortem | [SECURITY.md](SECURITY.md) |
 | Performance | Applies — operator-local CLI plus a locally served review UI; no hosted service, so there is no availability or latency SLO to publish | Measured, not gated — dated per-stage baselines over a large synthetic corpus are committed under `eval/` (`make perf-baseline`, and `make perf-baseline-pdf` for the mixed CSV+PDF intake path). Both are local commands rather than CI jobs, so no performance budget is merge-blocking | `Makefile`, [eval/](eval/) |
 | AI Development Measurement | Applies | Outcome-side only — the metrics ledger and the solo-scale DORA review are the committed, dated artifact; activity counters (sessions, tokens, lines changed, percent AI-generated) are deliberately not tracked or gated here, and the DORA review first falls due with the first tagged release | [docs/ROADMAP.md](docs/ROADMAP.md) metrics ledger and § DORA, at solo scale |
-| Data Governance | Applies (constituent PII, including DV-survivor records: highest sensitivity) | Partial: the data-flow map, per-pack retention and destruction model, and `reconcile destroy` destruction certificates are committed; constituent data stays operator-local and is never stored in this repo (fixtures are synthetic); recipes are schema-validated fail-closed at load. Gap: no per-source data-card directory beyond the extraction seam's model and data cards, and backup remains the operator's responsibility (documented, not tested here) | [docs/DATA-FLOW-AND-RETENTION.md](docs/DATA-FLOW-AND-RETENTION.md), [docs/DATA-CARD.md](docs/DATA-CARD.md) |
+| Data Governance | Applies (constituent PII, including DV-survivor records: highest sensitivity) | Partial: the data-flow map, per-pack retention and destruction model, and `constituent-reconcile destroy` destruction certificates are committed; constituent data stays operator-local and is never stored in this repo (fixtures are synthetic); recipes are schema-validated fail-closed at load. Gap: no per-source data-card directory beyond the extraction seam's model and data cards, and backup remains the operator's responsibility (documented, not tested here) | [docs/DATA-FLOW-AND-RETENTION.md](docs/DATA-FLOW-AND-RETENTION.md), [docs/DATA-CARD.md](docs/DATA-CARD.md) |
 
 Project-specific target values are recorded in
 [docs/ROADMAP.md](docs/ROADMAP.md) and findings in

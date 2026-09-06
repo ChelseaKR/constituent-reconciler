@@ -5,7 +5,7 @@
 # be writable and must uniquely identify a row. Pass a personal access token
 # with data.records:write access through the environment:
 #
-#   AIRTABLE_TOKEN=your-pat reconcile run \
+#   AIRTABLE_TOKEN=your-pat constituent-reconcile run \
 #     --config examples/intake-demo/recipe-airtable.toml --out out
 #
 # The connector sends at most ten rows per request, as Airtable requires. Under

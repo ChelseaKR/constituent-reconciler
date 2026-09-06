@@ -20,7 +20,7 @@ or assistant surface changes.
 
 ## System description and trust boundaries
 
-`reconcile run --config recipe.toml` (`src/constituent_reconciler/cli.py`)
+`constituent-reconcile run --config recipe.toml` (`src/constituent_reconciler/cli.py`)
 hands the recipe to the orchestrator in `src/constituent_reconciler/pipeline.py`.
 `_ingest_source()` routes each source path by extension: a `.csv` is read with
 the standard-library `csv` module in `read_records()`, and a `.pdf` is routed
@@ -59,7 +59,7 @@ The boundaries that matter:
    can reach a network call. The CRM connectors are the second egress; under a
    pack that requires local targets, `build_connector()` refuses a non-local
    connector before anything is written.
-4. **The local web boundary.** `reconcile review`
+4. **The local web boundary.** `constituent-reconcile review`
    (`src/constituent_reconciler/review/server.py`) is a second untrusted-input
    surface: the reviewer's own browser can be turned against a local server.
    It is already hardened and is cited under mitigations as a resolved
@@ -148,9 +148,9 @@ The boundaries that matter:
 
 ### Added 2026-08-03: the repair-plan surface (UC-03, ADR 0012)
 
-`reconcile plan-split` writes `repair_plan.json`, a local file that
+`constituent-reconcile plan-split` writes `repair_plan.json`, a local file that
 concentrates the raw field values of everyone caught in one bad merge.
-`reconcile apply-repair` (added 2026-08-21) executes it against the CiviCRM
+`constituent-reconcile apply-repair` (added 2026-08-21) executes it against the CiviCRM
 pilot behind the second-reviewer gate described below; a real apply also
 writes `repair_receipts.json`, the before/after values each operation
 actually changed.
@@ -160,7 +160,7 @@ actually changed.
   a bad merge's raw values into one small file. Mitigations present: both
   are written only into the operator's `--out` directory and are never
   transmitted; the provenance log stores each one's BLAKE2b digest, never
-  its content; `destruction.PII_ARTIFACTS` lists both, so `reconcile
+  its content; `destruction.PII_ARTIFACTS` lists both, so `constituent-reconcile
   destroy` removes them with a certificate (`tests/test_destruction.py`);
   and because planning is repeatable from the manifest and sources, the
   plan file can be destroyed the moment the repair is done without losing
@@ -210,7 +210,7 @@ then `apply_repair`. The DV pack refuses both through the same
 
 ### Added 2026-08-27: the AI assistant surface (ADR 0014)
 
-`reconcile ai-explain`, `ai-ask`, `ai-propose-corrections` and `ai-triage`
+`constituent-reconcile ai-explain`, `ai-ask`, `ai-propose-corrections` and `ai-triage`
 put an opt-in advisory layer over the review queue. Three of the four call a
 model provider, which makes this the second network path in the system after
 the extraction seam of T5, and `ai-propose-corrections` is the one command
@@ -224,7 +224,7 @@ no model and is unaffected by everything below.
   returns is ever applied, because the command's only output is the labeled
   draft `ai_ocr_proposals.json` and turning a proposal into a correction is
   the ordinary human path (`models.Correction`, the review server's correct
-  action, or `reconcile apply --decisions`); a proposal is accepted only when
+  action, or `constituent-reconcile apply --decisions`); a proposal is accepted only when
   its quote is an exact whitespace-normalized substring of the real source
   text (`ocr_propose._quote_verifies`,
   `tests/test_assistant_ocr_propose.py::test_never_invents_a_value_the_source_does_not_support`
@@ -252,7 +252,7 @@ no model and is unaffected by everything below.
   is the same shape as T6, and it should be read the same way. Mitigations
   present: the file is written only into the operator's `--out` directory
   and is never transmitted; it is listed in `destruction.PII_ARTIFACTS`, so
-  `reconcile destroy` removes it and certifies the removal, checked both by
+  `constituent-reconcile destroy` removes it and certifies the removal, checked both by
   the classification scan
   (`tests/test_destruction_inventory.py::test_every_artifact_the_code_writes_is_classified`)
   and, without consulting any list, by its bytes after a real destruction

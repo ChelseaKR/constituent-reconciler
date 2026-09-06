@@ -5,7 +5,7 @@
 # you load it with CiviCRM's "Import Contacts" and match on the external
 # identifier. A re-run keyed on the same identifier updates rather than duplicates.
 #
-#   reconcile run --config recipe-civicrm-csv.toml --out out
+#   constituent-reconcile run --config recipe-civicrm-csv.toml --out out
 #
 # The live API v4 push is the opt-in alternative (recipe-civicrm.toml). This file
 # target stays on the machine, so the DV policy pack permits it.

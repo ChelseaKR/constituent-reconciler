@@ -64,7 +64,7 @@ The smallest version that ships the differentiator.
   so destinations stay isolated and a new one is a single module.
 * Append-only, tamper-evident provenance log: each write records a BLAKE2b hash
   of the written fields and the previous entry's hash, forming a chain that
-  `reconcile verify` checks. Time comes from a pluggable timestamp authority; the
+  `constituent-reconcile verify` checks. Time comes from a pluggable timestamp authority; the
   default is the local clock, and an RFC 3161 trusted-timestamp authority is the
   seam a production deployment plugs in.
 * The consent gate runs before any connector is touched, so non-consented
@@ -148,7 +148,7 @@ because the tag itself is gated on adoption (see below):
   extraction extra included.
 * A **DPG Standard conformance note** (`docs/DPG-CONFORMANCE.md`) mapping the
   project against the nine indicators, honestly.
-* **Declared schema and interface versions** (`schema.py`, `reconcile schema`)
+* **Declared schema and interface versions** (`schema.py`, `constituent-reconcile schema`)
   for the config, the connector interface, and the JSON artifacts, with the
   versioning contract in docs/adr/0006-schema-stability.md.
 
@@ -157,10 +157,10 @@ because the tag itself is gated on adoption (see below):
 The differentiator's review surface, and the offline-first write path, two items
 the 1.0 milestone named.
 
-* **Local WCAG 2.2 AA web review queue** (`review/`, `reconcile review`): a
+* **Local WCAG 2.2 AA web review queue** (`review/`, `constituent-reconcile review`): a
   non-technical reviewer steps through the uncertain pairs in a browser, sees the
   two records side by side with source spans, and approves or rejects each merge.
-  Verdicts write to the same `decisions.json` that `reconcile apply` consumes, so
+  Verdicts write to the same `decisions.json` that `constituent-reconcile apply` consumes, so
   the web step replaces the hand-edited CSV without changing the pipeline. Built
   on `http.server`, no web-framework dependency.
 * **Offline by construction**: loopback-only bind, all assets inlined, and under
@@ -275,7 +275,7 @@ benchmark its selected model on representative local documents.
 
 ## Observability
 
-Tier C (library/CLI): `reconcile` is a local command-line pipeline and a
+Tier C (library/CLI): `constituent-reconcile` is a local command-line pipeline and a
 loopback-only review server, not a hosted service, so there is no request-rate,
 latency-SLO, or distributed-tracing surface for OTel/RUM tiers A or B to apply
 to. What Tier C asks for:

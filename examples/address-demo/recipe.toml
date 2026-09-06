@@ -1,7 +1,7 @@
 # recipe.toml — address-demo: shows address normalization in the match.
 #
 # Usage:
-#   reconcile run --config examples/address-demo/recipe.toml --out out
+#   constituent-reconcile run --config examples/address-demo/recipe.toml --out out
 #
 # The two source files write the same addresses two ways ("123 North Main
 # Street" versus "123 N Main St"). With address mapped and the deterministic

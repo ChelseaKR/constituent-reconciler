@@ -1,7 +1,7 @@
 # recipe-pdf.toml — example recipe that reads a folder of mixed PDFs and CSVs.
 #
 # Usage:
-#   reconcile run --config examples/intake-demo/recipe-pdf.toml --out out
+#   constituent-reconcile run --config examples/intake-demo/recipe-pdf.toml --out out
 #
 # Requires: pip install 'constituent-reconciler[extract]'
 #

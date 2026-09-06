@@ -18,12 +18,12 @@ Three out directories are built, one per surface, because the commands need
 different inputs and different destinations and merging them would mean one
 scenario silently overwriting another's manifest:
 
-* ``run``: ``reconcile run`` over an existing CSV and a text intake, through
+* ``run``: ``constituent-reconcile run`` over an existing CSV and a text intake, through
   the csv, civicrm_csv and salesforce_csv connectors with household grouping
-  and the stage cache on, then ``reconcile ai-propose-corrections``.
-* ``cutover``: ``reconcile compare``, the review session ``reconcile
-  compare-review`` serves, then ``reconcile compare-apply``.
-* ``repair``: ``reconcile run`` against a CiviCRM double, then ``plan-split``,
+  and the stage cache on, then ``constituent-reconcile ai-propose-corrections``.
+* ``cutover``: ``constituent-reconcile compare``, the review session ``constituent-reconcile
+  compare-review`` serves, then ``constituent-reconcile compare-apply``.
+* ``repair``: ``constituent-reconcile run`` against a CiviCRM double, then ``plan-split``,
   two ``approve-repair`` calls, and ``apply-repair --execute``.
 
 Coverage is no longer a comment. ``SWEPT_BY_CONTENT`` and
@@ -89,18 +89,18 @@ VERIFIED_CIVICRM_VERSION = "6.17.2"
 #: claim: the file must hold at least one planted sentinel before the
 #: destruction pass and none of them may be readable anywhere afterwards.
 SWEPT_BY_CONTENT: dict[str, str] = {
-    "resolved.csv": "reconcile run, csv connector",
-    "review_queue.csv": "reconcile run, on the uncertain pair the fixture plants",
-    "civicrm_import.csv": "reconcile run, civicrm_csv connector",
-    "salesforce_import.csv": "reconcile run, salesforce_csv connector",
-    "household_suggestions.csv": "reconcile run, [household] enabled",
-    "ai_ocr_proposals.json": "reconcile ai-propose-corrections",
-    "cutover_report.csv": "reconcile compare",
-    "cutover_review.csv": "reconcile compare",
-    "corrections.json": "the review session reconcile compare-review serves",
-    "target_corrections.csv": "reconcile compare-apply",
-    "repair_plan.json": "reconcile plan-split",
-    "repair_receipts.json": "reconcile apply-repair --execute",
+    "resolved.csv": "constituent-reconcile run, csv connector",
+    "review_queue.csv": "constituent-reconcile run, on the uncertain pair the fixture plants",
+    "civicrm_import.csv": "constituent-reconcile run, civicrm_csv connector",
+    "salesforce_import.csv": "constituent-reconcile run, salesforce_csv connector",
+    "household_suggestions.csv": "constituent-reconcile run, [household] enabled",
+    "ai_ocr_proposals.json": "constituent-reconcile ai-propose-corrections",
+    "cutover_report.csv": "constituent-reconcile compare",
+    "cutover_review.csv": "constituent-reconcile compare",
+    "corrections.json": "the review session constituent-reconcile compare-review serves",
+    "target_corrections.csv": "constituent-reconcile compare-apply",
+    "repair_plan.json": "constituent-reconcile plan-split",
+    "repair_receipts.json": "constituent-reconcile apply-repair --execute",
 }
 
 #: The rest of ``PII_ARTIFACTS``: files this fixture's real writers do produce,
@@ -114,8 +114,8 @@ SWEPT_BY_CONTENT: dict[str, str] = {
 #: the writer ran, the file was on disk before the pass, and the pass deleted
 #: it.
 SWEPT_BY_EXISTENCE: dict[str, str] = {
-    "withheld.csv": "reconcile run, on the revoked-consent record the fixture plants",
-    "cutover_withheld.csv": "reconcile compare-apply, on that same revoked record",
+    "withheld.csv": "constituent-reconcile run, on the revoked-consent record the fixture plants",
+    "cutover_withheld.csv": "constituent-reconcile compare-apply, on that same revoked record",
 }
 
 
@@ -300,7 +300,7 @@ def _text_sourced_record_id(out_dir: Path) -> str:
 
 
 def _build_run_scenario(root: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """``reconcile run`` on three connectors, then ``ai-propose-corrections``.
+    """``constituent-reconcile run`` on three connectors, then ``ai-propose-corrections``.
 
     ``chdir`` is required rather than cosmetic: a text intake's source span
     records the document's bare filename, so the source text
@@ -419,7 +419,7 @@ def _build_cutover_scenario(root: Path) -> Path:
     argv = ["--left", str(left_recipe), "--right", str(right_recipe), "--out", str(out_dir)]
     assert main(["compare", *argv]) == 0
 
-    # The same ReviewSession surface `reconcile compare-review` serves, driven
+    # The same ReviewSession surface `constituent-reconcile compare-review` serves, driven
     # headlessly because serving it would need a browser. Correcting a value
     # counts as this reviewer's approval of the pair, so recording a verdict
     # afterwards would abandon the correction as "approve as is".
@@ -668,7 +668,7 @@ def test_the_sweep_exercises_every_destroyable_artifact() -> None:
 
     unclassified = _unclassified_artifacts()
     assert not unclassified, (
-        "these artifacts are destroyed by `reconcile destroy` but no scenario in "
+        "these artifacts are destroyed by `constituent-reconcile destroy` but no scenario in "
         "this module drives their writer, so nothing here proves the destruction "
         "certificate they get is honest. Extend the fixture, or classify them in "
         f"SWEPT_BY_EXISTENCE with the reason a sentinel cannot reach them: {sorted(unclassified)}"
@@ -769,7 +769,7 @@ def test_the_stage_cache_entries_hold_field_values_and_are_swept(
 
 
 def test_no_sentinel_survives_a_destruction_pass(populated_out_dirs: dict[str, Path]) -> None:
-    """The whole claim of ``reconcile destroy``, checked against the bytes.
+    """The whole claim of ``constituent-reconcile destroy``, checked against the bytes.
 
     This is the assertion that failed on the pre-fix code in August 2026: it
     reported ``ai_ocr_proposals.json`` and ``household_suggestions.csv`` still
@@ -783,7 +783,7 @@ def test_no_sentinel_survives_a_destruction_pass(populated_out_dirs: dict[str, P
         assert summaries[name].destroyed, f"the {name} pass destroyed nothing, so it proves nothing"
         survivors = _surviving_sentinels(out_dir)
         assert not survivors, (
-            "`reconcile destroy` reported success and issued destruction certificates, "
+            "`constituent-reconcile destroy` reported success and issued destruction certificates, "
             f"but these planted field values are still readable under the {name} out "
             "directory. Each file named here is written by this package and is missing "
             f"from destruction.PII_ARTIFACTS: {survivors}"
@@ -810,7 +810,8 @@ def test_every_exercised_artifact_is_gone_after_the_pass(
 
     still_here = exercised & _existing_artifacts(populated_out_dirs)
     assert not still_here, (
-        f"`reconcile destroy` exited without an error and left these behind: {sorted(still_here)}"
+        "`constituent-reconcile destroy` exited without an error and left these behind: "
+        f"{sorted(still_here)}"
     )
 
 

@@ -1,6 +1,6 @@
 """Reviewed correction-file export for a migration cutover (UC-02, PR 2).
 
-``reconcile compare`` reports how two exports line up; this module carries the
+``constituent-reconcile compare`` reports how two exports line up; this module carries the
 human review of that comparison into the one artifact the cutover needs next:
 a local, import-ready correction file for the target side. The organization
 loads the file with the target CRM's own import tool. Nothing here mutates
@@ -162,7 +162,7 @@ def verify_compare_manifest(
     """Load and verify the comparison manifest, fail-closed on any drift.
 
     Returns the stored manifest so a successful export can extend it. A
-    missing manifest means the operator has not run ``reconcile compare`` into
+    missing manifest means the operator has not run ``constituent-reconcile compare`` into
     this directory; a mismatched one means an input or recipe changed after
     the comparison was reviewed. Both refuse.
     """
@@ -170,7 +170,7 @@ def verify_compare_manifest(
     manifest_path = out_dir / COMPARE_MANIFEST_FILENAME
     if not manifest_path.is_file():
         raise CompareError(
-            f"no comparison manifest at {manifest_path}; run reconcile compare "
+            f"no comparison manifest at {manifest_path}; run constituent-reconcile compare "
             "into this output directory first so the export is bound to a "
             "recorded comparison"
         )
@@ -192,7 +192,7 @@ def verify_compare_manifest(
         raise CompareError(
             f"the comparison manifest {manifest_path} does not match the current "
             f"inputs (differs on: {', '.join(drifted)}); an input or recipe "
-            "changed after the comparison was made. Re-run reconcile compare and "
+            "changed after the comparison was made. Re-run constituent-reconcile compare and "
             "review again before exporting"
         )
     return {str(key): value for key, value in stored.items()}
@@ -262,7 +262,7 @@ def read_decisions(
             return frozenset(), frozenset()
         raise CompareError(
             f"no decisions file at {decisions_path} while {len(result.review_pairs)} "
-            "pair(s) need review; run reconcile compare-review first. The "
+            "pair(s) need review; run constituent-reconcile compare-review first. The "
             "correction file is only exported after a person has decided every "
             "uncertain pair"
         )
@@ -278,7 +278,7 @@ def read_decisions(
         raise CompareError(
             f"{decisions_path} holds {len(awaiting)} pair(s) still awaiting a "
             f"second reviewer ({named}); have a second reviewer finish "
-            "(reconcile compare-review --reviewer <other-name>), or reject the pairs"
+            "(constituent-reconcile compare-review --reviewer <other-name>), or reject the pairs"
         )
     if require_second_reviewer:
         unconfirmed = approved_without_second_approval(data)
@@ -288,7 +288,7 @@ def read_decisions(
                 f"{decisions_path} cannot show two distinct approvers for "
                 f"{len(unconfirmed)} approved pair(s) ({named}), and a policy pack on "
                 "one of these sides requires two-person review. Have a second "
-                "reviewer review these pairs (reconcile compare-review --reviewer "
+                "reviewer review these pairs (constituent-reconcile compare-review --reviewer "
                 "<other-name>); a decisions file that records no reviewer "
                 "attribution cannot be applied under this pack at all"
             )
@@ -302,7 +302,7 @@ def read_decisions(
         raise CompareError(
             f"the decisions file {decisions_path} decides {sorted(stray)!r}, a pair "
             "this comparison never scored; it belongs to a different comparison. "
-            "Re-run reconcile compare-review against these inputs"
+            "Re-run constituent-reconcile compare-review against these inputs"
         )
     return approved, rejected
 
@@ -315,7 +315,7 @@ def apply_review(
     """Apply reviewed verdicts and re-partition, refusing anything undecided.
 
     An approved pair becomes a confident merge and a rejected one a durable
-    cannot-link, the same overrides ``reconcile apply`` feeds back into a run.
+    cannot-link, the same overrides ``constituent-reconcile apply`` feeds back into a run.
     Cannot-link enforcement may return automatic merges to review; any pair
     still in the review band after that stops the export, fail-closed.
     """

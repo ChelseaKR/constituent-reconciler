@@ -1,12 +1,12 @@
-"""The bundled demos as package data, and the ``reconcile demo`` command.
+"""The bundled demos as package data, and the ``constituent-reconcile demo`` command.
 
 ``examples/`` at the repository root is what every ``--config`` path in the
 README points into. It ships in the sdist and in the Docker image, and until
 2026-09-02 it did not ship in the wheel, so an operator who installed a release
-(``uvx --from git+...@v0.8.0``, or a downloaded wheel) had ``reconcile --help``
+(``uvx --from git+...@v0.8.0``, or a downloaded wheel) had ``constituent-reconcile --help``
 and then a bare ``FileNotFoundError`` from the Quickstart's first real command.
 The same tree is now package data under ``constituent_reconciler/examples``,
-and ``reconcile demo`` writes it to disk so the documented paths work from an
+and ``constituent-reconcile demo`` writes it to disk so the documented paths work from an
 installed wheel exactly as they do from a clone. ``tests/test_demo.py`` pins
 the packaged tree and the committed one byte-identical in both directions, so
 the copy cannot drift from the one the README, the Makefile and the Dockerfile
@@ -31,7 +31,7 @@ EXAMPLES_ROOT = Path(__file__).parent / "examples"
 DEFAULT_TARGET = Path("examples")
 """The relative path every documented ``--config`` uses."""
 
-NEXT_STEP = "reconcile run --config {recipe} --out out"
+NEXT_STEP = "constituent-reconcile run --config {recipe} --out out"
 """What to run once the demo is on disk, printed with the real recipe path."""
 
 

@@ -1388,7 +1388,7 @@ def export_comparable(
 ) -> tuple[ComparableReport, Path]:
     """Write only the suppressed comparable-database report.
 
-    Backs the standalone ``reconcile export-comparable`` command: one call,
+    Backs the standalone ``constituent-reconcile export-comparable`` command: one call,
     independent of ``recipe.comparable_export`` (which instead controls
     whether ``export`` above writes this report as a side effect of a normal
     ``run``/``apply``). Uses the recipe's ``comparable_breakdown_fields`` and

@@ -49,7 +49,7 @@ that exists in v0.7 unless it is explicitly a "wants next."
   programs), the people who fund and assure it (a grant-compliance officer, a
   DPG/open-source reviewer), and the owner who maintains it.
 - **Protocol.** For each persona: a goal, a walkthrough of the real surfaces they
-  would touch (`reconcile run`, `reconcile review`, the review queue CSV, the
+  would touch (`constituent-reconcile run`, `constituent-reconcile review`, the review queue CSV, the
   provenance log, the DV pack, the CRM export files, the eval report), what would
   work, where they would stall, and an open "what would make this a yes" prompt.
   Data-subject personas are interviewed about what they would need to **trust**
@@ -129,7 +129,7 @@ real audience segments.
 
 ### A2 — Denise, the review-queue reviewer (the product's primary user)
 - **Goal:** step through the uncertain pairs and decide approve, correct, or reject, without understanding probabilistic matching.
-- **Values today:** `reconcile review` opens a local browser queue showing the two records side by side with their source spans; the fail-closed gate means anything below threshold reached her instead of merging silently; the WCAG 2.2 AA structure (real comparison table, status by text and symbol not colour alone, `A`/`R`/`J`/`K` keyboard shortcuts, works with no JavaScript); each verdict saves to `decisions.json` so she can stop and resume.
+- **Values today:** `constituent-reconcile review` opens a local browser queue showing the two records side by side with their source spans; the fail-closed gate means anything below threshold reached her instead of merging silently; the WCAG 2.2 AA structure (real comparison table, status by text and symbol not colour alone, `A`/`R`/`J`/`K` keyboard shortcuts, works with no JavaScript); each verdict saves to `decisions.json` so she can stop and resume.
 - **Gets stuck:** the queue shows her the two records but not, in words she can act on, *why* the matcher thought they might be the same person or which fields disagreed; she is deciding on the source spans and her own judgment alone.
 - **Wants next:** a plain-language "these agree on last name and address, differ on date of birth" line beside each pair; the screen-reader walkthrough and Spanish copy that are still open before the 1.0 accessibility gate.
 - **Adopts if:** she can clear a queue confidently in an afternoon. **Walks if:** she feels she is guessing, because a wrong approval is the expensive error and she knows it.
@@ -143,7 +143,7 @@ real audience segments.
 
 ### A4 — Walter, volunteer running the batch
 - **Goal:** run the review queue a few hours a week with no technical training, the way the project says a volunteer can.
-- **Values today:** `reconcile review` is a browser window with no spreadsheet and no jargon; the keyboard-only flow; the resume-from-`decisions.json` behavior so a half-finished queue is not lost.
+- **Values today:** `constituent-reconcile review` is a browser window with no spreadsheet and no jargon; the keyboard-only flow; the resume-from-`decisions.json` behavior so a half-finished queue is not lost.
 - **Gets stuck:** getting *to* the review queue still means a recipe TOML file and a CLI invocation that a volunteer did not write; the Docker path helps but is still a command line.
 - **Wants next:** a gentler on-ramp from "here is a folder of intake" to "here is your queue"; the Spanish UI.
 - **Adopts if:** someone sets up the recipe once and he only ever touches the browser queue. **Walks if:** every session starts with a command he does not understand.
@@ -154,7 +154,7 @@ real audience segments.
 
 ### B1 — Priya, data/ops manager and accidental DBA
 - **Goal:** cut the staff hours spent reconciling disconnected tools and name mismatches each reporting cycle (the kind of 40-to-80-hour drain the README cites).
-- **Values today:** the Splink matcher arrives pre-tuned with m and u defaults so she supplies no labeled pairs and no blocking rules; CRM write-back is an upsert keyed on an external id, so a re-run updates rather than duplicates; `reconcile schema` declares the config, connector, and report schema versions she is building against; `--dry-run` shows what a write would do first.
+- **Values today:** the Splink matcher arrives pre-tuned with m and u defaults so she supplies no labeled pairs and no blocking rules; CRM write-back is an upsert keyed on an external id, so a re-run updates rather than duplicates; `constituent-reconcile schema` declares the config, connector, and report schema versions she is building against; `--dry-run` shows what a write would do first.
 - **Gets stuck:** the metrics-ledger targets in `docs/ROADMAP.md` are still TBD, so she cannot point at a committed false-merge threshold when her director asks "how wrong can it be"; there is no recorded end-to-end demo of messy input landing in a running CiviCRM instance to show the team.
 - **Wants next:** filled-in metric targets; HMIS comparable-database and Open Referral HSDS output shapes so her funder reports come out of the same pipeline; an incremental re-run that only re-resolves changed records on a large existing set.
 - **Adopts if:** a cycle's reconciliation drops from days to an afternoon. **Walks if:** she cannot defend the error rate or the re-run duplicates contacts.
@@ -172,7 +172,7 @@ real audience segments.
 
 ### C1 — Aisha, IT / security lead
 - **Goal:** approve the tool without adding attack surface or a phone-home path.
-- **Values today:** deterministic offline default with the cloud seam optional and policy-gated; the review server binds loopback only and inlines all assets with no external fetch; under the DV pack a non-loopback bind is refused fail-closed; the append-only BLAKE2b provenance chain that `reconcile verify` checks; one-command Docker self-host.
+- **Values today:** deterministic offline default with the cloud seam optional and policy-gated; the review server binds loopback only and inlines all assets with no external fetch; under the DV pack a non-loopback bind is refused fail-closed; the append-only BLAKE2b provenance chain that `constituent-reconcile verify` checks; one-command Docker self-host.
 - **Gets stuck:** uploaded PDFs and scans are untrusted input and the primary threat surface, and the threat model is a documented TODO in `docs/RESPONSIBLE-TECH-AUDITS.md`; the supply-chain items (SBOM, Sigstore signing, SHA-pinned actions, OIDC) are named as landing on the path to 1.0, not done.
 - **Wants next:** the committed threat model for the parse path; the supply-chain hardening shipped; a model and data card for the optional Bedrock seam.
 - **Adopts if:** it passes his review as offline-by-construction with a real SBOM. **Walks if:** the parser is a soft target or a release is unsigned.

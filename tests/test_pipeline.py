@@ -219,7 +219,7 @@ def test_comparable_export_off_by_default_produces_no_report(tmp_path: Path) -> 
 def test_recipe_comparable_export_writes_comparable_report_via_run(tmp_path: Path) -> None:
     # This is the gap the README claims but the original implementation never
     # wired: a recipe with [comparable].export = true must make a plain
-    # ``reconcile run`` (pipeline.export here) emit comparable_report.json,
+    # ``constituent-reconcile run`` (pipeline.export here) emit comparable_report.json,
     # not only the standalone ``export-comparable`` command.
     recipe = load_recipe(EXAMPLES / "recipe.toml")
     export_recipe = replace(
@@ -789,7 +789,7 @@ def _read_for_ids(path: Path, *, id_column: str | None = None) -> list[Record]:
 
 def test_inserting_a_row_leaves_other_generated_ids_unchanged(tmp_path: Path) -> None:
     # The failure this guards against: a row inserted into a CSV between
-    # `reconcile review` and `reconcile apply` must not re-bind recorded
+    # `constituent-reconcile review` and `constituent-reconcile apply` must not re-bind recorded
     # verdicts to different people. Ids derive from content, not position.
     before = tmp_path / "before.csv"
     before.write_text("First Name,Last Name\nAda,Lovelace\nGrace,Hopper\n", encoding="utf-8")

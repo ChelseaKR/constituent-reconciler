@@ -147,7 +147,7 @@ def test_repair_plan_is_a_listed_artifact_and_is_destroyed(tmp_path: Path) -> No
     """The split-repair plan holds raw field values, so destroy must cover it.
 
     ADR 0012 names the destruction-inventory entry a prerequisite for storing
-    plans at all: without it, `reconcile destroy` would leave the one artifact
+    plans at all: without it, `constituent-reconcile destroy` would leave the one artifact
     that concentrates a bad merge's raw values behind.
     """
 
@@ -182,7 +182,7 @@ def test_repair_receipts_is_a_listed_artifact_and_is_destroyed(tmp_path: Path) -
     """The applied-repair receipt holds before/after raw values, so destroy must cover it.
 
     ADR 0012 places the same duty on ``apply_repair``'s receipt file as on
-    the plan file it is written beside: without this entry, `reconcile
+    the plan file it is written beside: without this entry, `constituent-reconcile
     destroy` would leave behind the one artifact that concentrates the raw
     values a real repair actually changed.
     """

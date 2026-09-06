@@ -84,7 +84,9 @@ class _Response:
 
 
 def _apply_command(session: ReviewSession) -> str:
-    return f"reconcile apply --config <recipe.toml> --decisions {session.decisions_path}"
+    return (
+        f"constituent-reconcile apply --config <recipe.toml> --decisions {session.decisions_path}"
+    )
 
 
 def _host_is_valid(context: RequestContext) -> bool:

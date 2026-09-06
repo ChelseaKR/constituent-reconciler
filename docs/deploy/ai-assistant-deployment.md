@@ -13,7 +13,7 @@ inferred from whatever got built first. Deployment itself is a
 Unlike a hosted web service, this project ships as a CLI tool and a Docker
 image an operator runs on their own machine or their own infrastructure.
 There is no server this project operates on anyone's behalf today, and the
-AI assistant package does not change that: `reconcile ai-explain`,
+AI assistant package does not change that: `constituent-reconcile ai-explain`,
 `ai-ask`, `ai-propose-corrections`, and `ai-triage` are commands a
 deployer's own operator runs, against their own recipe and their own
 run directory, using their own model-provider credentials

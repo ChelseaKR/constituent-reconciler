@@ -70,7 +70,7 @@ but matching remains population-dependent.
 
 **Privacy and failure behavior.**
 
-- The cache is local and treated as a PII artifact by `reconcile destroy`.
+- The cache is local and treated as a PII artifact by `constituent-reconcile destroy`.
 - A cache entry with a schema/version/hash mismatch is ignored, never coerced.
 - DV mode allows only a cache path under the local output root unless the
   operator explicitly configures another local retention boundary.
@@ -94,7 +94,7 @@ live system.
 
 **Product shape.**
 
-1. Add `reconcile compare --left <recipe/source> --right <recipe/source>`.
+1. Add `constituent-reconcile compare --left <recipe/source> --right <recipe/source>`.
 2. Treat both sides as read-only sources; no connector is built.
 3. Produce reviewed identity outcomes plus a cutover report: matched people,
    left-only, right-only, conflicting values, and ambiguous clusters.
@@ -131,7 +131,7 @@ safe way to understand the repair.
 1. Add connector capabilities separate from `Connector.write_all`:
    `inspect_repair` and, only for adapters with verified semantics,
    `apply_repair`.
-2. `reconcile plan-split --manifest ... --cluster ...` reconstructs members and
+2. `constituent-reconcile plan-split --manifest ... --cluster ...` reconstructs members and
    lineage from the source batch, requires a reason and reviewer identity, and
    writes a local repair plan.
 3. The plan records the old external id, proposed split records, fields that
