@@ -18,9 +18,12 @@ on:
 # Least-privilege default token; the job widens only what it needs.
 permissions: {}
 
+# Cancel superseded pull-request runs only; a push to main keeps its verdict.
+# See the longer note in ci.yml — every push to main shares one concurrency
+# group, so cancelling on push loses a commit's result silently.
 concurrency:
   group: scorecard-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   analysis:

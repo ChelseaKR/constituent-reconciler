@@ -16,9 +16,18 @@ permissions:
 
 # Supersede in-flight runs on the same ref (CI-CD-STANDARD §11c) — a newer
 # push makes the older run's result moot, so don't spend minutes finishing it.
+#
+# Cancellation is limited to pull-request runs, which is where the superseding
+# actually happens and so where the minutes are. A push to main must not be
+# cancelled: `github.ref` is `refs/heads/main` for every one of them, so two
+# merges close together land in the same concurrency group and the second
+# cancels the first — leaving that commit on main with no verdict at all,
+# which reads the same as "not failed". That is not hypothetical here; it
+# happened to 12088bb ("ci: add job timeouts...", #133), whose every check,
+# `verify` included, is `cancelled`.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   verify:
