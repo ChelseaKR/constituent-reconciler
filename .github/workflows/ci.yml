@@ -25,8 +25,24 @@ permissions:
 # which reads the same as "not failed". That is not hypothetical here; it
 # happened to 12088bb ("ci: add job timeouts...", #133), whose every check,
 # `verify` included, is `cancelled`.
+#
+# Not cancelling is necessary but not sufficient, which is why the group key
+# below is no longer `github.ref` alone. A concurrency group holds one running
+# run and one *pending* run. When a third run joins, GitHub evicts the pending
+# one — it ends `cancelled` having dispatched zero jobs, and
+# `cancel-in-progress: false` does not protect it, because that setting governs
+# the run that is already executing, not the one still queued. Under the runner
+# contention this repository actually sees, three merges can easily be in flight
+# at once, so the middle commit lands on `main` with no verdict by exactly the
+# route the note above set out to close.
+#
+# Keying every non-pull-request run on `github.sha` gives each push, scheduled
+# run and manual dispatch its own group, so they never contend and can never
+# evict one another. Pull requests keep a single shared key per ref, so pushing
+# again to a branch still supersedes the now-irrelevant run — which is where the
+# minutes were being saved in the first place.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
