@@ -62,6 +62,44 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   still the maintainer's decision (#68).
 
 ### Added
+- **`constituent-reconcile init` scaffolds a recipe from your own column headers**
+  (#150). `docs/ADOPTION-KIT.md` Step 2 asked a non-technical operator to write
+  `recipe.toml` by hand, and `validate` would tell them afterwards what was wrong
+  without helping them write it. The first recipe is where a pilot stalls.
+
+  `constituent-reconcile init --existing clients.csv --incoming intake/ --out
+  recipe.toml` reads the header row of each CSV and writes a starter recipe.
+  Directories are read a file at a time, and the header comment names which files
+  were inspected and which extensions were found and skipped.
+
+  What it refuses to do is the point of it:
+  - **It never reads past the header.** Nothing is inferred from anyone's data.
+    A test scaffolds two files with identical headers and completely different
+    contents and asserts the two recipes are byte-identical.
+  - **It maps only on an exact alias from a published, closed table**, compared
+    case-insensitively with runs of whitespace collapsed and in no other way.
+    `Client Given` is not `first name`. Everything unrecognised becomes a named
+    `CHOOSE` with the operator's real column names beside it, and every column the
+    recipe does not use is listed at the foot of the file so nothing is dropped
+    silently. Two columns claiming one field maps neither and names both: a tie is
+    an ambiguity a person resolves. `tests/test_scaffold.py` asserts every alias is
+    published in `docs/ADOPTION-KIT.md`, that no alias is claimed by two fields, and
+    that each is already in comparison form.
+  - **It does not choose a policy pack.** `[policy] pack` is written empty, which
+    `policy_for` rejects, so the file does not load until a person has decided. The
+    pack settles whether personal data may leave the machine and it is not a field
+    a generator gets to default.
+  - **It will not overwrite an existing recipe**, whatever that file contains.
+
+  `validate` learns to read a scaffold's outstanding `CHOOSE` lines from the raw text
+  before `load_recipe` raises, so an operator sees every open decision at once
+  rather than one per run. An unmapped canonical field is reported as a note and
+  not as a failure: a field the data has no column for is a normal end state, and
+  failing on it would mean a scaffolded recipe could never become valid.
+
+  Verified end to end: scaffolding the demo CSVs and choosing `pack = "default"`
+  produces a recipe whose `run` writes a `resolved.csv` byte-identical to the
+  committed `examples/intake-demo/recipe.toml`'s.
 - **`constituent-reconcile demo`, and the bundled demos ship in the wheel.** `examples/`
   is committed at the repository root and was copied into the sdist and the
   Docker image, but a wheel carried the importable package only, so an
