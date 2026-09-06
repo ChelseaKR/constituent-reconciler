@@ -16,8 +16,16 @@ authors:
     family-names: "Kelly-Reif"
     email: "ckellyreif@gmail.com"
     alias: "ChelseaKR"
+# `version` is the version under development, the one `pyproject.toml`
+# declares. `date-released` is deliberately absent, and stays absent until a
+# tag exists: `git tag -l` prints nothing here, `release.yml` has never fired,
+# and there is no GitHub Release. This file carried `date-released:
+# "2026-09-02"` until 2026-09-06, which named a day on which nothing was
+# released — and unlike the README sentence that says no tag has been cut, this
+# field is what GitHub's "Cite this repository" panel and Zenodo actually read.
+# `tests/test_release_versions.py` holds it empty while no tag exists and
+# requires it once one does.
 version: "0.8.0"
-date-released: "2026-09-02"
 license: "Apache-2.0"
 repository-code: "https://github.com/ChelseaKR/constituent-reconciler"
 url: "https://github.com/ChelseaKR/constituent-reconciler"
