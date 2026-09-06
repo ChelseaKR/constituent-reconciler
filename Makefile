@@ -55,11 +55,16 @@ axe: axe-fixtures
 
 # Regenerate the committed eval report. Run after any change to matching.
 # The calibration flag arms the fail-closed kappa gate for the LLM field judge.
+# --controls runs the negative controls (src/constituent_reconciler/controls.py)
+# and renders them in the committed report. They are deterministic under the
+# pinned seed, so CI's `git diff --exit-code eval/report.md` covers the controls
+# section the same way it covers the measurement above it.
 eval:
 	.venv/bin/constituent-reconcile eval \
 		--config examples/intake-demo/recipe.toml \
 		--truth examples/intake-demo/ground_truth.json \
 		--calibration examples/intake-demo/calibration_labels.json \
+		--controls \
 		--out eval/report.md
 
 # Regenerate the committed extraction eval report. Run after any change to the

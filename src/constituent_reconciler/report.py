@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from constituent_reconciler.controls import ControlsReport
 from constituent_reconciler.evaluate import (
     KAPPA_GATE,
     CalibrationReport,
@@ -194,6 +195,55 @@ DEFAULT_PROVENANCE = (
 )
 
 
+def _controls_lines(controls: ControlsReport | None) -> list[str]:
+    """Render the negative controls, in their own section and never blended in.
+
+    The headline table is what the pipeline measured. This section is what
+    happens when the pipeline is deliberately broken, which is a different kind
+    of claim, so it gets its own heading and its own verdict. A reader who wants
+    the number reads the table; a reader who wants to know whether the number
+    could have been anything else reads this.
+    """
+
+    if controls is None:
+        return []
+    lines = [
+        "",
+        "## Controls",
+        "",
+        "Each row below is a deliberate sabotage with a known correct answer, run "
+        "against this same dataset. The expectation was written before the number "
+        "was measured. A control that does not move is the finding: it means the "
+        "metric above is not reading what the report says it reads.",
+        "",
+        f"Seed: `{controls.seed}`. Every control is deterministic under it, so this "
+        "section is byte-identical on a re-run.",
+        "",
+        "| Control | Rules out | Expected | Observed | Result |",
+        "|---------|-----------|----------|----------|--------|",
+    ]
+    lines += [
+        f"| `{outcome.name}` | {outcome.rules_out} | {outcome.expectation} | "
+        f"{outcome.observed} | **{'PASS' if outcome.passed else 'FAIL'}** |"
+        for outcome in controls.outcomes
+    ]
+    scoped = [outcome for outcome in controls.outcomes if outcome.scope]
+    if scoped:
+        lines += [
+            "",
+            "What the controls did not cover, stated so a partial control is not read "
+            "as a whole one:",
+            "",
+        ]
+        lines += [f"- `{outcome.name}`: {outcome.scope}." for outcome in scoped]
+    verdict = "PASS" if controls.passed else "FAIL"
+    lines += [
+        "",
+        f"Controls gate: **{verdict}**.",
+    ]
+    return lines
+
+
 def render_eval_markdown(
     report: EvalReport,
     *,
@@ -203,6 +253,7 @@ def render_eval_markdown(
     provenance: str | None = None,
     generator: str = "constituent-reconcile eval",
     field_judge_ran: bool = True,
+    controls: ControlsReport | None = None,
 ) -> str:
     """Render the eval report.
 
@@ -227,6 +278,12 @@ def render_eval_markdown(
     the path at all; see :func:`_calibration_lines` for why a run without one
     reports "not applicable" rather than a kappa failure. Both default to the
     ``constituent-reconcile eval`` behaviour, so committed fixture reports are unchanged.
+
+    ``controls`` carries the negative-control outcomes when the caller ran them
+    (``constituent-reconcile eval --controls``). They render in their own
+    section after everything else and are never folded into the headline table:
+    a sabotage result and a measurement are different claims, and mixing them
+    would make the report's own numbers ambiguous.
     """
     gate_pass = report.false_merge_rate <= gate_threshold
     gate_word = "PASS" if gate_pass else "FAIL"
@@ -312,6 +369,7 @@ def render_eval_markdown(
             for segment in report.segments
         ]
     lines += _calibration_lines(calibration, field_judge_ran=field_judge_ran)
+    lines += _controls_lines(controls)
     return "\n".join(lines) + "\n"
 
 

@@ -42,3 +42,24 @@ Cohen's kappa measures agreement between the extractor's confidence verdicts and
 Cohen's kappa: **0.80** over 20 labels.
 
 Kappa gate at 0.60: **PASS** (observed 0.80).
+
+## Controls
+
+Each row below is a deliberate sabotage with a known correct answer, run against this same dataset. The expectation was written before the number was measured. A control that does not move is the finding: it means the metric above is not reading what the report says it reads.
+
+Seed: `20260906`. Every control is deterministic under it, so this section is byte-identical on a re-run.
+
+| Control | Rules out | Expected | Observed | Result |
+|---------|-----------|----------|----------|--------|
+| `shuffled-labels` | a ground-truth file that is not actually being read | mean coverage precision over 20 seeded permutations falls to at most 10x the base rate (0.1994); real precision is 0.8750 | mean 0.0187, worst permutation 0.1250, base rate 0.0199 | **PASS** |
+| `null-matcher (below review)` | banding that ignores the score | every candidate rescored at 0.4000, under the review threshold 0.8000: auto recall and coverage recall must both be 0 | auto recall 0.0000 over 0 auto pairs, coverage recall 0.0000 | **PASS** |
+| `null-matcher (at auto threshold)` | a gated false-merge rate that cannot rise | every candidate rescored at the auto threshold 0.9700: all of them auto-merge, and the gated false-merge rate must rise above the real run's 0.0000 | 12 auto pairs, false-merge rate 0.4167, auto precision 0.5833, all-pairs base rate 0.0199 | **PASS** |
+| `identity` | a scorer that never fires | every exact twin pair is auto-merged: recall 1.0000 | recall 1.0000 (27/27 twin pairs auto-merged) | **PASS** |
+
+What the controls did not cover, stated so a partial control is not read as a whole one:
+
+- `null-matcher (below review)`: re-scores the candidate pairs the real run produced; blocking is held fixed and is not what this control tests.
+- `null-matcher (at auto threshold)`: re-scores the candidate pairs the real run produced; blocking is held fixed and is not what this control tests.
+- `identity`: 27 of 27 records, sampled under seed 20260906 and capped at 250.
+
+Controls gate: **PASS**.
