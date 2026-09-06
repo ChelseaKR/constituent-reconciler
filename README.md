@@ -31,13 +31,17 @@ hosted model on purpose and say so plainly, not as a buried caveat.
 
 ```sh
 make install                                                      # uv sync, Python 3.12+
+constituent-reconcile demo                                        # the bundled examples/, from the package
 constituent-reconcile run --config examples/intake-demo/recipe.toml --out out # bundled demo, offline
 constituent-reconcile review --config examples/intake-demo/recipe.toml --reviewer "your name" --out out
 ```
 
-That resolves the bundled intake demo and opens the browser review queue over
-the uncertain pairs; the full walkthrough, including PDF extraction, CRM
-write-back, and the DV policy pack, is under [Usage](#usage) below.
+`constituent-reconcile demo` writes the bundled `examples/` tree from the installed package
+(in a clone the files are already there, byte-identical, and it leaves them
+alone), `run` resolves the intake demo, and `review` opens the browser review
+queue over the uncertain pairs. The full walkthrough, including PDF
+extraction, CRM write-back, and the DV policy pack, is under [Usage](#usage)
+below.
 
 The command was named `reconcile` before 0.8.0. That name still runs, wired
 to the same entry point, and prints one line to stderr pointing here; it is
@@ -200,10 +204,14 @@ GitHub Release artifacts to download; `release.yml` is tag-triggered and still
 unexercised (the Release & Versioning row below says the same). Substitute a
 commit SHA for `main` if you need a fixed input.
 
-The bundled demos below need the repository, not just the wheel: `examples/`
-is committed at the repository root and ships in the sdist, but a wheel
-contains the importable package only. Clone the repository (or unpack the
-sdist) to run anything whose `--config` points into `examples/`.
+The bundled demos below run from an installed wheel as well as from a clone.
+`examples/` is committed at the repository root, and the same tree ships
+inside the package: `reconcile demo` writes it to `./examples` (or `--dir`),
+leaves a byte-identical file alone, and refuses to overwrite one that differs.
+`tests/test_wheel_quickstart.py` builds the wheel, installs it into a fresh
+virtual environment, and runs the Quickstart from outside the repository. The
+0.8.0 wheel predates `reconcile demo`; with that tag, clone the repository (or
+unpack the sdist) to run anything whose `--config` points into `examples/`.
 
 Before pointing the tool at your own data, check a recipe's shape without
 resolving anything:

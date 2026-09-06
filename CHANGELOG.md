@@ -6,6 +6,24 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 ## [Unreleased]
 
+### Added
+- **`constituent-reconcile demo`, and the bundled demos ship in the wheel.** `examples/`
+  is committed at the repository root and was copied into the sdist and the
+  Docker image, but a wheel carried the importable package only, so an
+  operator who installed a release (`uvx --from git+...@v0.8.0`, or the
+  wheel attached to it) had `constituent-reconcile --help` and nothing the README's
+  Quickstart could run. The same tree is now package data under
+  `constituent_reconciler/examples/`, and `constituent-reconcile demo` writes it to
+  `./examples` (or `--dir`): byte-exact, leaving an identical file alone,
+  refusing to touch one that differs, and writing nothing until every file
+  has been checked. `tests/test_demo.py` pins the packaged tree and the
+  committed one byte-identical in both directions, and
+  `tests/test_wheel_quickstart.py` builds the wheel, installs it into a fresh
+  virtual environment, and runs the README's Quickstart from a directory
+  outside the repository. That test fails rather than skips when it cannot
+  build or install, so a wheel that lost its demos is a red check and not a
+  green one.
+
 ### Changed
 - **The command is `constituent-reconcile`.** The console script was named
   `reconcile`, and PyPI already carries that name for an unrelated
@@ -30,6 +48,17 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   prints one line to stderr naming the new command and the removal version;
   stdout is untouched, so a script that captures the command's output sees no
   change. Removed in 0.9.0.
+
+### Fixed
+- **A `--config` that did not exist was a traceback.** `load_recipe` opened
+  the path with nothing around it, so `constituent-reconcile run
+  --config examples/intake-demo/recipe.toml` from anywhere but a clone ended in
+  `FileNotFoundError` and a stack trace, on the first command the README
+  tells a new operator to run. A missing recipe, an unreadable one and one
+  that is not valid TOML are now each a `RecipeError`, which every command
+  that loads a recipe already reports as one line on stderr with exit code
+  2; the missing-file message says what to pass, and that `constituent-reconcile demo`
+  writes the bundled one.
 
 ## [0.8.0] - 2026-09-02
 

@@ -334,3 +334,64 @@ def test_load_recipe_records_the_recipe_path(tmp_path: Path) -> None:
     path = _write(tmp_path, MINIMAL_INPUT)
     recipe = load_recipe(path)
     assert recipe.recipe_path == path
+
+
+# The other half of the case above: not a malformed recipe but an absent one.
+# This is what an installed wheel saw on the README's first command until
+# `reconcile demo` existed, and it was a FileNotFoundError traceback rather
+# than a message. Parametrized the same way, over every command that loads a
+# recipe, including the two (plan-split, apply-repair) that report under their
+# own prefix.
+@pytest.mark.parametrize(
+    "extra_args",
+    [
+        pytest.param(["run"], id="run"),
+        pytest.param(["validate"], id="validate"),
+        pytest.param(["eval", "--truth", "ground_truth.json"], id="eval"),
+        pytest.param(["apply", "--decisions", "decisions.json"], id="apply"),
+        pytest.param(["review", "--reviewer", "Test Reviewer", "--no-browser"], id="review"),
+        pytest.param(["export-comparable"], id="export-comparable"),
+        pytest.param(
+            [
+                "plan-split",
+                "--manifest",
+                "run_manifest.json",
+                "--cluster",
+                "c1",
+                "--reason",
+                "test",
+                "--reviewer",
+                "Test Reviewer",
+            ],
+            id="plan-split",
+        ),
+        pytest.param(["ai-explain", "--pair", "a", "b"], id="ai-explain"),
+        pytest.param(["ai-triage"], id="ai-triage"),
+    ],
+)
+def test_command_reports_a_missing_recipe_instead_of_crashing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], extra_args: list[str]
+) -> None:
+    from constituent_reconciler.cli import main
+
+    missing = tmp_path / "examples" / "intake-demo" / "recipe.toml"
+    command, *rest = extra_args
+    code = main([command, "--config", str(missing), *rest])
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "recipe not found" in err
+    assert str(missing) in err
+    assert "reconcile demo" in err
+    assert "Traceback" not in err
+
+
+def test_load_recipe_reports_a_path_it_cannot_read(tmp_path: Path) -> None:
+    with pytest.raises(RecipeError, match="recipe could not be read"):
+        load_recipe(tmp_path)  # a directory, not a file
+
+
+def test_load_recipe_reports_a_recipe_that_is_not_toml(tmp_path: Path) -> None:
+    path = tmp_path / "recipe.toml"
+    path.write_text("[input\nincoming = ", encoding="utf-8")
+    with pytest.raises(RecipeError, match="not valid TOML"):
+        load_recipe(path)

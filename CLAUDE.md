@@ -108,7 +108,7 @@ constituent-reconciler/
 │   │   ├── refusal.py             # deterministic prohibited-language scanner (EN/ES)
 │   │   ├── source_text.py         # reads real source-document text an OCR quote is checked against
 │   │   └── triage.py              # deterministic review-queue ordering; calls no model
-│   ├── cli.py                     # run/eval/compare(+-review/-apply)/review/apply/plan-split/approve-repair/apply-repair/report/validate/destroy/verify/schema/ai-explain/ai-ask/ai-propose-corrections/ai-triage
+│   ├── cli.py                     # run/eval/compare(+-review/-apply)/review/apply/plan-split/approve-repair/apply-repair/report/validate/destroy/verify/schema/demo/ai-explain/ai-ask/ai-propose-corrections/ai-triage
 │   ├── compare.py                 # read-only migration cutover comparison (constituent-reconcile compare)
 │   ├── compare_apply.py           # reviewed, consent-gated local correction-file export (compare-apply)
 │   ├── config.py                  # recipe.toml loading: sources, connector, thresholds, policy pack
@@ -124,8 +124,10 @@ constituent-reconciler/
 │   ├── consent.py                 # consent export gate; absent/revoked/expired withheld, fail-closed
 │   ├── decisions.py               # banding, clustering, golden-record selection; the fail-closed gate
 │   ├── defaults.py                # pre-tuned matching defaults
+│   ├── demo.py                    # reconcile demo: writes the packaged examples/ tree so the README's --config paths exist from a wheel
 │   ├── destruction.py             # retention executor and destruction certificates
 │   ├── evaluate.py                # eval scoring: false-merge and missed-match rates, Wilson intervals
+│   ├── examples/                  # package-data copy of the root examples/ tree; tests/test_demo.py pins them byte-identical
 │   ├── extract/
 │   │   ├── __init__.py            # public surface: the offline extractor and the seam gate
 │   │   ├── base.py                # extractor protocol and extraction result types

@@ -1,0 +1,13 @@
+id,First Name,Last Name,DOB,Email,Phone,Consent
+N001,Hector,Ramos,1994-02-11,,,granted
+N002,Jonathon,Reyes,04/12/1990,,,granted
+N003,David,Nguyen,1992-09-30,,,granted
+N004,James,Carter,1972-03-18,,,granted
+N005,Kathryn,O Brien,Feb 20 1978,,,granted
+N006,Aisha,Okafor,1988-12-05,,,granted
+N007,Maria,Lopez,1996-02-22,,,granted
+N008,Maria,Gonzales,11/03/1985,maria.g@example.org,,granted
+N009,Omar,Said,2000-10-10,,,revoked
+N010,Bob,Smith,1965-07-19,,530-555-0143,granted
+N011,David,Nguyen,09/30/1992,,,granted
+N012,Yusuf,Ali,1990-01-15,,,granted
