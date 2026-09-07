@@ -25,6 +25,8 @@ from typing import Any
 import pytest
 from tools.ai_eval import consent_leakage
 
+from constituent_reconciler.assistant.evidence_payload import evidence_payload
+
 
 class _Field:
     def __init__(self, name: str, value: str) -> None:
@@ -88,7 +90,10 @@ def test_a_planted_leak_fails_the_eval(monkeypatch: pytest.MonkeyPatch) -> None:
     Without this, the whole pass condition could rest on the premise check and
     the leak check could be dead, which is the shape this file is about.
     """
-    real_payload = consent_leakage.evidence_payload
+    # Imported from its defining module rather than read off `consent_leakage`:
+    # mypy's strict `no_implicit_reexport` refuses the attribute read, and the
+    # monkeypatch below still targets the name the eval actually calls.
+    real_payload = evidence_payload
 
     def leaking(evidence: Any, *, withheld_fields: tuple[str, ...]) -> Any:
         payload = real_payload(evidence, withheld_fields=withheld_fields)
