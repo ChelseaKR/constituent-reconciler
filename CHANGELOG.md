@@ -7,6 +7,51 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **`constituent-reconcile diff-runs`: what changed between two runs of one recipe.**
+  An operator re-runs the same recipe every month and defends the new numbers
+  against the old ones. `compare` answers a different question (two *sources*
+  inside one run), so that defence was two output directories and a pair of
+  eyes. `diff-runs --before out-2026-08 --after out-2026-09` reads both runs'
+  committed artifacts and reports which input files changed, which clusters
+  formed, dissolved or changed membership, which pairs entered or left the
+  review queue, which reviewed verdicts no longer apply, and the
+  consent-withheld delta. Nothing is re-scored and no matcher runs: every
+  number comes from bytes both runs already wrote, so the diff is deterministic
+  and two runs of it are byte-identical.
+
+  The section that needed re-derivation rather than a set difference is
+  invalidated decisions, and it distinguishes two reasons rather than
+  collapsing them: `pair-absent` (the later run never considered the pair at
+  all, so the verdict is about a comparison that no longer happens) and
+  `evidence-changed` (the pair is still there and its probability moved, so the
+  verdict was given against a different number than the one in force). The
+  auto-merge record is read alongside the review queue, so a decided pair that
+  moved into the auto band reads as changed rather than as vanished.
+
+  **A diff that could not be computed never renders like a diff that found
+  nothing.** Two identical runs give an empty diff and exit 0, which is a real
+  answer. A run directory missing `run_summary.json`, a dry-run directory with
+  no `resolved.csv`, a summary whose `withheld_no_consent` is absent or
+  non-numeric, a review queue with an unparseable probability: each of those
+  would otherwise print zeros, and zero is the reassuring reading in every one
+  of those cases. All refuse by name, before any diff bytes exist. "The earlier
+  run has no decisions file" is likewise reported as itself rather than as zero
+  invalidations.
+
+  **A diff across a configuration change is refused** unless
+  `--allow-recipe-change`, because it silently attributes threshold effects to
+  data drift; when allowed, the configuration change is rendered as the diff's
+  first section so nobody reads the cluster counts without it. Differing
+  declared schema versions are refused unconditionally: that is a category
+  error, not a caveat.
+
+  `run_diff.json` is counts only and passes through the same small-cell
+  suppression as `aggregate_summary.json` under a pack that requires it, at
+  that pack's own configured threshold rather than the module default.
+  `run_diff_detail.csv` carries the ids and is in
+  `destruction.PII_ARTIFACTS`, driven by the planted-sentinel sweep.
+  New `RUN_DIFF_SCHEMA_VERSION`.
+
 - **`constituent-reconcile plan-withdraw`: consent that lapses after the write is now
   an artifact, not a gap.** ADR 0013 makes a merged identity take its most
   restrictive member's consent *at write time*, and nothing re-evaluated it

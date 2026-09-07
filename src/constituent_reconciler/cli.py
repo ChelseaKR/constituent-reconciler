@@ -870,6 +870,44 @@ def _parse_as_of(raw: str | None, verb: str) -> date | int:
         return 2
 
 
+def _cmd_diff_runs(args: argparse.Namespace) -> int:
+    """Report what changed between two runs of one recipe (read-only).
+
+    Everything printed is counts and section names. The cluster and record ids
+    live only in the local ``run_diff_detail.csv``, which
+    ``constituent-reconcile destroy`` covers.
+    """
+
+    from constituent_reconciler import diff_runs as diff_module
+
+    before_dir, after_dir = Path(args.before), Path(args.after)
+    out_dir = Path(args.out) if args.out else after_dir
+    policy: Policy | None = None
+    if args.config:
+        try:
+            recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+        except (RecipeError, PolicyViolation) as error:
+            print(f"diff-runs error: {error}", file=sys.stderr)
+            return 2
+        policy = policy_for(recipe.policy_pack)
+    try:
+        diff = diff_module.diff_runs(
+            before_dir, after_dir, allow_recipe_change=args.allow_recipe_change
+        )
+    except diff_module.RunDiffError as error:
+        print(f"diff-runs error: {error}", file=sys.stderr)
+        return 2
+
+    diff_path, detail_path = diff_module.write_diff(diff, out_dir, policy=policy)
+    if args.format == "json":
+        print(json.dumps(diff_module.diff_payload(diff, policy=policy), indent=2, sort_keys=True))
+    else:
+        print(diff_module.render_diff(diff, policy=policy))
+    print(f"diff:   {diff_path}")
+    print(f"detail: {detail_path} ({len(diff.detail_rows)} row(s); local, destroyed by `destroy`)")
+    return 0
+
+
 def _cmd_plan_withdraw(args: argparse.Namespace) -> int:
     """Report the written records whose consent has lapsed since the write.
 
@@ -2015,6 +2053,40 @@ def build_parser() -> argparse.ArgumentParser:
         help="override the recipe's policy pack to match the written run; fail-closed on unknown",
     )
     withdraw_parser.set_defaults(func=_cmd_plan_withdraw)
+
+    diff_parser = sub.add_parser(
+        "diff-runs",
+        help="report what changed between two runs of one recipe: clusters, review "
+        "queue, invalidated decisions, consent",
+    )
+    diff_parser.add_argument("--before", required=True, help="the earlier run's output directory")
+    diff_parser.add_argument("--after", required=True, help="the later run's output directory")
+    diff_parser.add_argument(
+        "--out",
+        default=None,
+        help="where to write run_diff.json and run_diff_detail.csv (default: --after)",
+    )
+    diff_parser.add_argument(
+        "--config",
+        default=None,
+        help="recipe.toml whose policy pack decides whether the count summary is "
+        "small-cell suppressed; omit and no suppression is applied",
+    )
+    diff_parser.add_argument(
+        "--policy-pack",
+        default=None,
+        help="override the recipe's policy pack; fail-closed on unknown",
+    )
+    diff_parser.add_argument(
+        "--allow-recipe-change",
+        action="store_true",
+        help="compare runs whose recipe, thresholds or policy pack differ; the change "
+        "is recorded as the diff's first section",
+    )
+    diff_parser.add_argument(
+        "--format", choices=("markdown", "json"), default="markdown", help="output rendering"
+    )
+    diff_parser.set_defaults(func=_cmd_diff_runs)
 
     approve_repair_parser = sub.add_parser(
         "approve-repair",

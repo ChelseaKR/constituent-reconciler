@@ -108,7 +108,7 @@ constituent-reconciler/
 │   │   ├── refusal.py             # deterministic prohibited-language scanner (EN/ES)
 │   │   ├── source_text.py         # reads real source-document text an OCR quote is checked against
 │   │   └── triage.py              # deterministic review-queue ordering; calls no model
-│   ├── cli.py                     # init/run/eval/compare(+-review/-apply)/review/apply/plan-split/plan-withdraw/approve-repair/apply-repair/report/validate/destroy/verify/schema/demo/ai-explain/ai-ask/ai-propose-corrections/ai-triage
+│   ├── cli.py                     # init/run/eval/compare(+-review/-apply)/diff-runs/review/apply/plan-split/plan-withdraw/approve-repair/apply-repair/report/validate/destroy/verify/schema/demo/ai-explain/ai-ask/ai-propose-corrections/ai-triage
 │   ├── compare.py                 # read-only migration cutover comparison (constituent-reconcile compare)
 │   ├── compare_apply.py           # reviewed, consent-gated local correction-file export (compare-apply)
 │   ├── config.py                  # recipe.toml loading: sources, connector, thresholds, policy pack
@@ -125,6 +125,7 @@ constituent-reconciler/
 │   ├── decisions.py               # banding, clustering, golden-record selection; the fail-closed gate
 │   ├── defaults.py                # pre-tuned matching defaults
 │   ├── demo.py                    # reconcile demo: writes the packaged examples/ tree so the README's --config paths exist from a wheel
+│   ├── diff_runs.py               # read-only diff of two runs of one recipe (constituent-reconcile diff-runs); counts shareable, ids local
 │   ├── destruction.py             # retention executor and destruction certificates
 │   ├── evaluate.py                # eval scoring: false-merge and missed-match rates, Wilson intervals
 │   ├── examples/                  # package-data copy of the root examples/ tree; tests/test_demo.py pins them byte-identical
