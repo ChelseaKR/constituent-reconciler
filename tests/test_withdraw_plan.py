@@ -177,6 +177,14 @@ def test_an_expiry_crossed_after_the_write_names_exactly_that_record(
     assert _plan_via_cli(recipe_path, out_dir, as_of=AFTER_EXPIRY) == 0
 
     plan = _plan(out_dir)
+    # Pinned as literals, not read from the constants, so a rename or a
+    # re-spelling of either state has to be deliberate. A test that compares
+    # the plan against the same constant the code writes cannot see a wrong
+    # constant at all: both sides move together.
+    assert plan["repair_plan_schema"] == 3
+    assert plan["plan_kind"] == "withdraw"
+    assert plan["applicability"] == "checked"
+
     lapsed = _lapsed(plan)
     assert [entry["cluster_id"] for entry in lapsed] == [f"existing:{LAPSING_ROW}"]
     assert lapsed[0]["external_id"] == f"existing:{LAPSING_ROW}"
@@ -254,6 +262,9 @@ def test_a_recipe_that_does_not_require_consent_says_so_instead_of_zero(
     plan = _plan(out_dir)
     assert _lapsed(plan) == []
     assert plan["applicability"] == repair.APPLICABILITY_NOT_REQUIRED
+    # Pinned as a literal for the same reason as above: this string is what a
+    # consumer of the plan file branches on, so its spelling is the contract.
+    assert plan["applicability"] == "not-applicable-consent-not-required"
     assert plan["require_consent"] is False
 
 
