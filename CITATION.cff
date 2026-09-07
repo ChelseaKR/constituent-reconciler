@@ -26,6 +26,7 @@ authors:
 # `tests/test_release_versions.py` holds it empty while no tag exists and
 # requires it once one does.
 version: "0.9.0"
+date-released: "2026-09-07"
 license: "Apache-2.0"
 repository-code: "https://github.com/ChelseaKR/constituent-reconciler"
 url: "https://github.com/ChelseaKR/constituent-reconciler"
