@@ -62,11 +62,13 @@ numbers, byte for byte.
 from __future__ import annotations
 
 import random
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from constituent_reconciler import decisions, matching
-from constituent_reconciler.evaluate import evaluate, truth_pairs
+from constituent_reconciler.evaluate import evaluate, normalize_extracted_value, truth_pairs
+from constituent_reconciler.extract.base import ExtractedField
 from constituent_reconciler.models import Band, Pair, Record
 
 #: Default RNG seed. Pinned so a committed report is reproducible; the CLI
@@ -461,3 +463,195 @@ def run_controls(
         ),
     ]
     return ControlsReport(seed=seed, outcomes=tuple(outcomes))
+
+
+#: How many independent seeded reassignments the extraction label-shuffle
+#: control averages over. One reassignment of four documents is a coin flip;
+#: the mean over this many is what the bound below is applied to.
+EXTRACTION_SHUFFLE_ROUNDS = 20
+
+#: Headroom over the *exact* chance level for the extraction label shuffle.
+#: Unlike the matching control's base rate, the chance level here is computed
+#: analytically from the fixture set rather than approximated (see
+#: :func:`_extraction_chance_precision`), so the tolerance absorbs only the
+#: variance of a finite number of reassignments, not model error.
+EXTRACTION_SHUFFLE_TOLERANCE = 3.0
+
+
+def _extraction_true_positives(
+    predictions: Sequence[ExtractedField],
+    labels: Sequence[Mapping[str, str]],
+) -> int:
+    """True positives for one document's predictions against one label set.
+
+    Mirrors the claiming rule in
+    :func:`~constituent_reconciler.evaluate.extraction_metrics` exactly -- each
+    label can be claimed once, so a duplicated prediction scores once -- because
+    a control that scored by a different rule than the metric would not be
+    measuring the metric.
+    """
+
+    unclaimed: Counter[tuple[str, str]] = Counter()
+    for label in labels:
+        field_name = str(label["field_name"])
+        unclaimed[(field_name, normalize_extracted_value(field_name, str(label["value"])))] += 1
+    hits = 0
+    for prediction in predictions:
+        key = (
+            prediction.field_name,
+            normalize_extracted_value(prediction.field_name, prediction.value),
+        )
+        if unclaimed[key] > 0:
+            unclaimed[key] -= 1
+            hits += 1
+    return hits
+
+
+def _extraction_chance_precision(
+    docs: Sequence[str],
+    predicted: Mapping[str, Sequence[ExtractedField]],
+    truth: Mapping[str, Sequence[Mapping[str, str]]],
+    n_predictions: int,
+) -> float:
+    """Exact expected precision when every document is scored against another's labels.
+
+    Under a uniformly random derangement of the document-to-label-set
+    assignment, each document's new partner is uniform over the other
+    documents, and true positives are additive across documents. So the
+    expectation of the total is the sum over documents of the mean true-positive
+    count against every *other* document's labels -- computable exactly, with no
+    sampling. That is the number the measured mean is compared against, which is
+    why this control does not need a hand-chosen "chance" constant.
+
+    It is not zero in general: two documents can legitimately share a
+    normalized value (this repository's own fixture set has two forms whose
+    dates of birth both normalize to ``1988-03-09``), and a control that assumed
+    zero would fail on a correct fixture set.
+    """
+
+    if n_predictions == 0 or len(docs) < 2:
+        return 0.0
+    expected_hits = 0.0
+    for doc in docs:
+        others = [other for other in docs if other != doc]
+        expected_hits += sum(
+            _extraction_true_positives(predicted.get(doc, ()), truth.get(other, ()))
+            for other in others
+        ) / len(others)
+    return expected_hits / n_predictions
+
+
+def _derangement(size: int, rng: random.Random) -> list[int]:
+    """A permutation of ``range(size)`` with no fixed point.
+
+    Rejection sampling, which is uniform over derangements and terminates with
+    probability 1 (about 1/e of draws qualify). A plain shuffle would sometimes
+    return the identity, and a "sabotage" that reassigns a document to its own
+    labels changes nothing -- it would read as a pass while having applied
+    nothing, which is the failure this whole module exists to rule out.
+    """
+
+    if size < 2:
+        raise ValueError("a derangement needs at least two elements")
+    while True:
+        candidate = list(range(size))
+        rng.shuffle(candidate)
+        if all(candidate[index] != index for index in range(size)):
+            return candidate
+
+
+def shuffled_extraction_labels_control(
+    predicted: Mapping[str, Sequence[ExtractedField]],
+    truth: Mapping[str, Sequence[Mapping[str, str]]],
+    *,
+    seed: int = DEFAULT_SEED,
+    rounds: int = EXTRACTION_SHUFFLE_ROUNDS,
+    tolerance: float = EXTRACTION_SHUFFLE_TOLERANCE,
+) -> ControlOutcome:
+    """Rescore the same extractions against label sets swapped between documents.
+
+    ``eval-extraction`` reports field precision and recall against
+    ``labels.json``. Nothing checked that those numbers come from the labels. An
+    implementation that compared predictions against themselves, or that keyed
+    the truth lookup on something that always resolved to the document being
+    scored, would report exactly the numbers the committed report carries.
+
+    The sabotage keeps every prediction and permutes which document's labels
+    each document is scored against, so a number that survives it is not coming
+    from the labels.
+    """
+
+    docs = sorted(set(predicted) | set(truth))
+    n_predictions = sum(len(predicted.get(doc, ())) for doc in docs)
+    rules_out = "an extraction score that is not actually read from the labels file"
+
+    if len(docs) < 2:
+        return ControlOutcome(
+            name="shuffled-extraction-labels",
+            rules_out=rules_out,
+            expectation="at least two documents, so labels can be reassigned between them",
+            observed=f"{len(docs)} document(s); no reassignment exists, so nothing was measured",
+            passed=False,
+        )
+    if n_predictions == 0:
+        return ControlOutcome(
+            name="shuffled-extraction-labels",
+            rules_out=rules_out,
+            expectation="at least one predicted field, so there is something to rescore",
+            observed="the extractor produced no fields; nothing was measured",
+            passed=False,
+        )
+
+    real_hits = sum(
+        _extraction_true_positives(predicted.get(doc, ()), truth.get(doc, ())) for doc in docs
+    )
+    real_precision = real_hits / n_predictions
+    chance = _extraction_chance_precision(docs, predicted, truth, n_predictions)
+    bound = chance * tolerance
+
+    # noqa: S311 - reproducibility, not secrecy, for the reason given on the
+    # matching control above: a control nobody can re-run is not evidence.
+    rng = random.Random(seed)  # noqa: S311
+    measured: list[float] = []
+    for _ in range(rounds):
+        order = _derangement(len(docs), rng)
+        hits = sum(
+            _extraction_true_positives(predicted.get(doc, ()), truth.get(docs[order[index]], ()))
+            for index, doc in enumerate(docs)
+        )
+        measured.append(hits / n_predictions)
+    mean = sum(measured) / len(measured)
+    worst = max(measured)
+
+    return ControlOutcome(
+        name="shuffled-extraction-labels",
+        rules_out=rules_out,
+        expectation=(
+            f"mean precision over {rounds} seeded label reassignments falls to at most "
+            f"{tolerance:g}x the exact chance level ({bound:.4f}), and the real precision "
+            f"({real_precision:.4f}) is above that bound"
+        ),
+        observed=(
+            f"mean {mean:.4f}, worst reassignment {worst:.4f}, exact chance level {chance:.4f}"
+        ),
+        passed=mean <= bound and real_precision > bound,
+        scope=(
+            "predictions are held fixed and whole label sets are swapped between "
+            "documents, so it rules out truth that is not read at all, not truth "
+            "that is read and mis-normalized within a document"
+        ),
+    )
+
+
+def run_extraction_controls(
+    predicted: Mapping[str, Sequence[ExtractedField]],
+    truth: Mapping[str, Sequence[Mapping[str, str]]],
+    *,
+    seed: int = DEFAULT_SEED,
+) -> ControlsReport:
+    """Run every extraction control against one completed extraction eval."""
+
+    return ControlsReport(
+        seed=seed,
+        outcomes=(shuffled_extraction_labels_control(predicted, truth, seed=seed),),
+    )

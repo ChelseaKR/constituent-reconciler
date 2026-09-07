@@ -377,6 +377,29 @@ headline says.
 | `null-matcher (at auto threshold)` | The same, at the auto threshold. | A gated false-merge rate that cannot rise. Everything must auto-merge and the gated rate must go up. |
 | `identity` | Every record in a seeded sample is given an exact twin and the real matcher is asked to find them. | A scorer that never fires. Exact duplicates must auto-merge. |
 
+The extraction eval has its own control, run the same way:
+
+```sh
+constituent-reconcile eval-extraction --fixtures eval/fixtures/extraction --controls
+```
+
+| Control | The sabotage | What it rules out |
+|---------|--------------|-------------------|
+| `shuffled-extraction-labels` | Every prediction is kept and the label sets are swapped between documents under a seeded derangement, so no document is scored against its own labels. | An extraction score that is not actually read from `labels.json`. An eval that compared predictions against themselves, or that resolved every document to the same label set, would report exactly the numbers the committed report carries, and they would survive the swap. |
+
+Its expected value is computed **exactly** rather than approximated: under a
+uniform random derangement each document's partner is uniform over the others
+and true positives are additive, so the expectation of the permuted precision is
+the mean true-positive count of every document against every *other* document's
+labels. That number is not zero on a correct fixture set — two of this
+repository's own forms carry dates of birth that both normalize to
+`1988-03-09` — and a control that assumed zero would fail on a correct fixture
+set rather than on a broken eval.
+
+`make eval-extraction` passes `--controls`, so
+[`../eval/extraction-report.md`](../eval/extraction-report.md) carries the
+section and the same CI `git diff --exit-code` covers it.
+
 ### The case that motivated the identity control
 
 Replace the scorer with a constant `0.9` — above the review threshold, below the
@@ -422,9 +445,14 @@ Stated so a partial control is not read as a whole one:
   because it runs the real matcher over twice the sample. The report states the
   sample size next to the population it was drawn from, so a control that
   covered 250 of 50,000 never reads as one that covered all of them.
-* The controls are wired into `constituent-reconcile eval`. The FEBRL runners in
+* The controls are wired into `constituent-reconcile eval` and
+  `constituent-reconcile eval-extraction`. The FEBRL runners in
   `tools/benchmark/` do not yet pass them through, so the numbers at the top of
   this page have no committed control run behind them.
+* `shuffled-extraction-labels` holds the **predictions** fixed and swaps whole
+  label sets between documents. It rules out truth that is not read at all; it
+  does not rule out truth that is read and mis-normalized *within* a document,
+  because both sides of that comparison go through the same normalizer.
 * **Every control builds its own backend and scores through it directly, so none
   of them exercises the path `pipeline.run` actually takes.** Measured on
   2026-09-06: substituting the same constant `0.9` one layer up, at the

@@ -69,10 +69,13 @@ eval:
 
 # Regenerate the committed extraction eval report. Run after any change to the
 # extractor or to eval/fixtures/extraction. Exits nonzero below the ledger
-# targets (precision 0.95, recall 0.90).
+# targets (precision 0.95, recall 0.90), and --controls makes it exit nonzero
+# when the label-shuffle control stops distinguishing read labels from unread
+# ones, so CI's `git diff --exit-code` covers the Controls section too.
 eval-extraction:
 	.venv/bin/constituent-reconcile eval-extraction \
 		--fixtures eval/fixtures/extraction \
+		--controls \
 		--out eval/extraction-report.md
 
 # Regenerate the disaggregated matching-risk audit (R5). Every named segment
