@@ -7,6 +7,43 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **Confirmed households now reach CiviCRM and NPSP, not just the CSV
+  connectors** (`household.plan_household_writes`,
+  `connectors/household_write.py`; #151). EXP-07 shipped household suggestions
+  and a shared household-id column in the CSV connectors, and the live
+  connectors ignored the confirmed map entirely: `connectors/civicrm.py` and
+  `connectors/salesforce.py` contained zero occurrences of "household",
+  case-insensitive. So an organization on the API path got contacts and lost the
+  household it had just reviewed.
+
+  CiviCRM creates or reuses a Household contact keyed on
+  `external_identifier = hh-<id>` and one `Household Member of` relationship per
+  member. Salesforce upserts a Household Account by external id and sets each
+  Contact's `AccountId`. Both are idempotent by lookup rather than by hope: a
+  second run makes zero create calls. A dry run makes **no** call at all, not
+  even a read, so a preview never needs a credential.
+
+  **A household with any withheld or unwritten member is not written at all.**
+  The issue can be read as writing the household minus that member, and its
+  "Done when" line about a withheld member yielding no relationship row is
+  satisfied either way. This takes the more protective reading: a partial
+  household asserts a family relationship in the CRM on incomplete evidence, and
+  the withheld member's *absence* from a household the reviewer confirmed as
+  theirs is itself an inference about that person. The skip is recorded with a
+  named reason, so the fact stays visible without the inference being published.
+  `member-withheld` and `member-not-written` are separate reasons and are never
+  collapsed: one needs a consent conversation, the other needs the run
+  investigated.
+
+  A member CiviCRM does not hold is a refusal naming them, not a skipped
+  relationship, because continuing would leave a household record naming fewer
+  people than the reviewer confirmed. A Salesforce attach that fails says which
+  member is not on the Account and that a re-run finishes it.
+
+  Verified against injected transports, which prove request construction and
+  idempotency and not that either vendor accepts the calls. #67 is the live
+  exercise that would upgrade that claim, and nothing here says otherwise.
+
 - **`constituent-reconcile sweep-thresholds`: what your own reviewers imply about your
   thresholds.** The defaults are 0.97 auto and 0.80 review, pre-tuned so an adopter
   needs no labeled pairs. An organization that has *done* the reviewing has
