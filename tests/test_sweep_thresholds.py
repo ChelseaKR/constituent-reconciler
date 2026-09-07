@@ -473,9 +473,16 @@ def test_the_reports_hold_no_pair_id_and_are_kept_by_destroy(tmp_path: Path) -> 
         )
         == 0
     )
+    # Every id the run actually holds, checked by name. The earlier version of this
+    # assertion looked for one substring after stripping two words out of the text,
+    # which would have passed on a report that leaked every id but the first.
+    decided = json.loads((out_dir / "decisions.json").read_text(encoding="utf-8"))
+    ids = {record for pair in decided["approved"] + decided["rejected"] for record in pair}
+    assert len(ids) >= 2 * MINIMUM_DECIDED_PAIRS
     for name in (SWEEP_REPORT_FILENAME, SWEEP_JSON_FILENAME):
         text = (out_dir / name).read_text(encoding="utf-8")
-        assert "a0" not in text.replace("auto", "").replace("false", "")
+        leaked = sorted(record_id for record_id in ids if record_id in text)
+        assert leaked == [], f"{name} leaked record id(s): {leaked}"
         assert name in NOT_DESTROYED
 
     assert main(["destroy", "--out", str(out_dir), "--older-than", "0d"]) == 0
