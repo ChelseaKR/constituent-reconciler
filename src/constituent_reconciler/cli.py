@@ -35,6 +35,7 @@ import dataclasses
 import json
 import sys
 from collections.abc import Sequence
+from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, TextIO
 
@@ -845,6 +846,81 @@ def _cmd_plan_split(args: argparse.Namespace) -> int:
             "regenerated with plan-split before its repair continues",
             file=sys.stderr,
         )
+    print("planning is read-only: nothing was sent to or changed in the destination.")
+    return 0
+
+
+def _parse_as_of(raw: str | None, verb: str) -> date | int:
+    """The ``--as-of`` date, or the exit code for an unparseable one.
+
+    A date this tool cannot read is refused rather than replaced with today.
+    Silently falling back would evaluate consent against a date the operator
+    did not ask for and print the result as if it were the one they did.
+    """
+
+    if raw is None:
+        return date.today()
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        print(
+            f"{verb} error: --as-of must be an ISO-8601 date (YYYY-MM-DD); got {raw!r}",
+            file=sys.stderr,
+        )
+        return 2
+
+
+def _cmd_plan_withdraw(args: argparse.Namespace) -> int:
+    """Report the written records whose consent has lapsed since the write.
+
+    Read-only toward the destination and offline. Everything printed here is
+    counts, a date, a path and a digest; the external ids and record ids live
+    only in the local plan file, which ``constituent-reconcile destroy`` covers.
+    """
+
+    from constituent_reconciler import repair
+
+    try:
+        recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+    except (RecipeError, PolicyViolation) as error:
+        print(f"plan-withdraw error: {error}", file=sys.stderr)
+        return 2
+    as_of = _parse_as_of(args.as_of, "plan-withdraw")
+    if isinstance(as_of, int):
+        return as_of
+    try:
+        planned = repair.plan_withdraw(recipe, manifest_path=Path(args.manifest), as_of=as_of)
+    except repair.WithdrawPlanError as error:
+        print(f"plan-withdraw error: {error}", file=sys.stderr)
+        return 2
+
+    print(f"withdrawal plan: {planned.plan_path}")
+    print(f"  as of:        {planned.as_of.isoformat()}")
+    print(f"  destination:  {planned.destination}")
+    print(f"  written:      {planned.written} record(s) examined")
+    if planned.applicability == repair.APPLICABILITY_NOT_REQUIRED:
+        # Not "0 lapsed". The recipe applies no consent gate on the write path,
+        # so no written record can be out of consent against a rule it never
+        # stated, and an empty list here answers a question nobody asked.
+        print(
+            "  lapsed:       not checked -- this recipe does not require consent, so "
+            "no written record can lapse against it. Set [consent] require = true to "
+            "make this check mean something."
+        )
+    else:
+        print(f"  lapsed:       {len(planned.lapsed)} record(s) now out of consent")
+    if planned.inputs_changed:
+        print(
+            "  sources:      changed since the write ("
+            + ", ".join(planned.inputs_changed)
+            + "); consent was read from the current files"
+        )
+    if planned.mode == "manual":
+        print(
+            "  operations:   none declared for this destination; the plan is manual "
+            "and apply-repair will refuse it"
+        )
+    print(f"  plan digest:  {planned.digest} (recorded in the provenance log)")
     print("planning is read-only: nothing was sent to or changed in the destination.")
     return 0
 
@@ -1913,6 +1989,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="override the recipe's policy pack to match the written run; fail-closed on unknown",
     )
     plan_parser.set_defaults(func=_cmd_plan_split)
+
+    withdraw_parser = sub.add_parser(
+        "plan-withdraw",
+        help=(
+            "write a read-only plan of the written records whose consent has lapsed "
+            "since the run wrote them (ADR 0013)"
+        ),
+    )
+    withdraw_parser.add_argument(
+        "--config", required=True, help="path to the recipe.toml the written run used"
+    )
+    withdraw_parser.add_argument(
+        "--manifest", required=True, help="the written run's run_manifest.json"
+    )
+    withdraw_parser.add_argument(
+        "--as-of",
+        default=None,
+        help="ISO-8601 date to evaluate consent against (default: today); refused, "
+        "never defaulted, when it cannot be parsed",
+    )
+    withdraw_parser.add_argument(
+        "--policy-pack",
+        default=None,
+        help="override the recipe's policy pack to match the written run; fail-closed on unknown",
+    )
+    withdraw_parser.set_defaults(func=_cmd_plan_withdraw)
 
     approve_repair_parser = sub.add_parser(
         "approve-repair",

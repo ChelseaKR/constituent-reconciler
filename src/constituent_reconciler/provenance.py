@@ -48,6 +48,13 @@ RUN_START_ACTION = "run-start"
 # file's own digest; the plan's raw field values never enter the log.
 REPAIR_PLAN_ACTION = "repair-plan"
 
+# Action recorded when a consent-withdrawal plan is written for a whole written
+# run (``constituent-reconcile plan-withdraw``). The entry's content hash is the plan
+# file's own digest, and its record id is empty because the plan concerns every
+# record the run wrote rather than one cluster; the ids of the lapsed records
+# are in the plan file, which is a local PII artifact, never in the log.
+WITHDRAW_PLAN_ACTION = "withdraw-plan"
+
 # Action recorded when one repair operation is applied to a live destination
 # (``constituent-reconcile apply-repair`` -> ``connectors.civicrm.CivicrmConnector.apply_repair``).
 # The entry's content hash is the applied operation's own receipt digest,
@@ -444,6 +451,37 @@ class ProvenanceLog:
             external_id=external_id,
             field_sources=None,
             fill_policy="",
+        )
+
+    def append_withdraw_plan(self, *, plan_digest: str, lapsed: int) -> dict[str, object]:
+        """Record that a consent-withdrawal plan was written for this run.
+
+        The entry carries the plan file's digest as its content hash and
+        nothing else about the plan: no cluster id, no external id, no member
+        ids. That is deliberate and it differs from ``append_repair_plan``. A
+        split plan concerns one cluster an operator already named on the
+        command line, so naming it again in the log discloses nothing new. A
+        withdrawal plan's membership *is* the finding -- "these are the people
+        whose consent lapsed" -- and the log is the one artifact ``destroy``
+        refuses to delete. Recording the ids here would leave a permanent list
+        of lapsed constituents behind a destruction pass that is supposed to
+        remove exactly that. ``lapsed`` is a count, which the run summary
+        already publishes at this granularity.
+
+        Consent is null for the same reason it is null on ``repair-plan``: this
+        entry records planning, and planning discloses nothing.
+        """
+
+        return self._append(
+            action=WITHDRAW_PLAN_ACTION,
+            record_id="",
+            members=(),
+            consent=None,
+            digest=plan_digest,
+            external_id=None,
+            field_sources=None,
+            fill_policy="",
+            extra={"lapsed": lapsed},
         )
 
     def append_repair_apply(

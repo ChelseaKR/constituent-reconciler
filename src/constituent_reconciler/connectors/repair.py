@@ -35,6 +35,20 @@ from datetime import date
 OP_FIELD_RESTORE = "field-restore"
 OP_SPLIT_CREATE = "split-create"
 
+# The operation a written record needs when its consent lapses after the write
+# (``repair.plan_withdraw``, ADR 0013): the destination's own withdrawal
+# mechanism, which is CiviCRM's privacy flags or soft-delete and NPSP's flag
+# field. Named here, and deliberately declared by nobody. Enumerating it in a
+# ``RepairDeclaration`` would assert that this repository has read those
+# vendors' current documentation and exercised the operation against a live
+# instance, which ADR 0012 requires and which has not happened for withdrawal.
+# So ``supported_operations`` returns it for no connector, every withdrawal
+# plan is manual, and ``apply-repair`` refuses to execute one. A plan that
+# reported an empty operation list and stopped there would read as "nothing to
+# do" for a record that needs action; ``plan_withdraw`` reports the name and
+# the reason it is undeclared instead.
+OP_CONSENT_WITHDRAW = "consent-withdraw"
+
 # Version tokens must name one exact release. Any of these marks would turn
 # the token into a range, a wildcard, or an alias that drifts over time.
 _RANGE_MARKS: tuple[str, ...] = ("*", "<", ">", "=", "+", "~", ",", " ")

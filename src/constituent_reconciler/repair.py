@@ -1,4 +1,14 @@
-"""Read-only split repair planning (UC-03, ADR 0012).
+"""Read-only repair planning (UC-03, ADR 0012) and the gated apply path.
+
+Two plans live here, both in the ADR 0012 shape and told apart by
+``plan_kind``. ``plan-split`` repairs one written cluster a reviewer found to
+be a bad merge. ``plan-withdraw`` (see :func:`plan_withdraw`, near the bottom
+of this module) reports the written records whose consent has lapsed since the
+write, which ADR 0013 leaves unenforced the moment a run ends. Only the split
+plan is executable; no connector declares a withdrawal operation, so
+``apply-repair`` refuses a withdrawal plan by name.
+
+The split plan is described next.
 
 An administrator who discovers a bad merge after a batch was written needs to
 understand the repair before anyone touches the destination. ``constituent-reconcile
@@ -52,13 +62,15 @@ from constituent_reconciler import decisions, pipeline
 from constituent_reconciler.config import Recipe
 from constituent_reconciler.connectors.base import WRITE_ACTIONS, Connector
 from constituent_reconciler.connectors.repair import (
+    OP_CONSENT_WITHDRAW,
+    RepairOperation,
     RepairOperationResult,
     repair_declaration,
     supported_operations,
 )
 from constituent_reconciler.destruction import PROVENANCE_FILENAME
 from constituent_reconciler.manifest import file_digest, input_digests, manifest_hash
-from constituent_reconciler.models import Cluster, Correction, GoldenRecord, Record
+from constituent_reconciler.models import Cluster, Consent, Correction, GoldenRecord, Record
 from constituent_reconciler.provenance import (
     REPAIR_PLAN_ACTION,
     RUN_START_ACTION,
@@ -68,6 +80,8 @@ from constituent_reconciler.provenance import (
 )
 from constituent_reconciler.schema import (
     DECISIONS_SCHEMA_VERSION,
+    PLAN_KIND_SPLIT,
+    PLAN_KIND_WITHDRAW,
     REPAIR_APPROVAL_SCHEMA_VERSION,
     REPAIR_PLAN_SCHEMA_VERSION,
     REPAIR_RECEIPT_SCHEMA_VERSION,
@@ -447,6 +461,7 @@ def _plan_payload(
     operations = supported_operations(destination, "")
     return {
         "repair_plan_schema": REPAIR_PLAN_SCHEMA_VERSION,
+        "plan_kind": PLAN_KIND_SPLIT,
         "manifest_hash": manifest_digest,
         "policy_pack": recipe.policy_pack,
         "cluster_id": cluster_id,
@@ -948,6 +963,20 @@ def _verified_plan(
         raise RepairApplyError(f"repair plan is not valid JSON: {plan_path}") from error
     if not isinstance(plan_data, dict):
         raise RepairApplyError(f"repair plan must be a JSON object: {plan_path}")
+    # Two artifacts share this shape (schema.PLAN_KIND_*). Only a split plan is
+    # executable: no connector declares the consent-withdraw operation, so a
+    # withdrawal is manual by construction. Refusing by name here, rather than
+    # letting a missing "cluster_id" produce "repair plan carries no cluster
+    # id", is the difference between telling an operator the plan is the wrong
+    # kind and telling them it is malformed.
+    kind = str(plan_data.get("plan_kind", PLAN_KIND_SPLIT))
+    if kind != PLAN_KIND_SPLIT:
+        raise RepairApplyError(
+            f"{plan_path} is a {kind!r} plan, and apply-repair executes only "
+            f"{PLAN_KIND_SPLIT!r} plans. No verified withdrawal operation is declared "
+            "for any destination, so a withdrawal plan is applied by a person "
+            "following its manual_instructions."
+        )
     if plan_data.get("manifest_hash") != manifest_digest:
         raise RepairApplyError(
             "the repair plan was planned under a different manifest than the one "
@@ -1153,4 +1182,421 @@ def apply_repair_plan(
         approvers=approver_list,
         operations=tuple(results),
         receipts_path=resolved_receipts_path,
+    )
+
+
+# -- plan_withdraw: consent that lapsed after the write (ADR 0012 + ADR 0013) -
+
+
+WITHDRAW_PLAN_FILENAME = "withdraw_plan.json"
+
+#: What ``applicability`` says when the recipe requires consent, so a written
+#: record can lapse and an empty ``lapsed_records`` list is a real measurement.
+APPLICABILITY_CHECKED = "checked"
+
+#: What ``applicability`` says when the recipe does not require consent. The
+#: write path applied no consent gate, so no written record can be "out of
+#: consent" against a rule the recipe never stated, and an empty
+#: ``lapsed_records`` list here means the question was not asked. The two must
+#: never render the same way: an operator reading an empty plan has to be able
+#: to tell "nobody lapsed" from "nothing was checked".
+APPLICABILITY_NOT_REQUIRED = "not-applicable-consent-not-required"
+
+
+class WithdrawPlanError(ValueError):
+    """Planning a consent withdrawal refused, fail-closed.
+
+    Every raise happens before any plan bytes exist: no plan file is written
+    and no provenance entry is appended on this path.
+    """
+
+
+@dataclass(frozen=True)
+class PlannedWithdrawal:
+    """What one withdrawal-planning pass produced. Ids and counts only.
+
+    ``lapsed`` names the written clusters whose consent is no longer active at
+    ``as_of``; ``written`` is how many written records were examined, so an
+    empty ``lapsed`` can be read against a denominator rather than on its own.
+    ``inputs_changed`` names the source files that differ from the ones the
+    manifest hashed, which is how a revocation that arrived in a later intake
+    file becomes visible (see :func:`plan_withdraw`).
+    """
+
+    plan_path: Path
+    digest: str
+    as_of: date
+    destination: str
+    applicability: str
+    mode: str
+    written: int
+    lapsed: tuple[str, ...]
+    inputs_changed: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _WrittenRecord:
+    """One record a run wrote, as the provenance log recorded it."""
+
+    cluster_id: str
+    members: tuple[str, ...]
+    external_id: str
+
+
+def _withdraw_manifest(recipe: Recipe, manifest_path: Path) -> tuple[str, tuple[str, ...]]:
+    """Bind the plan to the written run's recipe, and report input drift.
+
+    Returns ``(manifest_hash, changed_input_names)``.
+
+    The recipe hash and policy pack are checked strictly, exactly as
+    :func:`_verify_manifest` checks them: they decide which columns build each
+    record's consent and whether consent is required at all, so planning under
+    a different recipe would replay a different rule.
+
+    The input files are deliberately **not** required to match. This is the one
+    place the withdrawal path differs from the split path, and it is the whole
+    reason the verb exists. ADR 0013 fixes a merged identity's consent at write
+    time; the two ways it lapses afterwards are an ``expires`` date crossing,
+    which needs no file to change, and a revocation arriving in a later intake
+    file, which necessarily changes one. Refusing on drift would leave the
+    second case undetectable by the only tool built to detect it. So the drift
+    is recorded as evidence instead: the plan names every changed input file
+    and carries both digests, and the CLI prints the names.
+    """
+
+    data = _load_withdraw_manifest(manifest_path)
+    recorded_pack = str(data.get("policy_pack", ""))
+    if recorded_pack != recipe.policy_pack:
+        raise WithdrawPlanError(
+            f"the manifest records policy pack {recorded_pack!r} but the recipe loaded "
+            f"pack {recipe.policy_pack!r}; plan with the pack the written run used"
+        )
+    recipe_hash = file_digest(recipe.recipe_path) if recipe.recipe_path is not None else None
+    if data.get("recipe_hash") != recipe_hash:
+        raise WithdrawPlanError(
+            "the recipe file does not match the manifest's recipe hash; the recipe "
+            "decides which columns build each record's consent, so a withdrawal plan "
+            "has to replay the exact recipe the written run used"
+        )
+    input_paths = [path for path in (recipe.existing, recipe.incoming) if path is not None]
+    current = input_digests(input_paths)
+    changed = tuple(_drifted_inputs(current, data.get("input_hashes")))
+    return manifest_hash(data), changed
+
+
+def _load_withdraw_manifest(manifest_path: Path) -> dict[str, object]:
+    """The manifest, or a refusal naming the file.
+
+    An unreadable manifest is never allowed to degrade into an empty plan:
+    "the manifest could not be read" and "no record lapsed" are opposite
+    findings and both would otherwise print zero lapsed records.
+    """
+
+    if not manifest_path.is_file():
+        raise WithdrawPlanError(f"run manifest not found: {manifest_path}")
+    try:
+        data: object = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise WithdrawPlanError(f"run manifest is not valid JSON: {manifest_path}") from error
+    if not isinstance(data, dict):
+        raise WithdrawPlanError(f"run manifest must be a JSON object: {manifest_path}")
+    return {str(key): value for key, value in data.items()}
+
+
+def _written_records(provenance_path: Path, manifest_digest: str) -> list[_WrittenRecord]:
+    """Every record written under this manifest, newest entry per cluster.
+
+    Refuses on a log that does not verify, and on a log that records no run
+    under this manifest -- both would otherwise yield an empty written set,
+    which prints as "no record lapsed" and means nothing of the sort.
+
+    A write entry whose member list is malformed, or which records no external
+    id, refuses by name. Skipping it would drop a written record out of the
+    denominator and out of the plan, so a person whose consent had lapsed
+    would be absent from the list of people whose consent had lapsed.
+    """
+
+    ok, message = verify_log(provenance_path)
+    if not ok:
+        raise WithdrawPlanError(
+            f"the provenance log cannot anchor a withdrawal plan ({provenance_path}): {message}"
+        )
+    in_segment = False
+    saw_manifest = False
+    found: dict[str, _WrittenRecord] = {}
+    with provenance_path.open(encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line:
+                continue
+            entry = json.loads(line)
+            if entry.get("action") == RUN_START_ACTION:
+                in_segment = entry.get("content_hash") == manifest_digest
+                saw_manifest = saw_manifest or in_segment
+            elif in_segment and entry.get("action") in WRITE_ACTIONS:
+                record = _written_record(entry)
+                found[record.cluster_id] = record
+    if not saw_manifest:
+        raise WithdrawPlanError(
+            "the provenance log records no run under this manifest; the manifest and "
+            "the log must come from the same run's output directory"
+        )
+    return [found[key] for key in sorted(found)]
+
+
+def _written_record(entry: dict[str, object]) -> _WrittenRecord:
+    cluster_id = str(entry.get("record_id") or "")
+    if not cluster_id:
+        raise WithdrawPlanError(
+            "a write entry in the provenance log records no cluster id, so the record "
+            "it wrote cannot be named; this run needs manual investigation, not a "
+            "generated plan"
+        )
+    raw = entry.get("members")
+    if not isinstance(raw, list) or not all(isinstance(member, str) for member in raw) or not raw:
+        raise WithdrawPlanError(
+            f"the write entry for cluster {cluster_id!r} carries a malformed member list"
+        )
+    external_id = entry.get("external_id")
+    if not isinstance(external_id, str) or not external_id:
+        raise WithdrawPlanError(
+            f"the write entry for cluster {cluster_id!r} records no external id, so the "
+            "destination record cannot be named; this record needs manual "
+            "investigation, not a generated plan"
+        )
+    return _WrittenRecord(
+        cluster_id=cluster_id,
+        members=tuple(sorted(str(member) for member in raw)),
+        external_id=external_id,
+    )
+
+
+def _member_consents(written: _WrittenRecord, records: dict[str, Record]) -> tuple[Consent, ...]:
+    """Each written member's current consent, or a refusal naming the missing.
+
+    A member the current batch cannot account for is an error, not an
+    omission. The written record is in the destination either way; dropping it
+    here would answer "does this record need withdrawing?" with silence and
+    render that silence as "no".
+    """
+
+    missing = [member for member in written.members if member not in records]
+    if missing:
+        raise WithdrawPlanError(
+            f"the source batch does not account for member(s) {', '.join(missing)} of "
+            f"written record {written.cluster_id!r} (external id "
+            f"{written.external_id!r}). That record is in the destination and its "
+            "current consent cannot be read, which is not the same as consent being "
+            "active; restore the member's source row, or handle this record by hand."
+        )
+    return tuple(records[member].consent for member in written.members)
+
+
+def _lapsed_record(
+    written: _WrittenRecord,
+    consents: tuple[Consent, ...],
+    *,
+    as_of: date,
+    destination: str,
+    operations: tuple[RepairOperation, ...],
+) -> dict[str, object] | None:
+    """One written record's withdrawal entry, or ``None`` when consent holds.
+
+    The record's consent is the most restrictive of its members' (ADR 0013),
+    the same combination ``decisions.golden_records`` applied at write time, so
+    the reason reported here is the reason the write path would give today.
+    """
+
+    combined = Consent.most_restrictive(consents)
+    reason = combined.reason(as_of=as_of, destination=destination)
+    if reason is None:
+        return None
+    return {
+        "cluster_id": written.cluster_id,
+        "external_id": written.external_id,
+        "members": list(written.members),
+        "reason": reason,
+        "member_reasons": [
+            {
+                "record_id": member,
+                "withhold_reason": consent.reason(as_of=as_of, destination=destination),
+            }
+            for member, consent in zip(written.members, consents, strict=True)
+        ],
+        "operations": [
+            {"name": operation.name, "destructive": operation.destructive}
+            for operation in operations
+        ],
+        "operations_status": "declared" if operations else "none-declared",
+    }
+
+
+def _withdraw_instructions(
+    destination: str,
+    *,
+    lapsed: Sequence[dict[str, object]],
+    operations: tuple[RepairOperation, ...],
+) -> tuple[str, ...]:
+    """What a person does with a plan this tool will not execute.
+
+    Written for the case that is true for every destination today: no
+    ``RepairDeclaration`` enumerates ``consent-withdraw``, so the operations
+    list is empty and these lines are the whole of the repair. The empty list
+    is stated as a fact with a reason rather than left to speak for itself.
+    """
+
+    if operations:
+        return ()
+    steps = [
+        f"No verified {OP_CONSENT_WITHDRAW!r} operation is declared for destination "
+        f"{destination!r}. That is not the same as there being nothing to do: this "
+        "tool has not exercised a withdrawal against that system, so it will execute "
+        "none of this plan, and `constituent-reconcile apply-repair` refuses it.",
+        "Each entry under lapsed_records names the destination record by its external "
+        "id and the reason its consent is no longer active. Act on every one of them.",
+        "In the destination, apply that system's own withdrawal mechanism to each "
+        "external id: CiviCRM's privacy flags or soft-delete, or the NPSP flag field. "
+        "Read the vendor's current documentation before the first one; this plan does "
+        "not state their semantics because this repository has not verified them.",
+        "Withdraw only the records this plan names. A record absent from it either "
+        "still has active consent or could not be evaluated, and the plan says which.",
+    ]
+    if lapsed:
+        steps.append(
+            f"On this plan that means {len(lapsed)} record(s): "
+            + ", ".join(str(entry["external_id"]) for entry in lapsed)
+            + "."
+        )
+    return tuple(steps)
+
+
+def _withdraw_payload(
+    recipe: Recipe,
+    *,
+    manifest_digest: str,
+    as_of: date,
+    written: Sequence[_WrittenRecord],
+    lapsed: Sequence[dict[str, object]],
+    inputs_changed: Sequence[str],
+    operations: tuple[RepairOperation, ...],
+) -> dict[str, object]:
+    """Assemble the deterministic plan payload. Ids and reasons, no values."""
+
+    destination = recipe.output.connector
+    return {
+        "repair_plan_schema": REPAIR_PLAN_SCHEMA_VERSION,
+        "plan_kind": PLAN_KIND_WITHDRAW,
+        "manifest_hash": manifest_digest,
+        "policy_pack": recipe.policy_pack,
+        "destination": destination,
+        "destination_version": "",
+        "as_of": as_of.isoformat(),
+        "applicability": (
+            APPLICABILITY_CHECKED if recipe.require_consent else APPLICABILITY_NOT_REQUIRED
+        ),
+        "require_consent": recipe.require_consent,
+        "written_records": len(written),
+        "inputs_changed": list(inputs_changed),
+        "mode": "verified" if operations else "manual",
+        "supported_operations": [
+            {"name": operation.name, "destructive": operation.destructive}
+            for operation in operations
+        ],
+        "lapsed_records": list(lapsed),
+        "manual_instructions": list(
+            _withdraw_instructions(destination, lapsed=lapsed, operations=operations)
+        ),
+    }
+
+
+def plan_withdraw(
+    recipe: Recipe,
+    *,
+    manifest_path: Path,
+    as_of: date | None = None,
+) -> PlannedWithdrawal:
+    """Plan the withdrawal of written records whose consent has since lapsed.
+
+    ADR 0013 makes a merged identity take its most restrictive member's consent
+    **at write time**. Nothing re-evaluates it afterwards, so a record written
+    to CiviCRM or Salesforce keeps sitting there after its ``expires`` date
+    passes or a later intake file revokes it, and until now no artifact in this
+    repository said which records those were. This verb produces that artifact:
+    read-only toward the destination, offline, and in the ADR 0012 plan shape,
+    so the existing approval and apply machinery can refuse it by name.
+
+    ``as_of`` is the date consent is evaluated against, default today. It is
+    the input the whole plan turns on, so it is recorded in the plan.
+
+    Corrections are deliberately not a parameter. ``pipeline._group_corrections``
+    refuses a correction whose field is outside ``recipe.fields``, and the
+    consent columns are not recipe fields, so no correction can change a
+    consent value. Accepting a corrections file here would imply otherwise.
+
+    Refuses, fail-closed, on a manifest that is missing, unreadable, or written
+    under a different recipe or policy pack; a provenance log that does not
+    verify or records no run under this manifest; a write entry with no cluster
+    id, no external id, or a malformed member list; and a written member the
+    current source batch cannot account for. Each of those would otherwise
+    produce a plan with fewer lapsed records than the truth, which is the one
+    failure this artifact cannot have.
+
+    An empty ``lapsed_records`` list is a real result under a consent-requiring
+    recipe and only there. Under a recipe that does not require consent the
+    plan's ``applicability`` says so, because the write path applied no consent
+    gate and "nobody lapsed" would be an answer to a question nobody asked.
+    """
+
+    out_dir = manifest_path.parent
+    manifest_digest, inputs_changed = _withdraw_manifest(recipe, manifest_path)
+    provenance_path = out_dir / PROVENANCE_FILENAME
+    written = _written_records(provenance_path, manifest_digest)
+    try:
+        records = pipeline.ingest_normalized_records(recipe)
+    except ValueError as error:
+        raise WithdrawPlanError(f"could not read the source batch: {error}") from error
+
+    effective_as_of = as_of if as_of is not None else date.today()
+    destination = recipe.output.connector
+    # Offline by construction: no destination version was read, and the blank
+    # version matches no declaration's enumerated list, so operations stay
+    # empty and the plan is manual. Nothing declares consent-withdraw anyway.
+    operations = supported_operations(destination, "")
+    lapsed: list[dict[str, object]] = []
+    if recipe.require_consent:
+        for record in written:
+            entry = _lapsed_record(
+                record,
+                _member_consents(record, records),
+                as_of=effective_as_of,
+                destination=destination,
+                operations=operations,
+            )
+            if entry is not None:
+                lapsed.append(entry)
+
+    payload = _withdraw_payload(
+        recipe,
+        manifest_digest=manifest_digest,
+        as_of=effective_as_of,
+        written=written,
+        lapsed=lapsed,
+        inputs_changed=inputs_changed,
+        operations=operations,
+    )
+    encoded = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    digest = hashlib.blake2b(encoded.encode("utf-8"), digest_size=32).hexdigest()
+    plan_path = out_dir / WITHDRAW_PLAN_FILENAME
+    plan_path.write_text(encoded, encoding="utf-8")
+    ProvenanceLog(provenance_path).append_withdraw_plan(plan_digest=digest, lapsed=len(lapsed))
+    return PlannedWithdrawal(
+        plan_path=plan_path,
+        digest=digest,
+        as_of=effective_as_of,
+        destination=destination,
+        applicability=str(payload["applicability"]),
+        mode=str(payload["mode"]),
+        written=len(written),
+        lapsed=tuple(str(entry["cluster_id"]) for entry in lapsed),
+        inputs_changed=inputs_changed,
     )
