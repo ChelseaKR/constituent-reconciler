@@ -7,6 +7,55 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **Excel workbooks are a first-class structured source** (`excel.py`,
+  `pipeline.read_workbook_records`; #142). `pipeline._route` handled `.csv`,
+  `.pdf`, `.txt` and `.eml`, so the spreadsheet side of intake -- which is how
+  most small nonprofits actually keep it -- had to be exported to CSV by hand
+  before every run. That export is a step where a column gets dropped or
+  renamed. A recipe can now say `existing = "clients.xlsx"` with an optional
+  `sheet` and `header_row`, and a folder walk picks up `.xlsx` and `.xlsm`
+  beside `.csv`. openpyxl ships behind a new `excel` extra, so an installation
+  that only reads CSVs does not carry a spreadsheet parser.
+
+  The workbook is opened read-only and never written, and values are read
+  rather than formula text. Reading is shared with the CSV path from the row
+  dict onward (`pipeline._records_from_rows`), so mapping, id minting and
+  consent reading cannot drift between the two readers: the bundled demo saved
+  as a workbook produces the same record ids and a byte-identical review queue.
+
+  **Four ways a workbook reads as data when it is not, each refused by name.**
+  openpyxl's read-only worksheets do not expose merge ranges at all, so a
+  merged header cell arrives as `None`, indistinguishable from an empty one; a
+  merge at the end of the header row would be trimmed as a trailing blank and
+  its column silently dropped. The merge check therefore costs one non-streaming
+  load of the workbook, which is this reader's memory ceiling; every other pass
+  streams. A formula whose result Excel never cached also arrives as
+  `None` under `data_only=True`, so a second, formula-visible pass tells "never
+  computed" apart from "empty". A workbook's used range routinely runs past its
+  last real row, and minting records from those rows would invent people, so
+  trailing wholly-blank rows are dropped while blank rows *between* data rows
+  are kept exactly as a CSV keeps them. A password-protected workbook is an
+  OLE2 container rather than a zip, and is named as needing a password instead
+  of reported as corrupt. A missing sheet, a blank header, duplicate headers,
+  an empty sheet and a header row past the end of the data are refused the same
+  way, before any record is read.
+
+  `validate` prints the sheet a run will read. That is worth printing because a
+  recipe naming no sheet gets the workbook's *first* one, and sheet order is a
+  property of the file: an operator who reorders tabs would otherwise have no
+  way to see what a run reads short of running it.
+
+  Typed cells render as the text an equivalent CSV would have held: a postcode
+  stored as a number does not become `90210.0`, a date-formatted cell renders
+  ISO-8601 so a consent date parses, and a boolean renders lowercase so `TRUE`
+  in a consent column lands on the recognized token rather than reading as an
+  unrecognized status, which fails closed to withheld.
+
+  The run manifest already digests the workbook file, and the recipe hash
+  covers `sheet` and `header_row`, so two runs reading different sheets of one
+  workbook are distinguishable in provenance. The structured reader does not
+  pass through the stage cache -- it never did, for CSV either -- so there is no
+  cache entry that could go stale on a sheet change.
 - **Confirmed households now reach CiviCRM and NPSP, not just the CSV
   connectors** (`household.plan_household_writes`,
   `connectors/household_write.py`; #151). EXP-07 shipped household suggestions

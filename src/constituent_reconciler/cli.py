@@ -39,7 +39,14 @@ from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, TextIO
 
-from constituent_reconciler import __version__, compare, compare_apply, pipeline, stage_cache
+from constituent_reconciler import (
+    __version__,
+    compare,
+    compare_apply,
+    excel,
+    pipeline,
+    stage_cache,
+)
 
 if TYPE_CHECKING:
     # Only for type hints: the deterministic pipeline commands never import
@@ -1364,6 +1371,27 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _sheet_note(recipe: Recipe, path: Path, problems: list[str]) -> str:
+    """The " (sheet 'X', header row N)" suffix validate prints for a workbook input.
+
+    Reported because a recipe that names no sheet reads the workbook's *first*
+    sheet, and sheet order is a property of the file: an operator who reorders
+    tabs would otherwise have no way to see what a run will read short of
+    running it. A workbook that cannot be opened, or that has no such sheet,
+    becomes a problem line instead of an exception, so validate keeps reporting
+    the rest of the recipe.
+    """
+
+    if path.suffix.lower() not in excel.WORKBOOK_SUFFIXES or not path.exists():
+        return ""
+    try:
+        sheet = excel.resolve_sheet_name(path, recipe.sheet)
+    except RecipeError as error:
+        problems.append(str(error))
+        return ""
+    return f" (sheet {sheet!r}, header row {recipe.header_row})"
+
+
 def _cmd_validate(args: argparse.Namespace) -> int:
     """Load and shape-check a recipe, and report its active switches.
 
@@ -1395,9 +1423,9 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         problems.append(f"input.existing does not exist: {recipe.existing}")
 
     print(f"recipe: {config_path}")
-    print(f"  incoming: {recipe.incoming}")
+    print(f"  incoming: {recipe.incoming}{_sheet_note(recipe, recipe.incoming, problems)}")
     if recipe.existing is not None:
-        print(f"  existing: {recipe.existing}")
+        print(f"  existing: {recipe.existing}{_sheet_note(recipe, recipe.existing, problems)}")
     print(f"  mapped fields: {', '.join(recipe.fields)}")
     print(f"  policy pack: {recipe.policy_pack}")
     print(

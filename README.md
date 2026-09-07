@@ -449,8 +449,8 @@ backend              = "pdfplumber"
 confidence_threshold = 0.5
 ```
 
-The pipeline routes `.csv` files through the structured reader and `.pdf` files
-through the extractor. Each extracted field carries a source-span pointer (PDF
+The pipeline routes `.csv` and `.xlsx`/`.xlsm` files through the structured
+reader and `.pdf` files through the extractor. Each extracted field carries a source-span pointer (PDF
 filename, page number, bounding box) that appears in the review queue CSV as
 `{field}_left_span` and `{field}_right_span` columns, so a reviewer can navigate
 back to where the value was read.

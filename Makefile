@@ -9,7 +9,7 @@
 # caught here instead of drifting silently. Run `uv lock` after editing
 # pyproject.toml and commit the result.
 install:
-	uv sync --locked --python 3.12 --group dev --extra extract
+	uv sync --locked --python 3.12 --group dev --extra extract --extra excel
 
 format-check:
 	.venv/bin/ruff format --check src tests tools
@@ -205,7 +205,7 @@ bundle:
 	rm -rf $(BUNDLE)
 	mkdir -p $(BUNDLE)/wheelhouse
 	uv build --wheel --out-dir $(BUNDLE)/wheelhouse
-	uv export --frozen --format requirements.txt --group dev --extra extract --no-hashes --no-emit-project --output-file $(BUNDLE)/requirements.txt
+	uv export --frozen --format requirements.txt --group dev --extra extract --extra excel --no-hashes --no-emit-project --output-file $(BUNDLE)/requirements.txt
 	.venv/bin/python -m pip download --requirement $(BUNDLE)/requirements.txt --dest $(BUNDLE)/wheelhouse
 	@if command -v docker >/dev/null 2>&1; then \
 		docker build -t constituent-reconciler . && \

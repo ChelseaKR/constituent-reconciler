@@ -33,7 +33,7 @@ from constituent_reconciler.suppression import ensure_non_identifying
 # listed here because its keys are the canonical field names themselves,
 # checked separately against CANONICAL_FIELDS.
 _SECTION_KEYS: dict[str, frozenset[str]] = {
-    "input": frozenset({"incoming", "existing", "id_column"}),
+    "input": frozenset({"incoming", "existing", "id_column", "sheet", "header_row"}),
     "mapping": frozenset(CANONICAL_FIELDS),
     "consent": frozenset({"column", "date", "expires", "scope", "require"}),
     "thresholds": frozenset({"prior", "auto", "review"}),
@@ -247,6 +247,13 @@ class Recipe:
     mapping: dict[str, str]
     existing: Path | None = None
     id_column: str | None = None
+    # Workbook selection, applied to whichever of the two inputs is an .xlsx or
+    # .xlsm file. ``sheet = None`` means the workbook's first sheet, which is a
+    # property of the file rather than of the recipe, so ``validate`` reports the
+    # name it resolved to. ``header_row`` is 1-based, matching what Excel shows
+    # in its own row gutter.
+    sheet: str | None = None
+    header_row: int = 1
     consent_column: str | None = None
     consent_date_column: str | None = None
     consent_expires_column: str | None = None
@@ -282,6 +289,35 @@ class Recipe:
 def _resolve(base: Path, value: str) -> Path:
     candidate = Path(value)
     return candidate if candidate.is_absolute() else (base / candidate)
+
+
+def _load_workbook_selection(input_section: dict[str, Any]) -> tuple[str | None, int]:
+    """Validate and build the [input] workbook keys, fail-closed on every bad shape.
+
+    Both keys are inert for a CSV input and load-bearing for a workbook, so
+    they are checked here regardless of what the input turns out to be: a
+    typo'd ``header_row`` should fail at load time rather than on the day
+    someone switches the recipe to a spreadsheet. ``True`` is rejected as a
+    row number explicitly, because ``bool`` is an ``int`` in Python and
+    ``header_row = true`` would otherwise read as row 1.
+    """
+
+    sheet_value = input_section.get("sheet")
+    if sheet_value is not None and (not isinstance(sheet_value, str) or not sheet_value.strip()):
+        raise RecipeError(
+            f"recipe [input] sheet must be a non-empty worksheet name, got {sheet_value!r}"
+        )
+
+    header_row = input_section.get("header_row", 1)
+    if isinstance(header_row, bool) or not isinstance(header_row, int):
+        raise RecipeError(
+            f"recipe [input] header_row must be a whole row number, got {header_row!r}"
+        )
+    if header_row < 1:
+        raise RecipeError(
+            f"recipe [input] header_row is 1-based and must be at least 1, got {header_row}"
+        )
+    return (None if sheet_value is None else str(sheet_value)), header_row
 
 
 def _load_cache_config(cache_section: dict[str, Any], base: Path) -> CacheConfig:
@@ -409,6 +445,8 @@ def load_recipe(
     existing_value = input_section.get("existing")
     existing = _resolve(base, str(existing_value)) if existing_value else None
 
+    sheet, header_row = _load_workbook_selection(input_section)
+
     normalize = NormalizeConfig(
         address_backend=str(normalize_section.get("address_backend", "deterministic")),
     )
@@ -458,6 +496,8 @@ def load_recipe(
         mapping=mapping,
         existing=existing,
         id_column=(str(input_section["id_column"]) if "id_column" in input_section else None),
+        sheet=sheet,
+        header_row=header_row,
         consent_column=(str(consent_section["column"]) if "column" in consent_section else None),
         consent_date_column=(str(consent_section["date"]) if "date" in consent_section else None),
         consent_expires_column=(

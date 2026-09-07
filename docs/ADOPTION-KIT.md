@@ -53,7 +53,7 @@ the write step and point it there.
 
 ## Step 1: Get your data into two files
 
-Put the existing records in one CSV and the new intake in another. The column
+Put the existing records in one file and the new intake in another. The column
 headers can be whatever your export produces; you map them in the next step. A
 small first pass, a few hundred rows, tells you most of what you need and runs in
 seconds.
@@ -63,10 +63,46 @@ existing.csv   # constituents already in your CRM
 incoming.csv   # the new intake to reconcile against them
 ```
 
+### Excel workbooks
+
+An `.xlsx` or `.xlsm` workbook works wherever a CSV does, so there is no export
+step to get wrong:
+
+```toml
+[input]
+existing = "clients.xlsx"
+incoming = "intake.csv"
+sheet = "Contacts"      # optional; the first sheet if you leave it out
+header_row = 2          # optional; row 1 if you leave it out
+```
+
+Install the extra that carries the spreadsheet reader:
+
+```sh
+pip install 'constituent-reconciler[excel]'
+```
+
+The workbook is opened read-only and never written, and only cell *values* are
+read, never formula text. Run `constituent-reconcile validate --config
+recipe.toml` first: it prints the sheet a run will actually read, which matters
+when you have not named one, because then it is whichever sheet is first in the
+file.
+
+A workbook is refused, by name, rather than half-read, when the named sheet is
+missing, when a header cell is blank or merged across the header row, when two
+columns share a name, when a formula's result was never saved by Excel, or when
+the file needs a password. Each of those would otherwise read as an empty column
+or an empty cell, and a blank that is really a missing read is the one kind of
+wrong answer this pipeline will not produce.
+
+`.xlsb` is not supported; save it as `.xlsx` first.
+
+### PDFs and other documents
+
 If your intake arrives as PDFs, point `incoming` at the folder instead and add an
 `[extract]` section (see [the README](../README.md#reading-from-pdfs)). The
-pipeline routes `.csv` files through the structured reader and `.pdf` files
-through the offline extractor.
+pipeline routes `.csv` and `.xlsx`/`.xlsm` files through the structured reader
+and `.pdf` files through the offline extractor.
 
 ## Step 2: Write a recipe
 
