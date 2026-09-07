@@ -134,6 +134,15 @@ NOT_DESTROYED: dict[str, str] = {
         "the only evidence of why an automatic merge happened"
     ),
     "compare_decisions.json": "the same shape as decisions.json, for the cutover comparison",
+    "calibration_report.md": (
+        "counts and rates over reviewer verdicts: how many pairs each threshold "
+        "setting would auto-merge, how many of those a person had rejected, and "
+        "the Wilson intervals. No pair id and no field value"
+    ),
+    "calibration_report.json": (
+        "the machine-readable half of calibration_report.md; the same counts and "
+        "rates, and the same absence of ids"
+    ),
     "run_diff.json": (
         "counts and section names only: how many clusters formed or dissolved "
         "between two runs, how many pairs entered or left review, how many "

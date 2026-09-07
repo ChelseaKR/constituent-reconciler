@@ -870,6 +870,56 @@ def _parse_as_of(raw: str | None, verb: str) -> date | int:
         return 2
 
 
+def _cmd_sweep_thresholds(args: argparse.Namespace) -> int:
+    """Score a threshold grid against this organization's own reviewer verdicts.
+
+    Read-only in every direction: it edits no recipe, applies nothing, and
+    prints counts and rates. Named ``sweep-thresholds`` rather than
+    ``calibrate`` because ``review/calibration.py`` already owns that word for
+    the planted-pair reviewer-agreement gate, which is a different mechanism.
+    """
+
+    from constituent_reconciler import sweep as sweep_module
+
+    try:
+        recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+    except (RecipeError, PolicyViolation) as error:
+        print(f"sweep-thresholds error: {error}", file=sys.stderr)
+        return 2
+    decisions_path = Path(args.decisions)
+    run_dir = Path(args.run_dir) if args.run_dir else decisions_path.parent
+    out_dir = Path(args.out) if args.out else run_dir
+    try:
+        report = sweep_module.sweep_thresholds(
+            recipe,
+            decisions_path=decisions_path,
+            run_dir=run_dir,
+            gate=float(args.gate),
+        )
+    except sweep_module.SweepError as error:
+        print(f"sweep-thresholds error: {error}", file=sys.stderr)
+        return 2
+
+    policy = policy_for(recipe.policy_pack)
+    markdown_path, json_path = sweep_module.write_sweep(report, out_dir, policy=policy)
+    print(sweep_module.render_sweep(report))
+    if args.suggest:
+        suggestion = report.suggestion
+        if suggestion is None:
+            print(
+                "no eligible row: these verdicts support no setting inside the gate. "
+                "Nothing is suggested, and nothing has been changed."
+            )
+        else:
+            print(
+                f"most conservative eligible row: auto {suggestion.auto}, review "
+                f"{suggestion.review}. Not applied; edit the recipe yourself if you mean it."
+            )
+    print(f"report: {markdown_path}")
+    print(f"json:   {json_path}")
+    return 0
+
+
 def _cmd_diff_runs(args: argparse.Namespace) -> int:
     """Report what changed between two runs of one recipe (read-only).
 
@@ -2087,6 +2137,40 @@ def build_parser() -> argparse.ArgumentParser:
         "--format", choices=("markdown", "json"), default="markdown", help="output rendering"
     )
     diff_parser.set_defaults(func=_cmd_diff_runs)
+
+    sweep_parser = sub.add_parser(
+        "sweep-thresholds",
+        help="report what your reviewers' own verdicts imply about a grid of "
+        "(auto, review) thresholds; never edits the recipe",
+    )
+    sweep_parser.add_argument("--config", required=True, help="path to recipe.toml")
+    sweep_parser.add_argument(
+        "--decisions", required=True, help="the reviewed decisions JSON to treat as labels"
+    )
+    sweep_parser.add_argument(
+        "--run-dir",
+        default=None,
+        help="the run directory holding review_queue.csv and auto_merges.json "
+        "(default: the --decisions file's own directory)",
+    )
+    sweep_parser.add_argument(
+        "--out", default=None, help="where to write the report (default: --run-dir)"
+    )
+    sweep_parser.add_argument(
+        "--gate",
+        type=float,
+        default=0.0,
+        help="max allowed false-merge rate for a row to be eligible (default 0.0, matching `eval`)",
+    )
+    sweep_parser.add_argument(
+        "--suggest",
+        action="store_true",
+        help="also print the most conservative eligible row; it is never applied",
+    )
+    sweep_parser.add_argument(
+        "--policy-pack", default=None, help="override the recipe's policy pack"
+    )
+    sweep_parser.set_defaults(func=_cmd_sweep_thresholds)
 
     approve_repair_parser = sub.add_parser(
         "approve-repair",
