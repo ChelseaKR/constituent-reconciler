@@ -194,8 +194,9 @@ def test_an_expiry_crossed_after_the_write_names_exactly_that_record(
 
     # The denominator travels with the finding, so one lapsed record can be
     # read against how many were examined rather than on its own.
-    assert plan["written_records"] == len(_written_cluster_ids(out_dir))
-    assert plan["written_records"] > 1
+    written = plan["written_records"]
+    assert written == len(_written_cluster_ids(out_dir))
+    assert isinstance(written, int) and written > 1
 
 
 def test_the_same_expiry_before_its_date_lapses_nothing(
@@ -210,7 +211,8 @@ def test_the_same_expiry_before_its_date_lapses_nothing(
     assert _lapsed(plan) == []
     # An empty list here is a measurement, and the plan says so.
     assert plan["applicability"] == repair.APPLICABILITY_CHECKED
-    assert plan["written_records"] > 0
+    written = plan["written_records"]
+    assert isinstance(written, int) and written > 0
 
 
 def test_a_revocation_arriving_in_a_later_intake_file_is_visible(
@@ -304,7 +306,9 @@ def test_an_undeclared_withdrawal_operation_is_named_not_left_empty(
     plan = _plan(out_dir)
     assert plan["mode"] == "manual"
     assert plan["supported_operations"] == []
-    steps = " ".join(str(step) for step in plan["manual_instructions"])  # type: ignore[union-attr]
+    instructions = plan["manual_instructions"]
+    assert isinstance(instructions, list)
+    steps = " ".join(str(step) for step in instructions)
     assert "consent-withdraw" in steps
     assert "not the same as there being nothing to do" in steps
     assert f"existing:{LAPSING_ROW}" in steps
