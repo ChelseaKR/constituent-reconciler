@@ -37,6 +37,7 @@ from pathlib import Path
 from constituent_reconciler import decisions
 from constituent_reconciler.models import Band, Cluster, Correction, Pair, Record, RunResult
 from constituent_reconciler.review.calibration import PlantedPair
+from constituent_reconciler.review.sharding import Shard, in_shard
 from constituent_reconciler.schema import DECISIONS_SCHEMA_VERSION
 
 APPROVED = "approved"
@@ -445,6 +446,7 @@ class ReviewSession:
         privacy_mode: bool = False,
         require_second_reviewer: bool = False,
         calibration: Sequence[PlantedPair] = (),
+        shard: Shard | None = None,
     ) -> None:
         self._result = result
         self._fields = fields
@@ -452,6 +454,10 @@ class ReviewSession:
         self.reviewer = _clean_reviewer(reviewer)
         self.privacy_mode = privacy_mode
         self.require_second_reviewer = require_second_reviewer
+        # When set, this session presents only the pairs hashing into this shard
+        # and stamps its identity into the decisions file it writes, so
+        # `merge-decisions` can check coverage and catch a misplaced pair.
+        self.shard = shard
         # A per-run secret embedded in every rendered form and checked on every
         # POST (FIX-01), so a page the reviewer has open elsewhere cannot forge
         # a verdict against this server: it cannot know a token it never saw.
@@ -459,7 +465,14 @@ class ReviewSession:
         self.token = secrets.token_urlsafe(24)
         # The same ordering the review_queue.csv uses, so the two surfaces agree.
         real_pairs = tuple(
-            sorted(result.review_pairs, key=lambda p: (-p.probability, p.left, p.right))
+            sorted(
+                (
+                    pair
+                    for pair in result.review_pairs
+                    if shard is None or in_shard(pair.left, pair.right, shard)
+                ),
+                key=lambda p: (-p.probability, p.left, p.right),
+            )
         )
         self._pairs, self._synthetic_indexes = _interleave_pairs(real_pairs, calibration)
         self._planted_records = {
@@ -1037,12 +1050,18 @@ class ReviewSession:
                 }
                 for entry in self._entries[index]
             ]
-        return {
+        payload: dict[str, object] = {
             "decisions_schema": DECISIONS_SCHEMA_VERSION,
             "approved": approved,
             "rejected": rejected,
             "audit": audit,
         }
+        if self.shard is not None:
+            # A shard file that does not say which shard it is cannot be checked
+            # for coverage, and a merge of unlabelled files would claim a
+            # completeness nothing verified.
+            payload["shard"] = {"index": self.shard.index, "count": self.shard.count}
+        return payload
 
     def save(self) -> None:
         self._decisions_path.parent.mkdir(parents=True, exist_ok=True)
