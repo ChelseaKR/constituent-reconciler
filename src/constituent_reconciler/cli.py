@@ -77,6 +77,7 @@ from constituent_reconciler.report import (
     render_source_quality,
 )
 from constituent_reconciler.review import session as review_session
+from constituent_reconciler.review import sharding
 from constituent_reconciler.scaffold import ScaffoldError, unfilled_stubs
 from constituent_reconciler.scaffold import build as build_scaffold
 from constituent_reconciler.scaffold import write as write_scaffold
@@ -464,6 +465,22 @@ def _refuse_incomplete_review(
     --policy-pack dv`` would merge pairs one person approved.
     """
 
+    # A merged file that covers only some shards reports a queue as fully
+    # reviewed while a whole shard was never opened. Checked FIRST, because it
+    # is the only one of the three that can be true while every pair the file
+    # does contain is perfectly reviewed -- the failure is what is absent.
+    partial = sharding.incomplete_merge(data)
+    if partial is not None:
+        print(
+            f"error: {decisions_path} is an incomplete merge of a sharded review: {partial}",
+            file=sys.stderr,
+        )
+        print(
+            "Finish the missing shard(s) (constituent-reconcile review --shard <i>/<n>) and "
+            "re-run `merge-decisions` over all of them.",
+            file=sys.stderr,
+        )
+        return True
     awaiting = _pairs_awaiting_second_review(data)
     if awaiting:
         print(
@@ -870,6 +887,45 @@ def _parse_as_of(raw: str | None, verb: str) -> date | int:
         return 2
 
 
+def _cmd_merge_decisions(args: argparse.Namespace) -> int:
+    """Combine per-reviewer shard decisions files into one whole-queue file.
+
+    Refuses on conflicting verdicts, on a pair recorded in a shard file it
+    does not hash into, and on files from different splits of the queue.
+    Coverage is recorded rather than required, because a partial merge is a
+    real intermediate artifact; it is ``apply`` that refuses to act on one.
+    """
+
+    paths = [Path(path) for path in args.shards]
+    try:
+        merged = sharding.merge_decisions(paths)
+    except sharding.ShardError as error:
+        print(f"merge-decisions error: {error}", file=sys.stderr)
+        return 2
+
+    into = Path(args.into)
+    into.parent.mkdir(parents=True, exist_ok=True)
+    into.write_text(json.dumps(merged.payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    covered = ", ".join(str(index) for index in merged.covered)
+    print(f"merged decisions: {into}")
+    print(f"  shards:  {len(merged.covered)} of {merged.shard_count} (covered: {covered})")
+    print(f"  pairs:   {merged.pairs} decided")
+    for name, digest in merged.sources:
+        print(f"  source:  {name} {digest}")
+    missing = sorted(set(range(1, merged.shard_count + 1)) - set(merged.covered))
+    if missing:
+        # Not an error here, and loudly not a success either: the file is
+        # honest about what it holds, and `apply` will refuse it.
+        print(
+            "warning: shard(s) "
+            + ", ".join(str(index) for index in missing)
+            + " are missing, so this merge does not cover the queue. "
+            "`constituent-reconcile apply` will refuse it until they are included.",
+            file=sys.stderr,
+        )
+    return 0
+
+
 def _cmd_sweep_thresholds(args: argparse.Namespace) -> int:
     """Score a threshold grid against this organization's own reviewer verdicts.
 
@@ -1167,6 +1223,23 @@ def _calibration_summary(session: object) -> str:
     return line
 
 
+def _parse_review_shard(spec: str | None) -> sharding.Shard | None | int:
+    """The requested shard, ``None`` for a whole-queue review, or an exit code.
+
+    A malformed or out-of-range spec is refused rather than clamped: a reviewer
+    who typed ``4/3`` would otherwise be handed some other shard's pairs and
+    believe they had covered a quarter of the queue that does not exist.
+    """
+
+    if not spec:
+        return None
+    try:
+        return sharding.parse_shard(spec)
+    except sharding.ShardError as error:
+        print(f"review error: {error}", file=sys.stderr)
+        return 2
+
+
 def _cmd_review(args: argparse.Namespace) -> int:
     from constituent_reconciler.review.calibration import generate_calibration_pairs
     from constituent_reconciler.review.server import serve
@@ -1180,10 +1253,17 @@ def _cmd_review(args: argparse.Namespace) -> int:
     except PolicyViolation as error:
         print(f"policy error: {error}", file=sys.stderr)
         return 2
+    shard = _parse_review_shard(args.shard)
+    if isinstance(shard, int):
+        return shard
     result = pipeline.run(recipe)
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
-    decisions_path = Path(args.decisions) if args.decisions else out_dir / "decisions.json"
+    # A sharded session writes its own file by default. Sharing one path across
+    # reviewers would have each session's save overwrite the last, which is
+    # exactly the sequential bottleneck sharding exists to remove.
+    default_decisions = out_dir / (shard.filename if shard else "decisions.json")
+    decisions_path = Path(args.decisions) if args.decisions else default_decisions
     # The flag may turn two-person review on for any pack; it cannot turn off
     # a pack that requires it (the dv pack defaults it on), fail-closed.
     require_second = bool(args.require_second_reviewer) or recipe.require_second_reviewer
@@ -1197,11 +1277,20 @@ def _cmd_review(args: argparse.Namespace) -> int:
             privacy_mode=recipe.require_local_targets,
             require_second_reviewer=require_second,
             calibration=calibration,
+            shard=shard,
         )
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
     print(render_run_summary(result))
+    if shard is not None:
+        # Printed in the header, per the issue: a reviewer must be able to see
+        # which slice they hold and how much of the queue it is.
+        print(
+            f"shard {shard}: {session.total} of {len(result.review_pairs)} queue pair(s) "
+            f"assigned to this reviewer, writing {decisions_path.name}. Merge every "
+            "shard with `constituent-reconcile merge-decisions` before applying."
+        )
     if calibration:
         print(
             f"calibration: {len(calibration)} planted known-answer pair(s) are mixed "
@@ -2172,6 +2261,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sweep_parser.set_defaults(func=_cmd_sweep_thresholds)
 
+    merge_parser = sub.add_parser(
+        "merge-decisions",
+        help="combine per-reviewer shard decisions files into one; refuses on "
+        "conflicting verdicts and on a pair recorded in the wrong shard",
+    )
+    merge_parser.add_argument(
+        "--into", required=True, help="path to write the merged decisions file to"
+    )
+    merge_parser.add_argument("shards", nargs="+", help="the shard decisions files to merge")
+    merge_parser.set_defaults(func=_cmd_merge_decisions)
+
     approve_repair_parser = sub.add_parser(
         "approve-repair",
         help="record one reviewer's approval of a repair plan's exact bytes (ADR 0012)",
@@ -2268,7 +2368,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     review_parser.add_argument("--out", default="out", help="output directory")
     review_parser.add_argument(
-        "--decisions", default=None, help="decisions file to write (default <out>/decisions.json)"
+        "--shard",
+        default=None,
+        help="review only this slice of the queue, as i/n (e.g. 2/3). Assignment is a "
+        "hash of each pair's own id, so slices are disjoint and stable across resumes; "
+        "the session writes decisions-<i>of<n>.json",
+    )
+    review_parser.add_argument(
+        "--decisions",
+        default=None,
+        help="decisions file to write (default <out>/decisions.json, or "
+        "<out>/decisions-<i>of<n>.json under --shard)",
     )
     review_parser.add_argument(
         "--host", default="127.0.0.1", help="bind host (loopback only under the dv pack)"
