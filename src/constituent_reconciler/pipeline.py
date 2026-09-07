@@ -21,6 +21,7 @@ from pathlib import Path
 from constituent_reconciler import (
     consent,
     decisions,
+    excel,
     household,
     matching,
     quality,
@@ -108,32 +109,102 @@ def read_records(
     """
 
     seen = _seen if _seen is not None else {}
-    records: list[Record] = []
     with path.open(newline="", encoding="utf-8-sig") as handle:
-        reader = csv.DictReader(handle)
-        for row in reader:
-            raw = {
-                canonical: (row.get(column) or "").strip() for canonical, column in mapping.items()
-            }
-            if id_column and (row.get(id_column) or "").strip():
-                unique_id = f"{source}:{row[id_column].strip()}"
-            else:
-                unique_id = _content_id(source, raw, id_prefix, seen)
-            records.append(
-                Record(
-                    unique_id=unique_id,
-                    source=source,
-                    raw=raw,
-                    consent=_read_consent(
-                        row,
-                        status_column=consent_column,
-                        granted_on_column=consent_date_column,
-                        expires_on_column=consent_expires_column,
-                        scope_column=consent_scope_column,
-                    ),
-                )
+        rows = list(csv.DictReader(handle))
+    return _records_from_rows(
+        rows,
+        source,
+        mapping=mapping,
+        id_column=id_column,
+        consent_column=consent_column,
+        consent_date_column=consent_date_column,
+        consent_expires_column=consent_expires_column,
+        consent_scope_column=consent_scope_column,
+        id_prefix=id_prefix,
+        seen=seen,
+    )
+
+
+def _records_from_rows(
+    rows: Iterable[dict[str, str]],
+    source: str,
+    *,
+    mapping: dict[str, str],
+    id_column: str | None,
+    consent_column: str | None,
+    consent_date_column: str | None,
+    consent_expires_column: str | None,
+    consent_scope_column: str | None,
+    id_prefix: str,
+    seen: dict[str, int],
+) -> list[Record]:
+    """Turn already-parsed structured rows into Records.
+
+    Shared by the CSV and workbook readers so the two cannot drift: mapping,
+    stripping, id minting and consent reading happen in exactly one place, and
+    a workbook of the same data resolves to the same record ids as its CSV.
+    """
+
+    records: list[Record] = []
+    for row in rows:
+        raw = {canonical: (row.get(column) or "").strip() for canonical, column in mapping.items()}
+        if id_column and (row.get(id_column) or "").strip():
+            unique_id = f"{source}:{row[id_column].strip()}"
+        else:
+            unique_id = _content_id(source, raw, id_prefix, seen)
+        records.append(
+            Record(
+                unique_id=unique_id,
+                source=source,
+                raw=raw,
+                consent=_read_consent(
+                    row,
+                    status_column=consent_column,
+                    granted_on_column=consent_date_column,
+                    expires_on_column=consent_expires_column,
+                    scope_column=consent_scope_column,
+                ),
             )
+        )
     return records
+
+
+def read_workbook_records(
+    path: Path,
+    source: str,
+    *,
+    mapping: dict[str, str],
+    id_column: str | None,
+    consent_column: str | None,
+    id_prefix: str,
+    consent_date_column: str | None = None,
+    consent_expires_column: str | None = None,
+    consent_scope_column: str | None = None,
+    sheet: str | None = None,
+    header_row: int = 1,
+    _seen: dict[str, int] | None = None,
+) -> list[Record]:
+    """Read one worksheet into Records, through the same path a CSV takes.
+
+    ``excel.read_rows`` returns the row dicts ``csv.DictReader`` would have
+    produced for the same data, so everything after it -- mapping, ids,
+    consent -- is the shared code above and needs no workbook-specific case.
+    """
+
+    seen = _seen if _seen is not None else {}
+    rows = excel.read_rows(path, sheet=sheet, header_row=header_row)
+    return _records_from_rows(
+        rows,
+        source,
+        mapping=mapping,
+        id_column=id_column,
+        consent_column=consent_column,
+        consent_date_column=consent_date_column,
+        consent_expires_column=consent_expires_column,
+        consent_scope_column=consent_scope_column,
+        id_prefix=id_prefix,
+        seen=seen,
+    )
 
 
 def _collect_mapped_fields(
@@ -414,21 +485,37 @@ def read_text_records(
 
 
 _PlanItem = tuple[str, Path]
-"""One unit of planned ingest work: a reader kind (csv, pdf, text) and a file."""
+"""One unit of planned ingest work: a reader kind and a file.
+
+The kinds are "csv" and "excel" (structured sources, read directly) and "pdf"
+and "text" (documents, which go through extraction).
+"""
+
+_DOCUMENT_KINDS = frozenset({"pdf", "text"})
+"""Reader kinds whose files are documents, and so count toward extract progress.
+
+Named rather than tested as ``kind != "csv"``: the structured readers are now
+two, and the old inequality would have counted every workbook as a document and
+given the extract stage a denominator that included files it never opens.
+"""
 
 
 def _route(path: Path, recipe: Recipe) -> tuple[str, str]:
     """Classify one file: (reader kind, skip reason); the kind is "" when skipped.
 
-    The routing rules are unchanged from the original single-pass reader:
-    .csv goes to the structured reader, .pdf to the PDF extractor, and .txt
-    or .eml to the text extractor, with the document readers available only
-    while ``extract.backend`` is not "none".
+    .csv goes to the structured reader and .xlsx or .xlsm to the workbook
+    reader, which is the same structured path with a spreadsheet parser in
+    front of it; .pdf goes to the PDF extractor and .txt or .eml to the text
+    extractor, with the document readers available only while
+    ``extract.backend`` is not "none". Workbooks carry no such switch: reading
+    one is parsing a structured file, not extracting fields from a document.
     """
 
     suffix = path.suffix.lower()
     if suffix == ".csv":
         return "csv", ""
+    if suffix in excel.WORKBOOK_SUFFIXES:
+        return "excel", ""
     if suffix == ".pdf":
         if recipe.extract.backend != "none":
             return "pdf", ""
@@ -573,6 +660,21 @@ def _read_plan(
                 id_prefix=id_prefix,
                 _seen=seen,
             )
+        elif kind == "excel":
+            records += read_workbook_records(
+                child,
+                source,
+                mapping=recipe.mapping,
+                id_column=recipe.id_column,
+                consent_column=recipe.consent_column,
+                consent_date_column=recipe.consent_date_column,
+                consent_expires_column=recipe.consent_expires_column,
+                consent_scope_column=recipe.consent_scope_column,
+                id_prefix=id_prefix,
+                sheet=recipe.sheet,
+                header_row=recipe.header_row,
+                _seen=seen,
+            )
         elif kind == "pdf":
             records += read_pdf_records(
                 child,
@@ -596,7 +698,7 @@ def _read_plan(
         if accounting is not None:
             accounting.note_read(child)
         if tracker is not None:
-            tracker.note_file(document=kind != "csv")
+            tracker.note_file(document=kind in _DOCUMENT_KINDS)
     return records
 
 
@@ -784,7 +886,9 @@ def ingest_normalized_records(
     tracker = _IngestTracker(
         sink=progress,
         files_total=sum(len(plan) for plan, _, _ in plans),
-        documents_total=sum(1 for plan, _, _ in plans for kind, _ in plan if kind != "csv"),
+        documents_total=sum(
+            1 for plan, _, _ in plans for kind, _ in plan if kind in _DOCUMENT_KINDS
+        ),
     )
     tracker.start()
     raw_records: list[Record] = []

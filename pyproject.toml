@@ -40,6 +40,11 @@ reconcile = "constituent_reconciler.cli:main"
 [project.optional-dependencies]
 extract = ["pdfplumber>=0.11"]
 ocr = ["pytesseract>=0.3.10"]
+# Excel workbooks as a structured source (.xlsx/.xlsm), read-only and values
+# only. openpyxl is pure Python and reaches no network; it is an extra rather
+# than a core dependency so an installation that only ever reads CSVs does not
+# carry a spreadsheet parser it never opens.
+excel = ["openpyxl>=3.1"]
 # The AI assistant package (constituent_reconciler.assistant) is opt-in and
 # never imported by the deterministic pipeline. This extra installs the
 # default provider's SDK only; the Bedrock provider's boto3 dependency is
@@ -56,6 +61,7 @@ dev = [
   "ruff>=0.15",
   "pip-audit>=2.7",
   "pdfplumber>=0.11",
+  "openpyxl>=3.1",
   "anthropic>=0.40",
   "boto3>=1.34",
 ]
@@ -106,6 +112,7 @@ module = [
   "pandas.*",
   "duckdb.*",
   "pdfplumber.*",
+  "openpyxl.*",
   "boto3.*",
   "botocore.*",
   "postal.*",

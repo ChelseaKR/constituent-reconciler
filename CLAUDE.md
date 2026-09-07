@@ -129,6 +129,8 @@ constituent-reconciler/
 │   ├── destruction.py             # retention executor and destruction certificates
 │   ├── evaluate.py                # eval scoring: false-merge and missed-match rates, Wilson intervals
 │   ├── examples/                  # package-data copy of the root examples/ tree; tests/test_demo.py pins them byte-identical
+│   ├── excel.py                   # .xlsx/.xlsm structured source: read-only, values only; a merged
+│   │                               # header and an uncomputed formula are refused, never read as blank
 │   ├── extract/
 │   │   ├── __init__.py            # public surface: the offline extractor and the seam gate
 │   │   ├── base.py                # extractor protocol and extraction result types
