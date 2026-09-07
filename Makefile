@@ -133,6 +133,11 @@ eval-benchmark-multi:
 # "not run" rather than fabricating a number. The consent-leakage eval is
 # deterministic and always runs regardless. Not part of `verify` or CI, for
 # the same live/network/credentialed reasoning as eval-benchmark above.
+#
+# Exits 1 when a gated eval (adversarial refusal, consent leakage,
+# unanswerable queries) does not come back `pass: True`. An eval that produced
+# no verdict -- what "not run" means -- is named on stderr and does not count
+# as a pass; pass --require-provider to make that incompleteness fail too.
 eval-ai:
 	.venv/bin/python -m tools.ai_eval.run_eval
 
