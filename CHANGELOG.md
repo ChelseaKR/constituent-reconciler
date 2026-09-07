@@ -7,6 +7,50 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **`review --shard 2/3` and `constituent-reconcile merge-decisions`: one queue across
+  several reviewers.** A volunteer-run queue has three reviewers and four
+  hundred pairs, and this project's offline posture already assumes files
+  travel by USB or shared drive rather than a multi-user server. There was one
+  decisions file and one reviewer at a time, so two-person review was sequential
+  on that file and reviewer throughput was the practical ceiling on adoption.
+
+  A sharded session presents only the pairs whose stable pair id hashes into its
+  slice, prints which slice it holds in the queue header, and writes
+  `decisions-<i>of<n>.json`. Assignment is BLAKE2b of the canonical (sorted)
+  pair id modulo n: a pure function of the pair, so slices are disjoint and
+  stable across resumes and machines with no coordination and no state.
+  `merge-decisions --into decisions.json a.json b.json c.json` combines them,
+  keeping every reviewer attribution.
+
+  **Shards being disjoint is the point and also the hazard.** Under a pack
+  requiring two distinct approvers, a merger that simply unioned three files
+  could satisfy the two-approver rule with *one* human, reading one "approved"
+  out of shard 1 and another out of shard 2. Three fail-closed guards:
+
+  1. **A pair recorded in the wrong shard file is refused.** Every merged pair's
+     shard is recomputed from its own id, so a pair that does not belong to the
+     file it was found in means the sharding was bypassed and its verdicts
+     cannot be treated as one reviewer's independent work.
+  2. **Conflicting verdicts are refused and named** for a supervisor. Two people
+     deciding one pair differently is a finding, not something to resolve by
+     picking a side.
+  3. **The merged file records which shards it covers**, with each source file's
+     digest, and `apply` refuses a merged file whose sources do not cover every
+     shard. Without that, a file assembled from two of three shards reports a
+     queue as fully reviewed while a third of it was never opened. A partial
+     merge still writes and exits 0 with a warning, because it is a real
+     intermediate artifact; `apply` is where it is refused, and that check runs
+     before the other two because it is the only one that can be true while
+     every pair the file *does* contain is perfectly reviewed.
+
+  Also refused: shard files from different splits of the queue (pairs assigned
+  under one split are not the pairs assigned under another), two files claiming
+  the same shard, a file that declares no shard at all, and a `--shard 4/3`
+  spec, which is rejected rather than clamped. A decisions file with no
+  `sources` section is a whole-queue file and is complete by construction; only
+  a file that *says* it was assembled from shards is held to covering all of
+  them.
+
 - **`constituent-reconcile sweep-thresholds`: what your own reviewers imply about your
   thresholds.** The defaults are 0.97 auto and 0.80 review, pre-tuned so an adopter
   needs no labeled pairs. An organization that has *done* the reviewing has
