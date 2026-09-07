@@ -21,8 +21,12 @@ against the two failure shapes it could have instead of the feature:
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import shutil
+import subprocess
+import sys
 import textwrap
 from datetime import date, timedelta
 from pathlib import Path
@@ -512,16 +516,49 @@ def test_the_plan_is_a_pii_artifact_that_destroy_removes(
     assert (out_dir / "provenance.jsonl").exists()
 
 
-def test_planning_twice_on_one_date_is_byte_identical(
+def test_planning_twice_on_one_date_is_byte_identical_across_processes(
     written_run: tuple[Path, Path],
 ) -> None:
-    """Only ``as_of`` may make two plans of one run differ."""
+    """Only ``as_of`` may make two plans of one run differ.
+
+    Each pass runs in its own subprocess under a different ``PYTHONHASHSEED``.
+    An in-process double-run proves very little: Python randomizes only
+    ``str``/``bytes`` hashing and only per process, so a plan whose ordering
+    depended on iterating a set of record ids would come out identical on both
+    passes of a single-process test and differ between two real invocations.
+    Measured on this repository: an in-process double-run passes on exactly
+    that defect.
+
+    ``plan-withdraw`` writes beside the manifest and has no ``--out``, so each
+    subprocess gets its own copy of the run directory rather than overwriting
+    the previous plan in place.
+    """
 
     recipe_path, out_dir = written_run
-    assert _plan_via_cli(recipe_path, out_dir, as_of=AFTER_EXPIRY) == 0
-    first = (out_dir / WITHDRAW_PLAN_FILENAME).read_bytes()
-    assert _plan_via_cli(recipe_path, out_dir, as_of=AFTER_EXPIRY) == 0
-    assert (out_dir / WITHDRAW_PLAN_FILENAME).read_bytes() == first
+    digests: set[str] = set()
+    for seed in ("0", "12345", "99991"):
+        target = out_dir.parent / f"seed-{seed}"
+        shutil.copytree(out_dir, target)
+        completed = subprocess.run(  # noqa: S603 - fixed argv, no shell, test-local paths
+            [
+                sys.executable,
+                "-m",
+                "constituent_reconciler.cli",
+                "plan-withdraw",
+                "--config",
+                str(recipe_path),
+                "--manifest",
+                str(target / "run_manifest.json"),
+                "--as-of",
+                AFTER_EXPIRY.isoformat(),
+            ],
+            env={**os.environ, "PYTHONHASHSEED": seed},
+            capture_output=True,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr.decode("utf-8", "replace")
+        digests.add(hashlib.sha256((target / WITHDRAW_PLAN_FILENAME).read_bytes()).hexdigest())
+    assert len(digests) == 1, f"the plan differed across hash seeds: {sorted(digests)}"
 
 
 # -- helper for the doctored-log test -----------------------------------------

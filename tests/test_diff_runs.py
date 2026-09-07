@@ -20,8 +20,12 @@ not by hoping the matcher produces them.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -198,17 +202,42 @@ def test_two_identical_runs_produce_an_empty_diff_and_exit_zero(tmp_path: Path) 
     assert _detail(after) == ["change,id,detail"]
 
 
-def test_the_same_two_runs_diff_byte_identically(tmp_path: Path) -> None:
-    demo = _demo(tmp_path)
-    recipe = demo / "recipe.toml"
-    before, after = tmp_path / "before", tmp_path / "after"
-    _run(recipe, before)
-    _run(recipe, after)
+def test_the_same_two_runs_diff_byte_identically_across_processes(tmp_path: Path) -> None:
+    """Two invocations, three hash seeds, three subprocesses. See the helper.
 
-    assert _diff_cli(before, after, "--out", str(tmp_path / "d1")) == 0
-    assert _diff_cli(before, after, "--out", str(tmp_path / "d2")) == 0
-    for name in (RUN_DIFF_FILENAME, RUN_DIFF_DETAIL_FILENAME):
-        assert (tmp_path / "d1" / name).read_bytes() == (tmp_path / "d2" / name).read_bytes()
+    The fixture is deliberately WIDE: sixteen added clusters, eight removed and
+    eight with changed membership. An earlier version diffed the demo against
+    itself, which is an empty diff -- and a set of zero or one element has no
+    order to lose, so a genuine hash-order dependence planted in the detail
+    writer produced identical bytes under every seed and the control read as
+    green. One row is always in order.
+    """
+
+    before = _write_run(
+        tmp_path / "before",
+        clusters={f"keep-{i:02d}": [f"m{i}"] for i in range(8)}
+        | {f"gone-{i:02d}": [f"g{i}"] for i in range(8)}
+        | {f"moved-{i:02d}": [f"x{i}"] for i in range(8)},
+    )
+    after = _write_run(
+        tmp_path / "after",
+        clusters={f"keep-{i:02d}": [f"m{i}"] for i in range(8)}
+        | {f"new-{i:02d}": [f"n{i}"] for i in range(16)}
+        | {f"moved-{i:02d}": [f"x{i}", f"y{i}"] for i in range(8)},
+    )
+    sanity = compute_diff(before, after)
+    assert len(sanity.clusters_added) == 16
+    assert len(sanity.clusters_removed) == 8
+    assert len(sanity.clusters_membership_changed) == 8
+
+    digests = _digests_across_hash_seeds(
+        ["diff-runs", "--before", str(before), "--after", str(after)],
+        "--out",
+        (RUN_DIFF_FILENAME, RUN_DIFF_DETAIL_FILENAME),
+        tmp_path,
+    )
+    for name, seen in digests.items():
+        assert len(seen) == 1, f"{name} differed across hash seeds: {sorted(seen)}"
 
 
 # -- a diff that could not be computed must not look like an empty one --------
@@ -497,3 +526,37 @@ def test_the_dv_pack_suppresses_the_count_summary(tmp_path: Path) -> None:
     # The dv pack's own configured threshold, pinned as a literal so a change to
     # it has to be deliberate rather than followed silently by this assertion.
     assert guarded_suppression["threshold"] == 11
+
+
+# -- determinism, measured where it can actually fail --------------------------
+
+
+def _digests_across_hash_seeds(
+    argv: list[str], out_flag: str, names: tuple[str, ...], tmp_path: Path
+) -> dict[str, set[str]]:
+    """Run one command in three subprocesses under different ``PYTHONHASHSEED``.
+
+    Running a command twice inside ONE interpreter proves very little about
+    determinism. Python randomizes only ``str``/``bytes`` hashing, and only per
+    process, so an artifact whose ordering depends on iterating a set of strings
+    comes out identical on both passes of a single-process test and differs
+    between two real invocations. Measured on this repository: an in-process
+    double-run passes on exactly that defect.
+
+    (Float hashing is seed-independent, so a set of thresholds or probabilities
+    would not reproduce it; those are sorted here anyway.)
+    """
+
+    digests: dict[str, set[str]] = {name: set() for name in names}
+    for seed in ("0", "12345", "99991"):
+        target = tmp_path / f"seed-{seed}"
+        completed = subprocess.run(  # noqa: S603 - fixed argv, no shell, test-local paths
+            [sys.executable, "-m", "constituent_reconciler.cli", *argv, out_flag, str(target)],
+            env={**os.environ, "PYTHONHASHSEED": seed},
+            capture_output=True,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr.decode("utf-8", "replace")
+        for name in names:
+            digests[name].add(hashlib.sha256((target / name).read_bytes()).hexdigest())
+    return digests
