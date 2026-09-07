@@ -1021,6 +1021,48 @@ def _cmd_diff_runs(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_explain(args: argparse.Namespace) -> int:
+    """Build one cluster's auditor trace from a run's own artifacts.
+
+    Offline and read-only: no model is called, nothing is re-scored, and no
+    decision is changed. The full rendering carries mapped field values and is
+    local; the redacted one never reads them.
+    """
+
+    from constituent_reconciler import explain as explain_module
+
+    mode = explain_module.REDACTED if args.redact else explain_module.FULL
+    try:
+        trace = explain_module.explain(
+            Path(args.out),
+            cluster=args.cluster,
+            record=args.record,
+            mode=mode,
+            verify=args.verify,
+        )
+    except explain_module.ExplainError as error:
+        print(f"explain error: {error}", file=sys.stderr)
+        return 2
+
+    if args.format == "json":
+        print(json.dumps(explain_module.trace_payload(trace), indent=2, sort_keys=True))
+    else:
+        print(explain_module.render_trace(trace))
+
+    if args.write:
+        path = explain_module.write_trace(trace, args.format)
+        kind = "shareable" if trace.redacted else "LOCAL, carries field values"
+        print(f"written: {path} ({kind})", file=sys.stderr)
+
+    if trace.verification is not None and not trace.verification.ok:
+        # Non-zero covers both "a check failed" and "a check could not run".
+        # Reporting an unverifiable trace as verified is the failure mode this
+        # flag exists to prevent, so it is never exit 0.
+        print("verification did not pass; see the Verification section", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _cmd_plan_withdraw(args: argparse.Namespace) -> int:
     """Report the written records whose consent has lapsed since the write.
 
@@ -2490,6 +2532,40 @@ def build_parser() -> argparse.ArgumentParser:
         help="list eligible artifacts without deleting or logging",
     )
     destroy_parser.set_defaults(func=_cmd_destroy)
+
+    explain_parser = sub.add_parser(
+        "explain",
+        help="build an offline auditor's trace for one resolved cluster or record: "
+        "members, edges, who decided them, corrections, consent, provenance",
+    )
+    explain_parser.add_argument("--out", required=True, help="the run's output directory")
+    explain_target = explain_parser.add_mutually_exclusive_group(required=True)
+    explain_target.add_argument("--cluster", default=None, help="the cluster id to trace")
+    explain_target.add_argument(
+        "--record", default=None, help="a member record id; its cluster is traced"
+    )
+    explain_parser.add_argument(
+        "--redact",
+        action="store_true",
+        help="shareable rendering: ids, bands, probabilities, hashes, reviewers and "
+        "reasons, with no mapped field value read at all",
+    )
+    explain_parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="re-derive the provenance chain, the cited entry's own hash, and the "
+        "manifest hash; exit non-zero if any check fails or cannot be run",
+    )
+    explain_parser.add_argument(
+        "--write",
+        action="store_true",
+        help="also write the rendering into --out (never anywhere else); the full "
+        "rendering is a local PII artifact that `destroy` covers",
+    )
+    explain_parser.add_argument(
+        "--format", choices=("markdown", "json"), default="markdown", help="output rendering"
+    )
+    explain_parser.set_defaults(func=_cmd_explain)
 
     verify_parser = sub.add_parser("verify", help="check a provenance log's hash chain")
     verify_parser.add_argument("--provenance", required=True, help="path to provenance.jsonl")

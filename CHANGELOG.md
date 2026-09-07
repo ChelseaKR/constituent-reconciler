@@ -7,6 +7,48 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **`constituent-reconcile explain`: the offline auditor's trace for one resolved
+  record** (`explain.py`; #146). A funder's auditor, or a data subject's advocate,
+  asks "why is this one record, and who decided that?" The answer existed, spread
+  across five artifacts: `resolved.csv` named the members, `auto_merges.json` said at
+  what probability and in which band the matcher joined them, `decisions.json` said
+  which human approved the ones a human saw, `corrections.json` said what a reviewer
+  fixed, and `provenance.jsonl` said what was written under which consent, chained to
+  the manifest. Answering the question meant reading all five and holding them in your
+  head at once. `ai-explain` narrates one pair through a hosted model; this is its
+  deterministic counterpart. It calls no model, re-scores nothing, and adds no decision
+  path -- every number in it is a byte the run already wrote.
+
+  **Two renderings.** The full one carries the mapped field values and is a local PII
+  artifact that `destroy` sweeps. The redacted one is shareable with someone entitled
+  to know how a decision was made but not to hold the data -- and it is not the full
+  rendering with values stripped on the way out. `_values` returns an empty mapping at
+  **read** time, so no field value ever enters the structure the redacted renderer
+  walks. Stripping on output is one forgotten branch away from a leak; not reading is
+  not. `tests/test_destruction_leaves_nothing.py` now drives `explain --write` over the
+  real pipeline with planted sentinels and asserts the redacted file never held one.
+
+  **`--verify` re-derives rather than restating.** It recomputes the cited entry's own
+  hash from its body, walks the whole chain, and recomputes the manifest's hash from
+  `run_manifest.json` to check it against the `run-start` entry opening the segment. A
+  log edited to be internally consistent still fails against the manifest it claims to
+  describe. A check that could not run is reported as that and does not exit 0: the
+  flag answers "is this trace backed by evidence that still holds", and a missing
+  provenance log cannot answer yes.
+
+  **Nothing absent is rendered as a fact.** "No human reviewed this cluster" and "this
+  run has no decisions.json" are different findings and reach the output as different
+  sentences, as do "the reviewer recorded no correction" and "corrections.json is
+  missing". Two cluster members joined transitively are named as such rather than given
+  a probability for a comparison that never happened, and an unreadable probability is
+  reported as unreadable, never as 0.0 -- zero is the strongest possible statement that
+  two records are different people. An unknown cluster or record id exits non-zero
+  rather than being traced as an empty cluster.
+
+  `--write` puts the rendering in the run's own output directory and nowhere else, by
+  there being no parameter that could say otherwise, which is what the `dv` pack
+  requires of the full rendering.
+
 - **Excel workbooks are a first-class structured source** (`excel.py`,
   `pipeline.read_workbook_records`; #142). `pipeline._route` handled `.csv`,
   `.pdf`, `.txt` and `.eml`, so the spreadsheet side of intake -- which is how

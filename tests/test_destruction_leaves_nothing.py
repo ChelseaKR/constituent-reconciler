@@ -45,6 +45,7 @@ is the real code.
 
 from __future__ import annotations
 
+import csv
 import json
 import shutil
 import textwrap
@@ -102,6 +103,8 @@ SWEPT_BY_CONTENT: dict[str, str] = {
     "target_corrections.csv": "constituent-reconcile compare-apply",
     "repair_plan.json": "constituent-reconcile plan-split",
     "repair_receipts.json": "constituent-reconcile apply-repair --execute",
+    "explain_trace.md": "constituent-reconcile explain --write, on the sentinel's own cluster",
+    "explain_trace.json": "constituent-reconcile explain --write --format json, same cluster",
 }
 
 #: The rest of ``PII_ARTIFACTS``: files this fixture's real writers do produce,
@@ -354,7 +357,50 @@ def _build_run_scenario(root: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     assert len(detail.read_text(encoding="utf-8").splitlines()) > 1, (
         "the diff detail file must carry rows here, or its destruction proves nothing"
     )
+
+    # explain --write, on a cluster the sentinel record is in, so the auditor's
+    # trace on disk really does carry a planted field value before the pass.
+    # Both renderings are written; only the full one is destroyed, and the
+    # redacted one is checked below for never having held a sentinel at all.
+    sentinel_cluster = _sentinel_cluster_id(out_dir)
+    for output_format in ("markdown", "json"):
+        for extra in ((), ("--redact",)):
+            code = main(
+                [
+                    "explain",
+                    "--out",
+                    str(out_dir),
+                    "--cluster",
+                    sentinel_cluster,
+                    "--write",
+                    "--format",
+                    output_format,
+                    *extra,
+                ]
+            )
+            assert code == 0
+    for name in ("explain_trace.md", "explain_trace.json"):
+        body = (out_dir / name).read_text(encoding="utf-8").lower()
+        assert any(sentinel.lower() in body for sentinel in SENTINELS), (
+            f"{name} must carry a planted value here, or its destruction proves nothing"
+        )
+    for name in ("explain_trace_redacted.md", "explain_trace_redacted.json"):
+        body = (out_dir / name).read_text(encoding="utf-8").lower()
+        assert not any(sentinel.lower() in body for sentinel in SENTINELS), (
+            f"{name} is NOT destroyed, so it must never have held a field value"
+        )
     return out_dir
+
+
+def _sentinel_cluster_id(out_dir: Path) -> str:
+    """The cluster whose golden record carries a planted sentinel value."""
+
+    with (out_dir / "resolved.csv").open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            line = ",".join(value or "" for value in row.values()).lower()
+            if any(sentinel.lower() in line for sentinel in SENTINELS):
+                return (row.get("cluster_id") or "").strip()
+    raise AssertionError("no cluster in resolved.csv carries a planted sentinel")
 
 
 # -- the cutover surface -------------------------------------------------------
