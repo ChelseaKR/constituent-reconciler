@@ -203,13 +203,32 @@ def test_two_identical_runs_produce_an_empty_diff_and_exit_zero(tmp_path: Path) 
 
 
 def test_the_same_two_runs_diff_byte_identically_across_processes(tmp_path: Path) -> None:
-    """Two invocations, three hash seeds, three subprocesses. See the helper."""
+    """Two invocations, three hash seeds, three subprocesses. See the helper.
 
-    demo = _demo(tmp_path)
-    recipe = demo / "recipe.toml"
-    before, after = tmp_path / "before", tmp_path / "after"
-    _run(recipe, before)
-    _run(recipe, after)
+    The fixture is deliberately WIDE: sixteen added clusters, eight removed and
+    eight with changed membership. An earlier version diffed the demo against
+    itself, which is an empty diff -- and a set of zero or one element has no
+    order to lose, so a genuine hash-order dependence planted in the detail
+    writer produced identical bytes under every seed and the control read as
+    green. One row is always in order.
+    """
+
+    before = _write_run(
+        tmp_path / "before",
+        clusters={f"keep-{i:02d}": [f"m{i}"] for i in range(8)}
+        | {f"gone-{i:02d}": [f"g{i}"] for i in range(8)}
+        | {f"moved-{i:02d}": [f"x{i}"] for i in range(8)},
+    )
+    after = _write_run(
+        tmp_path / "after",
+        clusters={f"keep-{i:02d}": [f"m{i}"] for i in range(8)}
+        | {f"new-{i:02d}": [f"n{i}"] for i in range(16)}
+        | {f"moved-{i:02d}": [f"x{i}", f"y{i}"] for i in range(8)},
+    )
+    sanity = compute_diff(before, after)
+    assert len(sanity.clusters_added) == 16
+    assert len(sanity.clusters_removed) == 8
+    assert len(sanity.clusters_membership_changed) == 8
 
     digests = _digests_across_hash_seeds(
         ["diff-runs", "--before", str(before), "--after", str(after)],
