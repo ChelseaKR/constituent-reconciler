@@ -108,7 +108,7 @@ constituent-reconciler/
 │   │   ├── refusal.py             # deterministic prohibited-language scanner (EN/ES)
 │   │   ├── source_text.py         # reads real source-document text an OCR quote is checked against
 │   │   └── triage.py              # deterministic review-queue ordering; calls no model
-│   ├── cli.py                     # init/run/eval/compare(+-review/-apply)/diff-runs/sweep-thresholds/review/apply/merge-decisions/plan-split/plan-withdraw/approve-repair/apply-repair/report/validate/destroy/verify/schema/demo/ai-explain/ai-ask/ai-propose-corrections/ai-triage
+│   ├── cli.py                     # init/run/eval/compare(+-review/-apply)/diff-runs/sweep-thresholds/explain/review/apply/merge-decisions/plan-split/plan-withdraw/approve-repair/apply-repair/report/validate/destroy/verify/schema/demo/ai-explain/ai-ask/ai-propose-corrections/ai-triage
 │   ├── compare.py                 # read-only migration cutover comparison (constituent-reconcile compare)
 │   ├── compare_apply.py           # reviewed, consent-gated local correction-file export (compare-apply)
 │   ├── config.py                  # recipe.toml loading: sources, connector, thresholds, policy pack
@@ -128,6 +128,10 @@ constituent-reconciler/
 │   ├── diff_runs.py               # read-only diff of two runs of one recipe (constituent-reconcile diff-runs); counts shareable, ids local
 │   ├── destruction.py             # retention executor and destruction certificates
 │   ├── evaluate.py                # eval scoring: false-merge and missed-match rates, Wilson intervals
+│   ├── explain.py                 # offline auditor's trace for one cluster (constituent-reconcile explain);
+│   │                               # composes the run's own artifacts, calls no model, re-scores nothing.
+│   │                               # The redacted rendering never READS a field value; --verify recomputes
+│   │                               # the cited entry's hash and the manifest hash rather than restating them
 │   ├── examples/                  # package-data copy of the root examples/ tree; tests/test_demo.py pins them byte-identical
 │   ├── excel.py                   # .xlsx/.xlsm structured source: read-only, values only; a merged
 │   │                               # header and an uncomputed formula are refused, never read as blank

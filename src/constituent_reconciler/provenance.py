@@ -71,7 +71,16 @@ def content_hash(payload: dict[str, str]) -> str:
     return hashlib.blake2b(canonical, digest_size=32).hexdigest()
 
 
-def _entry_hash(entry: dict[str, object]) -> str:
+def entry_hash(entry: Mapping[str, object]) -> str:
+    """BLAKE2b-256 over an entry's body, excluding its own ``entry_hash``.
+
+    Public because an auditor's trace (``explain.py``) has to *recompute* the
+    hash of the entry it cites rather than repeat the one stored beside it: a
+    verifier that echoed the stored value back would agree with a tampered log
+    about everything. Chain verification below uses the same function, so the
+    two can never drift into checking different bytes.
+    """
+
     body = {key: value for key, value in entry.items() if key != "entry_hash"}
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.blake2b(canonical, digest_size=32).hexdigest()
@@ -555,7 +564,7 @@ class ProvenanceLog:
         token = getattr(self.authority, "last_token", None)
         if isinstance(token, str) and token:
             entry["tsa_token"] = token
-        entry["entry_hash"] = _entry_hash(entry)
+        entry["entry_hash"] = entry_hash(entry)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, sort_keys=True) + "\n")
@@ -586,7 +595,7 @@ def verify_log(path: Path) -> tuple[bool, str]:
             entry = json.loads(line)
             if entry.get("prev_hash") != prev:
                 return False, f"broken chain at line {line_number}: prev_hash mismatch"
-            recomputed = _entry_hash(entry)
+            recomputed = entry_hash(entry)
             if recomputed != entry.get("entry_hash"):
                 return False, f"tampered entry at line {line_number}: hash mismatch"
             if entry.get("seq") != seq:

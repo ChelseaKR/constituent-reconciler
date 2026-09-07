@@ -571,14 +571,14 @@ def _relink(entries: list[dict[str, object]]) -> list[str]:
     pass on the wrong refusal.
     """
 
-    from constituent_reconciler.provenance import GENESIS_HASH, _entry_hash
+    from constituent_reconciler.provenance import GENESIS_HASH, entry_hash
 
     prev = GENESIS_HASH
     out: list[str] = []
     for entry in entries:
         entry["prev_hash"] = prev
         entry.pop("entry_hash", None)
-        entry["entry_hash"] = _entry_hash(entry)
+        entry["entry_hash"] = entry_hash(entry)
         prev = str(entry["entry_hash"])
         out.append(json.dumps(entry, sort_keys=True))
     return out

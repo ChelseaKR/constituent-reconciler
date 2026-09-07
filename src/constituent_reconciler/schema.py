@@ -119,6 +119,16 @@ SWEEP_SCHEMA_VERSION = 1
 # byte; no release has been tagged, so no published artifact predates it.
 AUTO_MERGE_SCHEMA_VERSION = 1
 
+# The explain_trace.json shape ``constituent-reconcile explain`` writes: one cluster's
+# members, the pairwise edges that joined them with their bands and
+# probabilities, who decided each one, the corrections applied, the consent at
+# write time, and the provenance entry chained to the manifest. Versioned on its
+# own, like the run diff and the calibration report, because its reader is an
+# auditor holding one record rather than a consumer of the run report. Version 1
+# from its first byte; no release has been tagged, so no published artifact
+# predates it.
+EXPLAIN_TRACE_SCHEMA_VERSION = 1
+
 # The connector repair-capability declaration shape (connectors/repair.py):
 # destination, enumerated verified versions, operation vocabulary, and the
 # vendor evidence fields.

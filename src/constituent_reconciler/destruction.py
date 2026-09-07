@@ -104,6 +104,14 @@ PII_ARTIFACTS: tuple[str, ...] = (
     # systems, and the count-only run_diff.json beside it keeps every number the
     # detail file supports, so destroying it removes no evidence.
     "run_diff_detail.csv",
+    # The full auditor's trace (``constituent-reconcile explain``) reproduces the golden
+    # record's field values, the reviewed values of any pair a person saw, and
+    # the corrected value a reviewer typed. It is the same content class as
+    # resolved.csv, assembled for one cluster, and is destroyed for the same
+    # reason. Its redacted sibling is on NOT_DESTROYED below: that one never
+    # reads a field value, so there is nothing in it to remove.
+    "explain_trace.md",
+    "explain_trace.json",
 )
 
 # The other half of the same judgment: every filename this package joins onto
@@ -142,6 +150,16 @@ NOT_DESTROYED: dict[str, str] = {
     "calibration_report.json": (
         "the machine-readable half of calibration_report.md; the same counts and "
         "rates, and the same absence of ids"
+    ),
+    "explain_trace_redacted.md": (
+        "the shareable auditor's trace: record ids, bands, probabilities, "
+        "reviewer names, document spans, chain hashes and refusal reasons. No "
+        "mapped field value is read into it, so destroying it would remove the "
+        "evidence of how a decision was made without removing anybody's data"
+    ),
+    "explain_trace_redacted.json": (
+        "the machine-readable half of explain_trace_redacted.md; the same "
+        "content and the same absence of field values"
     ),
     "run_diff.json": (
         "counts and section names only: how many clusters formed or dissolved "
