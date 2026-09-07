@@ -20,7 +20,8 @@ scenario silently overwriting another's manifest:
 
 * ``run``: ``constituent-reconcile run`` over an existing CSV and a text intake, through
   the csv, civicrm_csv and salesforce_csv connectors with household grouping
-  and the stage cache on, then ``constituent-reconcile ai-propose-corrections``.
+  and the stage cache on, then ``constituent-reconcile ai-propose-corrections`` and
+  ``diff-runs`` against a doctored copy of the same run.
 * ``cutover``: ``constituent-reconcile compare``, the review session ``constituent-reconcile
   compare-review`` serves, then ``constituent-reconcile compare-apply``.
 * ``repair``: ``constituent-reconcile run`` against a CiviCRM double, then ``plan-split``,
@@ -116,6 +117,10 @@ SWEPT_BY_CONTENT: dict[str, str] = {
 SWEPT_BY_EXISTENCE: dict[str, str] = {
     "withheld.csv": "constituent-reconcile run, on the revoked-consent record the fixture plants",
     "cutover_withheld.csv": "constituent-reconcile compare-apply, on that same revoked record",
+    "run_diff_detail.csv": (
+        "constituent-reconcile diff-runs, over a doctored copy of the run scenario; the "
+        "rows are cluster ids, member record ids and a change kind, never a field value"
+    ),
     "withdraw_plan.json": (
         "constituent-reconcile plan-withdraw, after the repair scenario's write; the plan "
         "carries cluster ids, external ids and a withhold reason, never a field value"
@@ -334,6 +339,21 @@ def _build_run_scenario(root: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         ]
     )
     assert code == 0
+
+    # diff-runs, against a doctored copy of this same run so the detail file has
+    # real rows rather than only a header. The copy loses one cluster, which the
+    # diff reports by id; the manifest and summary are untouched, so the
+    # comparison itself is the ordinary one.
+    earlier = root / "earlier"
+    shutil.copytree(out_dir, earlier)
+    resolved = earlier / "resolved.csv"
+    kept = resolved.read_text(encoding="utf-8").splitlines()
+    resolved.write_text("\n".join(kept[:-1]) + "\n", encoding="utf-8")
+    assert main(["diff-runs", "--before", str(earlier), "--after", str(out_dir)]) == 0
+    detail = out_dir / "run_diff_detail.csv"
+    assert len(detail.read_text(encoding="utf-8").splitlines()) > 1, (
+        "the diff detail file must carry rows here, or its destruction proves nothing"
+    )
     return out_dir
 
 

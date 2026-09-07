@@ -90,6 +90,16 @@ REPAIR_PLAN_SCHEMA_VERSION = 3
 PLAN_KIND_SPLIT = "split"
 PLAN_KIND_WITHDRAW = "withdraw"
 
+# The count-only run_diff.json written by ``constituent-reconcile diff-runs``: how many
+# clusters formed, dissolved or changed membership between two runs of one
+# recipe, how many pairs entered or left review, how many reviewed decisions no
+# longer apply, and the consent-withheld delta. Versioned on its own, like the
+# migration summary and the repair plan, because it is read by a data manager
+# defending one month's numbers against the last, not by the run report's
+# consumers. Version 1 from its first byte; no release has been tagged, so no
+# published artifact predates it.
+RUN_DIFF_SCHEMA_VERSION = 1
+
 # The auto_merges.json shape ``constituent-reconcile run`` writes: every pair the
 # matcher merged without a human, with the probability and band that decided it
 # and the thresholds in force. Versioned on its own, like the migration summary

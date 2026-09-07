@@ -98,6 +98,12 @@ PII_ARTIFACTS: tuple[str, ...] = (
     "withdraw_plan.json",
     "household_suggestions.csv",
     "ai_ocr_proposals.json",
+    # The diff detail file names the clusters that formed or dissolved and the
+    # records in them. Ids only, no field values, but the same reasoning as
+    # withheld.csv applies: ids resolve to people through the organization's own
+    # systems, and the count-only run_diff.json beside it keeps every number the
+    # detail file supports, so destroying it removes no evidence.
+    "run_diff_detail.csv",
 )
 
 # The other half of the same judgment: every filename this package joins onto
@@ -128,6 +134,12 @@ NOT_DESTROYED: dict[str, str] = {
         "the only evidence of why an automatic merge happened"
     ),
     "compare_decisions.json": "the same shape as decisions.json, for the cutover comparison",
+    "run_diff.json": (
+        "counts and section names only: how many clusters formed or dissolved "
+        "between two runs, how many pairs entered or left review, how many "
+        "reviewed decisions no longer apply. No ids and no field values; the ids "
+        "live in run_diff_detail.csv, which IS destroyed"
+    ),
     "repair_approvals.json": (
         "reviewer names, verdicts, and timestamps keyed by the plan digest they "
         "approved; the same content class as decisions.json's audit section"
