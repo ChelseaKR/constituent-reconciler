@@ -313,6 +313,58 @@ def test_header_row_offset_reads_the_row_the_recipe_names(tmp_path: Path) -> Non
     ]
 
 
+def test_a_macro_enabled_workbook_reads_like_any_other(tmp_path: Path) -> None:
+    """``.xlsm`` is claimed in the recipe docs, so it is held to a test.
+
+    Macros are not executed and not read; the extension is routed because a
+    macro-enabled workbook is a normal OOXML package with cell values in it,
+    and refusing one would send an operator back to a manual CSV export for a
+    file this reader can read.
+    """
+
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "Contacts"
+    sheet.append(["First Name", "Last Name"])
+    sheet.append(["Ada", "Lovelace"])
+    path = tmp_path / "macro.xlsm"
+    book.save(path)
+    assert excel.read_rows(path, sheet="Contacts") == [
+        {"First Name": "Ada", "Last Name": "Lovelace"}
+    ]
+
+
+def test_an_unreadable_spreadsheet_format_is_skipped_with_a_reason(tmp_path: Path) -> None:
+    """``.xlsb`` is binary and openpyxl cannot read it.
+
+    It is deliberately absent from the routed suffixes, so a folder walk names
+    it in the ingest report's skipped list instead of crashing the run on a
+    file the parser was never going to open.
+    """
+
+    demo = tmp_path / "demo"
+    demo.mkdir()
+    shutil.copy(EXAMPLES / "recipe.toml", demo / "recipe.toml")
+    shutil.copy(EXAMPLES / "existing.csv", demo / "existing.csv")
+    folder = demo / "incoming"
+    folder.mkdir()
+    shutil.copy(EXAMPLES / "incoming.csv", folder / "incoming.csv")
+    (folder / "legacy.xlsb").write_bytes(b"binary workbook")
+
+    recipe = (demo / "recipe.toml").read_text(encoding="utf-8")
+    (demo / "recipe.toml").write_text(
+        recipe.replace('incoming = "incoming.csv"', 'incoming = "incoming"'), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    _run(demo / "recipe.toml", out)
+    report = json.loads((out / "run_report.json").read_text(encoding="utf-8"))
+    skipped = {
+        Path(item["path"]).name: item["reason"] for item in report["ingest"]["files_skipped"]
+    }
+    assert "legacy.xlsb" in skipped
+    assert ".xlsb" in skipped["legacy.xlsb"]
+
+
 def test_an_unnamed_sheet_resolves_to_the_first_one(tmp_path: Path) -> None:
     book = Workbook()
     book.active.title = "Contacts"
