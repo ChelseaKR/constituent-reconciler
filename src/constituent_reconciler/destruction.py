@@ -115,6 +115,12 @@ NOT_DESTROYED: dict[str, str] = {
         "even if a future edit were to list it"
     ),
     "decisions.json": "pair ids, verdicts, reviewer names, and timestamps; no field values",
+    "auto_merges.json": (
+        "the counterpart to decisions.json for the merges no person reviewed: "
+        "pair ids, the probability and band that decided each one, and the "
+        "thresholds in force. No field values, and destroying it would remove "
+        "the only evidence of why an automatic merge happened"
+    ),
     "compare_decisions.json": "the same shape as decisions.json, for the cutover comparison",
     "repair_approvals.json": (
         "reviewer names, verdicts, and timestamps keyed by the plan digest they "

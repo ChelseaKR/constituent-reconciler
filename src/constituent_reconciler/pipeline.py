@@ -992,6 +992,63 @@ def _write_comparable_report(report: ComparableReport, out_dir: Path) -> Path:
     return report_path
 
 
+def _write_auto_merges(result: RunResult, recipe: Recipe, out_dir: Path) -> Path:
+    """Record why every automatic merge happened.
+
+    ``decisions.json`` records who decided each pair a *person* saw, and it
+    survives ``destroy`` because it is audit evidence carrying no field values.
+    The pairs the matcher merged on its own had no such record: ``resolved.csv``
+    names a cluster's members and ``provenance.jsonl`` names the field-level
+    lineage, but nothing anywhere said at what probability, in which band, or
+    against which thresholds the members were joined. ``review_queue.csv``
+    carries a probability only for the pairs that fell *below* the auto
+    threshold -- so the merges a human checked were explainable afterwards and
+    the merges nobody checked were not.
+
+    That is the gap this closes. An auditor asking "why is this one record"
+    about an auto-merged cluster could previously be told only that the system
+    decided so.
+
+    Content class is exactly ``decisions.json``'s: record ids, a probability, a
+    band, and the thresholds in force. No field value is written here, which is
+    why ``destruction.NOT_DESTROYED`` carries it -- deleting it would remove
+    audit evidence without removing anybody's personal data.
+
+    Ordering matches ``review_queue.csv`` (descending probability, then ids) so
+    two runs over the same input produce byte-identical files.
+    """
+
+    import json
+
+    from constituent_reconciler.schema import AUTO_MERGE_SCHEMA_VERSION
+
+    path = out_dir / "auto_merges.json"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pairs: list[dict[str, object]] = []
+    for pair in sorted(result.auto_pairs, key=lambda p: (-p.probability, p.left, p.right)):
+        entry: dict[str, object] = {
+            "left": pair.left,
+            "right": pair.right,
+            "probability": round(pair.probability, 4),
+            "band": pair.band.value,
+        }
+        if pair.note:
+            entry["note"] = pair.note
+        pairs.append(entry)
+    payload = {
+        "schema_version": AUTO_MERGE_SCHEMA_VERSION,
+        "auto_threshold": recipe.auto_threshold,
+        "review_threshold": recipe.review_threshold,
+        # Written even when it is zero. A run that auto-merged nothing and a run
+        # whose evidence was never recorded must not read the same way, and an
+        # absent file cannot tell them apart.
+        "pair_count": len(pairs),
+        "pairs": pairs,
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
 def _write_run_summary(
     result: RunResult,
     recipe: Recipe,
@@ -1133,6 +1190,10 @@ class ExportSummary:
     comparable_path: Path | None = None
     household_suggestions: tuple[household.HouseholdSuggestion, ...] = ()
     household_path: Path | None = None
+    # Where the automatic merges' evidence went. ``None`` on a dry run, which
+    # writes nothing; never ``None`` on a real run, including one that merged
+    # nothing, so "no automatic merges" and "no record of them" stay apart.
+    auto_merges_path: Path | None = None
     # Per-source completeness, normalization failures, consent coverage, and
     # duplicate density (quality.py). Unlike aggregate/comparable, this is
     # computed on every run, not gated by recipe.aggregate_export: it answers
@@ -1344,8 +1405,10 @@ def export(
             aggregate_path = _write_aggregate_summary(
                 aggregate, out_dir, fill_policy=recipe.fill_policy
             )
+    auto_merges_path: Path | None = None
     if not dry_run:
         _write_run_summary(result, recipe, withheld, out_dir)
+        auto_merges_path = _write_auto_merges(result, recipe, out_dir)
 
     comparable, comparable_path = _maybe_export_comparable(
         recipe, exportable, out_dir=out_dir, dry_run=dry_run
@@ -1376,6 +1439,7 @@ def export(
         comparable_path=comparable_path,
         household_suggestions=household_suggestions,
         household_path=household_path,
+        auto_merges_path=auto_merges_path,
         data_quality=data_quality,
     )
 

@@ -71,6 +71,15 @@ CUTOVER_CORRECTIONS_SCHEMA_VERSION = 2
 # artifact carries version 1.
 REPAIR_PLAN_SCHEMA_VERSION = 2
 
+# The auto_merges.json shape ``constituent-reconcile run`` writes: every pair the
+# matcher merged without a human, with the probability and band that decided it
+# and the thresholds in force. Versioned on its own, like the migration summary
+# and the repair plan, because it is read by an auditor rather than by the run
+# report's consumers, and because it is the counterpart to decisions.json --
+# which records who decided the pairs a person saw. Version 1 from its first
+# byte; no release has been tagged, so no published artifact predates it.
+AUTO_MERGE_SCHEMA_VERSION = 1
+
 # The connector repair-capability declaration shape (connectors/repair.py):
 # destination, enumerated verified versions, operation vocabulary, and the
 # vendor evidence fields.
@@ -102,6 +111,7 @@ def versions() -> dict[str, int]:
         "decisions_schema": DECISIONS_SCHEMA_VERSION,
         "migration_summary": MIGRATION_SUMMARY_SCHEMA_VERSION,
         "cutover_corrections": CUTOVER_CORRECTIONS_SCHEMA_VERSION,
+        "auto_merge": AUTO_MERGE_SCHEMA_VERSION,
         "repair_plan": REPAIR_PLAN_SCHEMA_VERSION,
         "repair_capability": REPAIR_CAPABILITY_SCHEMA_VERSION,
         "repair_approval": REPAIR_APPROVAL_SCHEMA_VERSION,

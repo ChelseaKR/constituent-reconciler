@@ -6,6 +6,30 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 ## [Unreleased]
 
+### Added
+- **`auto_merges.json`: why every automatic merge happened.** `decisions.json`
+  records who decided each pair a *person* saw, and it survives `destroy`
+  because it is audit evidence carrying no field values. The pairs the matcher
+  merged on its own had no such record. `resolved.csv` named a cluster's
+  members and `provenance.jsonl` named the field-level lineage, but nothing
+  anywhere said at what probability, in which band, or against which thresholds
+  the members were joined -- `review_queue.csv` carries a probability only for
+  the pairs that fell *below* the auto threshold. So the merges a human checked
+  were explainable afterwards and the merges nobody checked were not. Measured
+  on the intake demo: six clusters formed automatically, and the only surviving
+  record of any of them was a `members` list.
+
+  Every real run now writes `auto_merges.json` beside the run summary: one row
+  per auto-band pair with its probability and band, plus the thresholds in
+  force, under the new `AUTO_MERGE_SCHEMA_VERSION`. It is written even when
+  nothing auto-merged, because an absent file cannot distinguish "no automatic
+  merges" from "no record of them". Rows are ordered exactly as
+  `review_queue.csv` is, so two runs over the same input are byte-identical.
+  Classified in `destruction.NOT_DESTROYED` alongside `decisions.json`, and a
+  planted-sentinel test searches the rendered bytes for every raw field value
+  in the run to keep that classification honest. This is the artifact an
+  offline auditor's trace has to read.
+
 ### Fixed
 - **The false-merge gate passed on zero evidence: a `0/0` rate published as a
   passing `0.0%`.** The gated metric was `false_merges / len(auto)` with a
