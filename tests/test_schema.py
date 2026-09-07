@@ -9,6 +9,7 @@ from constituent_reconciler import pipeline
 from constituent_reconciler.cli import main
 from constituent_reconciler.config import load_recipe
 from constituent_reconciler.schema import (
+    AUTO_MERGE_SCHEMA_VERSION,
     CONFIG_SCHEMA_VERSION,
     CONNECTOR_INTERFACE_VERSION,
     CUTOVER_CORRECTIONS_SCHEMA_VERSION,
@@ -39,6 +40,7 @@ def test_versions_mapping_matches_constants() -> None:
         "decisions_schema": DECISIONS_SCHEMA_VERSION,
         "migration_summary": MIGRATION_SUMMARY_SCHEMA_VERSION,
         "cutover_corrections": CUTOVER_CORRECTIONS_SCHEMA_VERSION,
+        "auto_merge": AUTO_MERGE_SCHEMA_VERSION,
         "repair_plan": REPAIR_PLAN_SCHEMA_VERSION,
         "repair_capability": REPAIR_CAPABILITY_SCHEMA_VERSION,
         "repair_approval": REPAIR_APPROVAL_SCHEMA_VERSION,
