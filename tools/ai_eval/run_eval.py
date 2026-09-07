@@ -16,6 +16,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +34,61 @@ from tools.ai_eval import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_JSON_OUT = REPO_ROOT / "eval" / "ai" / "results.json"
 DEFAULT_MD_OUT = REPO_ROOT / "eval" / "ai" / "report.md"
+
+#: The evals whose ``pass`` is a gate rather than a number to read.
+#:
+#: ``citation_grounding`` and ``ocr_proposals`` are deliberately absent.
+#: ``citation_grounding`` says in terms that its grounding rate "measures model
+#: quality, not safety", because every unverified claim is withheld from
+#: display by construction; ``ocr_proposals`` reports an invented-value count
+#: and has never declared a pass condition. Adding either here would be
+#: inventing a threshold this repository has not chosen. They are rendered in
+#: the report and read by a person, which is what they are for.
+GATED_EVALS: tuple[str, ...] = (
+    "adversarial_refusal",
+    "consent_leakage",
+    "unanswerable_queries",
+)
+
+
+@dataclass(frozen=True)
+class GateFinding:
+    """One gated eval that did not come back with a pass."""
+
+    eval_name: str
+    #: ``"failed"``: the eval ran and its gate did not pass.
+    #: ``"no-verdict"``: the eval declared no pass condition at all, which is
+    #: what ``not_run()`` produces. The two are kept apart because they mean
+    #: different things and warrant different exit codes.
+    kind: str
+    detail: str
+
+
+def gate_findings(results: Mapping[str, Mapping[str, Any]]) -> list[GateFinding]:
+    """Every gated eval that did not return ``pass: True``, and why.
+
+    A missing ``pass`` key is a **missing verdict, not a pass**. The
+    ``not_run()`` result each provider-backed eval returns carries no ``pass``
+    key at all, so reading this as ``result.get("pass", True)`` would report a
+    suite that measured nothing as a suite that passed everything -- the same
+    shape ``evaluate.rate`` stopped producing when a rate over an empty
+    denominator became ``None`` instead of a passing ``0.0%``.
+    """
+
+    findings: list[GateFinding] = []
+    for name in GATED_EVALS:
+        result = results.get(name)
+        if result is None:
+            findings.append(GateFinding(name, "no-verdict", "absent from the results entirely"))
+            continue
+        if "pass" not in result:
+            status = result.get("status", "unknown")
+            reason = result.get("reason", "no reason recorded")
+            findings.append(GateFinding(name, "no-verdict", f"status {status!r}: {reason}"))
+            continue
+        if result["pass"] is not True:
+            findings.append(GateFinding(name, "failed", f"gate FAILED (pass={result['pass']!r})"))
+    return findings
 
 
 def _pct(value: float | None) -> str:
@@ -169,6 +227,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default=None, help="override the provider's default model")
     parser.add_argument("--out-json", default=str(DEFAULT_JSON_OUT))
     parser.add_argument("--out-md", default=str(DEFAULT_MD_OUT))
+    parser.add_argument(
+        "--require-provider",
+        action="store_true",
+        help=(
+            "treat a gated eval that produced no verdict as a failure. Without "
+            "a provider the three provider-backed evals record 'not run'; this "
+            "makes that incompleteness merge-blocking, for a release-evidence run"
+        ),
+    )
     args = parser.parse_args(argv)
 
     provider = make_provider(name=args.provider, model=args.model)
@@ -205,6 +272,37 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"wrote {out_json}")
     print(f"wrote {out_md}")
+
+    # The gate. Until this existed, every eval below could render
+    # `Gate: **FAIL**` into the committed report and this function still
+    # returned 0, so `make eval-ai` succeeded on a consent leak -- the finding
+    # `consent_leakage`'s own docstring calls "merge-blocking-grade".
+    findings = gate_findings(results)
+    for finding in findings:
+        print(f"{finding.eval_name}: {finding.detail}", file=sys.stderr)
+
+    failed = [finding for finding in findings if finding.kind == "failed"]
+    if failed:
+        names = ", ".join(finding.eval_name for finding in failed)
+        print(f"eval-ai FAILED: gated eval(s) did not pass: {names}", file=sys.stderr)
+        return 1
+
+    no_verdict = [finding for finding in findings if finding.kind == "no-verdict"]
+    if no_verdict:
+        names = ", ".join(finding.eval_name for finding in no_verdict)
+        if args.require_provider:
+            print(
+                f"eval-ai FAILED: --require-provider was set and these gated "
+                f"eval(s) produced no verdict: {names}",
+                file=sys.stderr,
+            )
+            return 1
+        print(
+            f"eval-ai INCOMPLETE: no verdict from {names}. Exiting 0 because "
+            "--require-provider was not passed; the report records these as "
+            "'not run' rather than as passes.",
+            file=sys.stderr,
+        )
     return 0
 
 

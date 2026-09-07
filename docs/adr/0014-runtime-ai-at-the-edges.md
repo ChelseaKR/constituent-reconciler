@@ -287,6 +287,25 @@ full detail and per-case data in `eval/ai/report.md` and
 | Consent/policy leakage (5 fixtures x 3 policy packs, deterministic) | 0 leaks (after the fix above; 20 before it) | **PASS** |
 | Unanswerable / query-structuring (8 prompts) | 0 of 8 answers fabricated a specific-looking value the evidence never gave | **PASS** |
 
+The **Gate** column above is now enforced by the runner. The three rows
+marked **PASS** are listed in `run_eval.GATED_EVALS`, and
+`python -m tools.ai_eval.run_eval` exits 1 if any of them comes back with
+anything other than `pass: True`. Until that gate existed the runner
+returned 0 unconditionally: a planted leak produced
+`**Leaks found: 22.** Gate: **FAIL**` in `eval/ai/report.md` and
+`make eval-ai` still succeeded.
+
+A gated eval that produced **no verdict** is treated as a missing
+measurement, not a pass. Without a provider the three provider-backed evals
+record `status: "not run"` and carry no `pass` key at all, so the runner
+names them on stderr and exits 0 (the local, uncredentialed case), or exits
+1 under `--require-provider` (the release-evidence case, where four evals
+silently not running is not a clean bill of health). `citation_grounding`
+and `ocr_proposals` stay ungated for the reasons their rows give; adding
+either to `GATED_EVALS` would mean choosing a threshold this project has
+not chosen, and `tests/test_ai_eval_run_eval.py` asserts their exclusion so
+it stays a deliberate act.
+
 The one OCR finding is reported, not smoothed over: `wrong_person_trap`
 (fixtures.py) is a source document whose only legible surname belongs to
 the caseworker, not the client (`"Caseworker: Angela Halloway"`), with the
