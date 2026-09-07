@@ -39,6 +39,27 @@ F1 is reported for comparability with published record-linkage results and is no
 
 Not applicable to this run. The LLM field judge never executed: the corpus is structured CSV, so no extraction seam was invoked and there are no confidence verdicts for human labels to agree with. This is not a waived gate. Reporting a kappa failure for a component that did not run would be a false claim about coverage, the same way a fixed provenance sentence was; the gate itself still fails closed wherever the judge does run.
 
+## Controls
+
+Each row below is a deliberate sabotage with a known correct answer, run against this same dataset. The expectation was written before the number was measured. A control that does not move is the finding: it means the metric above is not reading what the report says it reads.
+
+Seed: `20260906`. Every control is deterministic under it, so this section is byte-identical on a re-run.
+
+| Control | Rules out | Expected | Observed | Result |
+|---------|-----------|----------|----------|--------|
+| `shuffled-labels` | a ground-truth file that is not actually being read | mean coverage precision over 20 seeded permutations falls to at most 10x the base rate (0.0015); real precision is 0.9954 | mean 0.0002, worst permutation 0.0013, base rate 0.0002 | **PASS** |
+| `null-matcher (below review)` | banding that ignores the score | every candidate rescored at 0.4000, under the review threshold 0.8000: auto recall and coverage recall must both be 0 | auto recall 0.0000 over 0 auto pairs, coverage recall 0.0000 | **PASS** |
+| `null-matcher (at auto threshold)` | a gated false-merge rate that cannot rise | every candidate rescored at the auto threshold 0.9700: all of them auto-merge, and the gated false-merge rate must rise above the real run's 0.0000 | 10342 auto pairs, false-merge rate 0.8161, auto precision 0.1839, all-pairs base rate 0.0002 | **PASS** |
+| `identity` | a scorer that never fires | every exact twin pair is auto-merged: recall 1.0000 | recall 0.9960 (249/250 twin pairs auto-merged) | **FAIL** |
+
+What the controls did not cover, stated so a partial control is not read as a whole one:
+
+- `null-matcher (below review)`: re-scores the candidate pairs the real run produced; blocking is held fixed and is not what this control tests.
+- `null-matcher (at auto threshold)`: re-scores the candidate pairs the real run produced; blocking is held fixed and is not what this control tests.
+- `identity`: 250 of 5000 records, sampled under seed 20260906 and capped at 250.
+
+Controls gate: **FAIL**.
+
 ## Flow-through evidence
 
 | Source file | SHA-256 |

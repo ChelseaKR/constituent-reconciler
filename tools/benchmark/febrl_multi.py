@@ -55,6 +55,7 @@ from pathlib import Path
 
 from constituent_reconciler import decisions, pipeline
 from constituent_reconciler.config import load_recipe
+from constituent_reconciler.controls import DEFAULT_SEED, ControlsReport, run_controls
 from constituent_reconciler.evaluate import EvalReport, evaluate, format_rate, gate_holds
 from constituent_reconciler.models import Pair, Record
 from constituent_reconciler.report import render_eval_markdown
@@ -350,8 +351,15 @@ def run(
     gate: float,
     offline: bool,
     raw_dir: Path | None = None,
-) -> tuple[str, EvalReport, bool]:
-    """Prepare, run, score, and sweep one FEBRL dataset. Mirrors ``run_eval.run``."""
+    controls: bool = False,
+    seed: int = DEFAULT_SEED,
+) -> tuple[str, EvalReport, bool, bool]:
+    """Prepare, run, score, and sweep one FEBRL dataset. Mirrors ``run_eval.run``.
+
+    ``controls`` behaves exactly as it does there, including returning the
+    false-merge verdict and the controls verdict separately so neither is
+    reported under the other's name.
+    """
 
     spec = DATASETS[dataset]
     raw = raw_dir or (out_dir / "raw")
@@ -370,6 +378,19 @@ def run(
             f"scored {report.n_true_pairs}; {out_dir} holds a stale truth file"
         )
 
+    controls_report: ControlsReport | None = None
+    if controls:
+        controls_report = run_controls(
+            result.records,
+            result.pairs,
+            truth["clusters"],
+            recipe.fields,
+            prior=recipe.prior,
+            auto_threshold=recipe.auto_threshold,
+            review_threshold=recipe.review_threshold,
+            seed=seed,
+        )
+
     markdown = render_eval_markdown(
         report,
         dataset=f"FEBRL dataset{dataset} ({spec.corruption_level} corruption)",
@@ -377,6 +398,7 @@ def run(
         provenance=truth.get("provenance"),
         generator="make eval-benchmark-multi",
         field_judge_ran=False,
+        controls=controls_report,
     )
     lines = [
         "",
@@ -402,7 +424,12 @@ def run(
     lines += render_sweep_table(sweep)
 
     full = markdown + "\n".join(lines) + "\n"
-    return full, report, gate_holds(report.false_merge_rate, gate)
+    return (
+        full,
+        report,
+        gate_holds(report.false_merge_rate, gate),
+        controls_report is None or controls_report.passed,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -412,12 +439,30 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--report-out", type=Path, default=None)
     parser.add_argument("--gate", type=float, default=0.01)
     parser.add_argument("--offline", action="store_true")
+    parser.add_argument(
+        "--controls",
+        action="store_true",
+        help="also run the negative controls against this benchmark run",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=DEFAULT_SEED,
+        help=f"RNG seed for the controls (default {DEFAULT_SEED})",
+    )
     args = parser.parse_args(argv)
 
     out_dir = args.out_dir or Path(f"benchmarks/febrl{args.dataset}")
     report_out = args.report_out or Path(f"eval/febrl{args.dataset}-report.md")
 
-    markdown, report, gate_pass = run(args.dataset, out_dir, gate=args.gate, offline=args.offline)
+    markdown, report, gate_pass, controls_passed = run(
+        args.dataset,
+        out_dir,
+        gate=args.gate,
+        offline=args.offline,
+        controls=args.controls,
+        seed=args.seed,
+    )
     report_out.parent.mkdir(parents=True, exist_ok=True)
     report_out.write_text(markdown, encoding="utf-8")
     print(f"wrote benchmark eval report: {report_out}")
@@ -425,12 +470,14 @@ def main(argv: list[str] | None = None) -> int:
         f"false-merge rate {format_rate(report.false_merge_rate, digits=2)} "
         f"({report.false_merges}/{report.n_auto}), gate {'PASS' if gate_pass else 'FAIL'}"
     )
+    if args.controls:
+        print(f"controls: {'PASS' if controls_passed else 'FAIL'}")
     print(
         f"coverage precision {format_rate(report.precision_coverage)}, "
         f"recall {format_rate(report.recall_coverage)}, "
         f"F1 {format_rate(report.f1_coverage)}"
     )
-    return 0 if gate_pass else 1
+    return 0 if (gate_pass and controls_passed) else 1
 
 
 if __name__ == "__main__":

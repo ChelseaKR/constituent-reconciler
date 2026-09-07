@@ -187,7 +187,7 @@ def test_run_eval_scores_the_sample_and_reports_flow_through(
     """
 
     _repin(monkeypatch, raw_dir)
-    markdown, report, _gate_pass = run_eval.run(
+    markdown, report, _gate_pass, _controls = run_eval.run(
         tmp_path / "out", gate=1.0, offline=True, raw_dir=raw_dir
     )
 
@@ -203,7 +203,7 @@ def test_run_eval_report_does_not_claim_a_kappa_failure(
     raw_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _repin(monkeypatch, raw_dir)
-    markdown, _report, _gate = run_eval.run(
+    markdown, _report, _gate, _controls = run_eval.run(
         tmp_path / "out", gate=1.0, offline=True, raw_dir=raw_dir
     )
     assert "Not applicable to this run" in markdown

@@ -28,6 +28,7 @@ from pathlib import Path
 
 from constituent_reconciler import pipeline
 from constituent_reconciler.config import load_recipe
+from constituent_reconciler.controls import DEFAULT_SEED, ControlsReport, run_controls
 from constituent_reconciler.evaluate import EvalReport, evaluate, format_rate, gate_holds
 from constituent_reconciler.models import Band, Record
 from constituent_reconciler.report import render_eval_markdown
@@ -107,8 +108,26 @@ def run(
     gate: float,
     offline: bool,
     raw_dir: Path | None = None,
-) -> tuple[str, EvalReport, bool]:
-    """Prepare, run, and score the benchmark. Returns (markdown, report, gate_pass)."""
+    controls: bool = False,
+    seed: int = DEFAULT_SEED,
+) -> tuple[str, EvalReport, bool, bool]:
+    """Prepare, run, and score. Returns (markdown, report, gate_pass, controls_passed).
+
+    The two verdicts are returned separately and reported separately. Folding a
+    failed control into ``gate_pass`` would print "false-merge rate 0.00%, gate
+    FAIL", which names the wrong gate: the false-merge rate held, and something
+    else did not. ``controls_passed`` is ``True`` when the controls were not
+    requested, because a run that did not ask for them has not failed them.
+
+    ``controls`` runs the negative controls against this same benchmark run.
+    Until they were wired through here, the numbers at the top of
+    docs/BENCHMARK.md -- the external, third-party ones this project points at
+    when it claims measured accuracy -- had no committed control run behind
+    them, while the synthetic fixture eval did. A failing control makes the
+    whole run fail, exactly as the false-merge gate does: a headline that
+    cannot be shown to be measuring anything is not a headline worth
+    publishing.
+    """
 
     raw = raw_dir or (out_dir / "raw")
     fetch(raw, offline=offline)
@@ -130,6 +149,19 @@ def run(
         if len(examples) == 3:
             break
 
+    controls_report: ControlsReport | None = None
+    if controls:
+        controls_report = run_controls(
+            result.records,
+            result.pairs,
+            truth["clusters"],
+            recipe.fields,
+            prior=recipe.prior,
+            auto_threshold=recipe.auto_threshold,
+            review_threshold=recipe.review_threshold,
+            seed=seed,
+        )
+
     markdown = render_eval_markdown(
         report,
         dataset=out_dir.name,
@@ -137,6 +169,7 @@ def run(
         provenance=truth.get("provenance"),
         generator="make eval-benchmark",
         field_judge_ran=False,
+        controls=controls_report,
     )
     # The converter and the scorer count ground-truth pairs independently. If
     # they disagree, the truth file on disk is not the one just derived from the
@@ -150,7 +183,12 @@ def run(
 
     section = _flow_through_section(raw, result.records, report, examples)
     full = markdown + "\n".join(section) + "\n"
-    return full, report, gate_holds(report.false_merge_rate, gate)
+    return (
+        full,
+        report,
+        gate_holds(report.false_merge_rate, gate),
+        controls_report is None or controls_report.passed,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -168,9 +206,26 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="fail instead of downloading if the sources are not already cached",
     )
+    parser.add_argument(
+        "--controls",
+        action="store_true",
+        help="also run the negative controls against this benchmark run",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=DEFAULT_SEED,
+        help=f"RNG seed for the controls (default {DEFAULT_SEED})",
+    )
     args = parser.parse_args(argv)
 
-    markdown, report, gate_pass = run(args.out_dir, gate=args.gate, offline=args.offline)
+    markdown, report, gate_pass, controls_passed = run(
+        args.out_dir,
+        gate=args.gate,
+        offline=args.offline,
+        controls=args.controls,
+        seed=args.seed,
+    )
     args.report_out.parent.mkdir(parents=True, exist_ok=True)
     args.report_out.write_text(markdown, encoding="utf-8")
     print(f"wrote benchmark eval report: {args.report_out}")
@@ -179,12 +234,16 @@ def main(argv: list[str] | None = None) -> int:
         f"({report.false_merges}/{report.n_auto}), gate "
         f"{'PASS' if gate_pass else 'FAIL'}"
     )
+    if args.controls:
+        print(f"controls: {'PASS' if controls_passed else 'FAIL'}")
     print(
         f"coverage precision {format_rate(report.precision_coverage)}, "
         f"recall {format_rate(report.recall_coverage)}, "
         f"F1 {format_rate(report.f1_coverage)}"
     )
-    return 0 if gate_pass else 1
+    # A failed control invalidates the headline: the numbers may be real, but
+    # nothing has shown they could have come out otherwise.
+    return 0 if (gate_pass and controls_passed) else 1
 
 
 if __name__ == "__main__":

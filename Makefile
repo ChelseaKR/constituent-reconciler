@@ -110,6 +110,7 @@ eval-large:
 eval-benchmark:
 	.venv/bin/python -m tools.benchmark.run_eval \
 		--out-dir benchmarks/febrl4 \
+		--controls \
 		--report-out eval/febrl4-report.md
 
 # The same treatment applied to FEBRL datasets 1-3 (docs/BENCHMARK.md, #68):
@@ -118,10 +119,16 @@ eval-benchmark:
 # split. DATASET selects which one; default 1. Same non-CI, network-needed
 # reasoning as eval-benchmark above.
 DATASET := 1
+# --controls is passed here and above so a regeneration cannot silently drop
+# the Controls section from a committed report. NOTE: dataset 2 currently exits
+# 1 because its `identity` control genuinely fails (docs/BENCHMARK.md says what
+# was measured and why). That nonzero exit is a true signal; making the command
+# green by not asking for the controls is the defect this repository fights.
 eval-benchmark-multi:
 	.venv/bin/python -m tools.benchmark.febrl_multi \
 		--dataset $(DATASET) \
 		--out-dir benchmarks/febrl$(DATASET) \
+		--controls \
 		--report-out eval/febrl$(DATASET)-report.md
 
 # Score the opt-in AI assistant package (constituent_reconciler.assistant,
