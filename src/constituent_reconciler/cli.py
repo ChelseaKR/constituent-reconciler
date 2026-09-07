@@ -49,7 +49,7 @@ from constituent_reconciler.config import Recipe, RecipeError, load_recipe
 from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.consent import partition_by_consent
 from constituent_reconciler.controls import DEFAULT_SEED as CONTROLS_DEFAULT_SEED
-from constituent_reconciler.controls import run_controls
+from constituent_reconciler.controls import run_controls, run_extraction_controls
 from constituent_reconciler.demo import NEXT_STEP, DemoError, write_demo
 from constituent_reconciler.destruction import destroy, parse_retention
 from constituent_reconciler.evaluate import (
@@ -382,11 +382,15 @@ def _cmd_eval_extraction(args: argparse.Namespace) -> int:
         return 2
 
     report = extraction_metrics(predicted, labels)
+    controls_report = None
+    if args.controls:
+        controls_report = run_extraction_controls(predicted, labels, seed=args.seed)
     markdown = render_extraction_markdown(
         report,
         dataset=fixtures.name,
         precision_target=args.precision_target,
         recall_target=args.recall_target,
+        controls=controls_report,
     )
     if args.out:
         Path(args.out).write_text(markdown, encoding="utf-8")
@@ -400,6 +404,11 @@ def _cmd_eval_extraction(args: argparse.Namespace) -> int:
         and report.precision >= args.precision_target
         and report.recall >= args.recall_target
     )
+    # A failed control means the numbers above cannot be trusted, so it is
+    # merge-blocking in its own right rather than a note beside a passing run.
+    if controls_report is not None and not controls_report.passed:
+        print("extraction controls FAILED: see the Controls section", file=sys.stderr)
+        return 1
     return 0 if met else 1
 
 
@@ -1703,6 +1712,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.90,
         help="minimum field recall for exit status 0 (default 0.90, the ledger target)",
+    )
+    exeval_parser.add_argument(
+        "--controls",
+        action="store_true",
+        help="also run the negative controls and render them under their own heading",
+    )
+    exeval_parser.add_argument(
+        "--seed",
+        type=int,
+        default=CONTROLS_DEFAULT_SEED,
+        help=f"RNG seed for the controls (default {CONTROLS_DEFAULT_SEED})",
     )
     exeval_parser.set_defaults(func=_cmd_eval_extraction)
 

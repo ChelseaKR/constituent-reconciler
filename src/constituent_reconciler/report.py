@@ -392,6 +392,7 @@ def render_extraction_markdown(
     dataset: str,
     precision_target: float = 0.95,
     recall_target: float = 0.90,
+    controls: ControlsReport | None = None,
 ) -> str:
     # None means the denominator was empty, so the target was not demonstrated.
     # Fail closed: an unmeasured extractor has not met a ledger target.
@@ -459,4 +460,5 @@ def render_extraction_markdown(
             "README), so the measurement demonstrably catches a real miss "
             "rather than scoring a set the extractor is guaranteed to ace.",
         ]
+    lines += _controls_lines(controls)
     return "\n".join(lines) + "\n"

@@ -31,3 +31,19 @@ Field-level precision and recall of the offline PDF extractor. A predicted field
 Ledger targets: precision at least 95.0%, recall at least 90.0%. Observed: precision 100.0%, recall 94.1%. **MET**.
 
 False negatives (1 here) are shown, not hidden: the fixture set deliberately includes at least one field the deterministic extractor is known not to parse (see the fixture README), so the measurement demonstrably catches a real miss rather than scoring a set the extractor is guaranteed to ace.
+
+## Controls
+
+Each row below is a deliberate sabotage with a known correct answer, run against this same dataset. The expectation was written before the number was measured. A control that does not move is the finding: it means the metric above is not reading what the report says it reads.
+
+Seed: `20260906`. Every control is deterministic under it, so this section is byte-identical on a re-run.
+
+| Control | Rules out | Expected | Observed | Result |
+|---------|-----------|----------|----------|--------|
+| `shuffled-extraction-labels` | an extraction score that is not actually read from the labels file | mean precision over 20 seeded label reassignments falls to at most 3x the exact chance level (0.0625), and the real precision (1.0000) is above that bound | mean 0.0156, worst reassignment 0.0625, exact chance level 0.0208 | **PASS** |
+
+What the controls did not cover, stated so a partial control is not read as a whole one:
+
+- `shuffled-extraction-labels`: predictions are held fixed and whole label sets are swapped between documents, so it rules out truth that is not read at all, not truth that is read and mis-normalized within a document.
+
+Controls gate: **PASS**.
