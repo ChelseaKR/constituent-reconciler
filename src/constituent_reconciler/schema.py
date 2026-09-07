@@ -100,6 +100,16 @@ PLAN_KIND_WITHDRAW = "withdraw"
 # published artifact predates it.
 RUN_DIFF_SCHEMA_VERSION = 1
 
+# The calibration_report.json written by ``constituent-reconcile sweep-thresholds``: one row
+# per (auto, review) setting with what an organization's own reviewer verdicts
+# imply about it -- labeled auto-merges, false merges, missed matches, review
+# load, Wilson intervals, and whether the row is eligible under the false-merge
+# gate. Counts and rates only, never a pair id. Versioned on its own because it
+# is read by someone deciding whether to change a threshold, which is a
+# different audience and a different lifetime from the run report. Version 1
+# from its first byte.
+SWEEP_SCHEMA_VERSION = 1
+
 # The auto_merges.json shape ``constituent-reconcile run`` writes: every pair the
 # matcher merged without a human, with the probability and band that decided it
 # and the thresholds in force. Versioned on its own, like the migration summary

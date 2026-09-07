@@ -108,7 +108,7 @@ constituent-reconciler/
 │   │   ├── refusal.py             # deterministic prohibited-language scanner (EN/ES)
 │   │   ├── source_text.py         # reads real source-document text an OCR quote is checked against
 │   │   └── triage.py              # deterministic review-queue ordering; calls no model
-│   ├── cli.py                     # init/run/eval/compare(+-review/-apply)/diff-runs/review/apply/plan-split/plan-withdraw/approve-repair/apply-repair/report/validate/destroy/verify/schema/demo/ai-explain/ai-ask/ai-propose-corrections/ai-triage
+│   ├── cli.py                     # init/run/eval/compare(+-review/-apply)/diff-runs/sweep-thresholds/review/apply/plan-split/plan-withdraw/approve-repair/apply-repair/report/validate/destroy/verify/schema/demo/ai-explain/ai-ask/ai-propose-corrections/ai-triage
 │   ├── compare.py                 # read-only migration cutover comparison (constituent-reconcile compare)
 │   ├── compare_apply.py           # reviewed, consent-gated local correction-file export (compare-apply)
 │   ├── config.py                  # recipe.toml loading: sources, connector, thresholds, policy pack
@@ -158,6 +158,7 @@ constituent-reconciler/
 │   ├── schema.py                  # declared schema/interface versions for the stability contract
 │   ├── stage_cache.py             # content-addressed cache for extraction and normalization only
 │   ├── suppression.py             # aggregate suppression-aware summaries for external sharing
+│   ├── sweep.py                   # threshold grid scored against an org's OWN reviewer verdicts (sweep-thresholds); never edits a recipe, never recommends weakening the gate
 │   └── telemetry.py               # content-free optional model-call telemetry
 ├── tests/
 │   ├── fixtures/                  # seeded synthetic data, zero real PII, planted ground truth

@@ -7,6 +7,49 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **`constituent-reconcile sweep-thresholds`: what your own reviewers imply about your
+  thresholds.** The defaults are 0.97 auto and 0.80 review, pre-tuned so an adopter
+  needs no labeled pairs. An organization that has *done* the reviewing has
+  labels anyway, and nothing let it see what they imply. This treats reviewer
+  verdicts as labels, replays the probabilities the run already committed
+  against a grid of (auto, review) settings, and reports what each would have
+  done: labeled auto-merges, false merges, missed matches, review load and
+  Wilson intervals per row.
+
+  Not called `calibrate`. `review/calibration.py` already owns that word for a
+  different mechanism (planted known-answer pairs and the fail-closed kappa gate
+  on reviewer agreement), and one name for two gates is how a doc becomes wrong.
+
+  **Four things it will not do**, because a threshold sweep is structurally a
+  tool for finding the setting that makes your numbers look best:
+
+  1. It will not recommend weakening the gate. Eligibility uses
+     `evaluate.gate_holds`, not a comparison, so a row that auto-merged nothing
+     has an *undefined* false-merge rate and can never be recommended.
+     Undefined is not zero, and zero is the best possible value for this metric.
+     `--suggest` prints the most conservative eligible row and applies nothing;
+     the report never edits a recipe.
+  2. It will not compute a rate over an unlabeled denominator. Only pairs a
+     human decided carry a label, so both numerator and denominator are counted
+     over the labeled set alone. A labeled numerator over every auto-merged pair
+     would be a wrong number wearing a real one's clothes.
+  3. It will not report a review load it cannot observe. The run recorded
+     probabilities only at or above its own review threshold, so a row proposing
+     a *lower* one renders its review load as "no evidence" rather than as a
+     small number, on the column an operator reads as cost.
+  4. It will not run on a handful of decisions. Below 30 decided pairs it exits
+     non-zero with the minimum stated, and there is no flag to lower it: a
+     Wilson interval over three verdicts covers most of the range, and a point
+     estimate printed beside one computed from four hundred is how a gate gets
+     retuned on noise.
+
+  Nothing is re-scored, deliberately. Re-scoring would recompute probabilities
+  from the current sources, which may no longer be the ones the reviewer saw,
+  silently relabeling their verdicts against evidence they never read. A decided
+  pair the run's artifacts cannot account for is a refusal naming it, because
+  dropping it would shrink the labeled set and quietly improve every row.
+  New `SWEEP_SCHEMA_VERSION`.
+
 - **`constituent-reconcile diff-runs`: what changed between two runs of one recipe.**
   An operator re-runs the same recipe every month and defends the new numbers
   against the old ones. `compare` answers a different question (two *sources*
