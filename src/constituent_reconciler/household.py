@@ -26,7 +26,7 @@ recipe); the default is off under every policy pack, including ``dv``.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from constituent_reconciler.models import GoldenRecord
@@ -152,3 +152,98 @@ def confirmed_member_map(
         for member in suggestion.members:
             out[member] = suggestion.household_id
     return out
+
+
+# -- writing a confirmed household to a live CRM (EXP-07, #151) ---------------
+
+
+#: External-id prefix for the household record a connector creates. Keyed so a
+#: re-run finds the household it made last time instead of making a second one.
+HOUSEHOLD_EXTERNAL_ID_PREFIX = "hh-"
+
+#: Why a confirmed household was not written. Each is a different follow-up, so
+#: they are never collapsed into one bucket, and none of them is silence.
+SKIP_MEMBER_WITHHELD = "member-withheld"
+SKIP_MEMBER_NOT_WRITTEN = "member-not-written"
+SKIP_SINGLE_MEMBER = "single-member"
+
+
+@dataclass(frozen=True)
+class HouseholdWrite:
+    """One confirmed household, ready to write, with every member accounted for."""
+
+    household_id: str
+    #: Member cluster id -> the external id that member was actually written
+    #: under, in sorted member order. Both are needed: the relationship is
+    #: created against the destination's id, and the report names the cluster.
+    members: tuple[tuple[str, str], ...]
+
+    @property
+    def external_id(self) -> str:
+        return f"{HOUSEHOLD_EXTERNAL_ID_PREFIX}{self.household_id}"
+
+
+@dataclass(frozen=True)
+class HouseholdSkip:
+    """A confirmed household that was not written, and exactly why."""
+
+    household_id: str
+    reason: str
+    #: The member ids responsible, so the report names people rather than a count.
+    members: tuple[str, ...]
+
+
+def plan_household_writes(
+    suggestions: Sequence[HouseholdSuggestion],
+    confirmed_ids: frozenset[str],
+    written_external_ids: Mapping[str, str],
+    withheld_ids: frozenset[str] = frozenset(),
+) -> tuple[list[HouseholdWrite], list[HouseholdSkip]]:
+    """Split confirmed households into the ones that may be written and the rest.
+
+    ``written_external_ids`` maps a member's cluster id to the external id its
+    own write landed under; a member absent from it was not written, whatever
+    the reason. ``withheld_ids`` are the cluster ids the consent gate held back,
+    passed separately so a withheld member is reported as withheld rather than
+    as a generic failure.
+
+    **A household with any withheld or unwritten member is not written at all.**
+    The issue could be read as writing the household minus that member, and the
+    "Done when" line about a withheld member yielding no relationship row is
+    satisfied either way. This takes the more protective reading, for the reason
+    the triage names: a partial household asserts a family relationship in the
+    CRM on incomplete evidence, and the withheld member's *absence* from a
+    household the reviewer confirmed as theirs is itself an inference about that
+    person. Recording the skip with a named reason keeps the fact visible
+    without publishing the inference. This is the one judgement in this feature
+    that is arguable, and it is stated in the PR rather than buried.
+
+    A single-member household is skipped too: there is no relationship to
+    assert, and creating a household record for one person adds a grouping
+    nobody confirmed.
+    """
+
+    writes: list[HouseholdWrite] = []
+    skips: list[HouseholdSkip] = []
+    for suggestion in sorted(suggestions, key=lambda s: s.household_id):
+        if suggestion.household_id not in confirmed_ids:
+            continue
+        members = tuple(sorted(suggestion.members))
+        withheld = tuple(member for member in members if member in withheld_ids)
+        if withheld:
+            skips.append(HouseholdSkip(suggestion.household_id, SKIP_MEMBER_WITHHELD, withheld))
+            continue
+        unwritten = tuple(member for member in members if member not in written_external_ids)
+        if unwritten:
+            skips.append(HouseholdSkip(suggestion.household_id, SKIP_MEMBER_NOT_WRITTEN, unwritten))
+            continue
+        if len(members) < 2:
+            skips.append(HouseholdSkip(suggestion.household_id, SKIP_SINGLE_MEMBER, members))
+            continue
+        writes.append(
+            HouseholdWrite(
+                household_id=suggestion.household_id,
+                members=tuple((member, written_external_ids[member]) for member in members),
+            )
+        )
+    return writes, skips

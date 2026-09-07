@@ -137,7 +137,7 @@ constituent-reconciler/
 │   │   ├── sandbox.py             # resource-limited extraction subprocess
 │   │   ├── seam.py                # optional hosted/local model seams, policy-gated
 │   │   └── text.py                # plain-text and .eml body extraction
-│   ├── household.py               # reviewed household suggestions, off by default
+│   ├── household.py               # reviewed household suggestions + the confirmed-household write plan (#151); a household with a withheld or unwritten member is never written
 │   ├── manifest.py                # reproducibility manifest and input hashes
 │   ├── matching/                  # backend protocol and Splink implementation
 │   │   └── evidence.py            # real field-level Splink comparison evidence (ADR 0014); Splink
