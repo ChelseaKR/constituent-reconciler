@@ -6,6 +6,8 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-07
+
 ### Added
 - **`constituent-reconcile explain`: the offline auditor's trace for one resolved
   record** (`explain.py`; #146). A funder's auditor, or a data subject's advocate,
