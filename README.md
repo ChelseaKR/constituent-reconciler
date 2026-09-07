@@ -12,7 +12,7 @@ four opt-in `ai-*` commands under
 [AI-assisted review](#ai-assisted-review-opt-in-not-offline): those call a
 hosted model on purpose and say so plainly, not as a buried caveat.
 
-> **Status: Beta (0.8.0, untagged), early but working.** The pipeline runs and is tested:
+> **Status: Beta (0.9.0, untagged), early but working.** The pipeline runs and is tested:
 > CSV or PDF in, deduplicated records out, with source-span pointers in the
 > review queue, CASS-style address normalization, a committed eval
 > ([eval/report.md](eval/report.md)), a local WCAG 2.2 AA web review UI, CiviCRM
@@ -213,7 +213,7 @@ fresh virtual environment, and runs the Quickstart from outside the repository.
 
 Every wheel that exists is one someone built — from a clone, from the sdist, or
 from the Git ref above — and every one of them carries the packaged examples.
-There is no published 0.8.0 wheel and no `v0.8.0` tag to install instead; as
+There is no published 0.9.0 wheel and no `v0.9.0` tag to install instead; as
 the paragraph above says, no `v*` tag has been cut at all.
 
 Before pointing the tool at your own data, check a recipe's shape without
