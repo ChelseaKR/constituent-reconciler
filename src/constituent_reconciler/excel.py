@@ -26,7 +26,6 @@ import datetime as dt
 import zipfile
 from pathlib import Path
 from typing import Any
-from xml.etree import ElementTree as ET
 
 from constituent_reconciler.config import RecipeError
 
@@ -43,20 +42,6 @@ names, into a crash.
 # magic number is what separates "needs a password" from "corrupt file" -- two
 # refusals an operator fixes in completely different ways.
 _OLE2_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
-
-# The OOXML parts below are parsed with the standard library's ElementTree.
-# S314 flags that as untrusted-XML parsing, and the input genuinely is
-# untrusted -- an intake workbook arrives from outside. Two things make it the
-# right call here anyway, and neither is "the file is probably fine":
-# ElementTree's expat parser refuses undefined entities outright rather than
-# expanding them, which is what the entity-expansion attacks S314 exists for;
-# and openpyxl has already parsed these same parts of this same file, through
-# the same stdlib parser, before any of this code runs. Reaching for defusedxml
-# here would harden the second reader of a file the first reader already
-# opened, while adding a dependency to the offline install.
-_SPREADSHEET_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-_RELS_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
-_DOC_RELS_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
 
 class WorkbookError(RecipeError):
@@ -113,11 +98,13 @@ def _guard_container(path: Path) -> None:
         )
 
 
-def _load(path: Path, *, data_only: bool) -> Any:
+def _load(path: Path, *, data_only: bool, read_only: bool = True) -> Any:
     openpyxl = _require_openpyxl()
     _guard_container(path)
     try:
-        return openpyxl.load_workbook(path, read_only=True, data_only=data_only, keep_links=False)
+        return openpyxl.load_workbook(
+            path, read_only=read_only, data_only=data_only, keep_links=False
+        )
     except zipfile.BadZipFile as error:
         raise _fail(f"workbook is not a readable .xlsx/.xlsm file: {path} ({error})") from error
     except OSError as error:
@@ -148,72 +135,30 @@ def resolve_sheet_name(path: Path, sheet: str | None) -> str:
     return str(sheet)
 
 
-def _sheet_part(path: Path, sheet_name: str) -> str | None:
-    """The zip member holding ``sheet_name``'s XML, or ``None`` if unmappable.
+def _merged_ranges_over_row(path: Path, sheet_name: str, row: int) -> list[str]:
+    """A1-style merge refs on ``sheet_name`` whose row span covers ``row``.
 
-    Walks the OOXML package relationships rather than an openpyxl private
-    attribute: ``xl/workbook.xml`` lists sheets in order with a relationship
-    id, and ``xl/_rels/workbook.xml.rels`` maps that id to the part. Returns
-    ``None`` only when the package omits one of those parts, in which case the
-    caller falls back to the blank-header refusal.
+    This needs its own workbook load, and not a read-only one, because
+    openpyxl's ``ReadOnlyWorksheet`` does not carry ``merged_cells`` at all:
+    in streaming mode a merged header cell simply arrives as ``None``, exactly
+    like an empty one. So the check that a header is not silently merged costs
+    one full load of the workbook, which is the memory ceiling on this reader.
+    Every other pass stays streaming.
+
+    Doing it through openpyxl rather than by opening the package's XML keeps
+    one parser over the untrusted file instead of two.
     """
 
-    with zipfile.ZipFile(path) as archive:
-        names = set(archive.namelist())
-        if "xl/workbook.xml" not in names or "xl/_rels/workbook.xml.rels" not in names:
-            return None
-        book = ET.fromstring(archive.read("xl/workbook.xml"))  # noqa: S314 - see above
-        rels = ET.fromstring(  # noqa: S314 - see above
-            archive.read("xl/_rels/workbook.xml.rels")
-        )
-
-    targets = {
-        rel.get("Id"): rel.get("Target", "") for rel in rels.findall(f"{{{_RELS_NS}}}Relationship")
-    }
-    for element in book.iter(f"{{{_SPREADSHEET_NS}}}sheet"):
-        if element.get("name") != sheet_name:
-            continue
-        target = targets.get(element.get(f"{{{_DOC_RELS_NS}}}id", ""), "")
-        if not target:
-            return None
-        member = target.lstrip("/")
-        if not member.startswith("xl/"):
-            member = f"xl/{member}"
-        return member if member in names else None
-    return None
-
-
-def _merged_ranges_over_row(path: Path, part: str, row: int) -> list[str]:
-    """A1-style merge refs on ``part`` whose row span covers ``row``.
-
-    Streamed with ``iterparse`` and cleared as it goes, so a large sheet costs
-    no more memory than a small one. This exists because openpyxl's read-only
-    worksheets do not materialize merge ranges at all: a merged header cell
-    reads as ``None``, indistinguishable from an empty one, which is the
-    "blank" the issue's acceptance list refuses.
-    """
-
-    from openpyxl.utils.cell import range_boundaries
-
-    refs: list[str] = []
-    with zipfile.ZipFile(path) as archive, archive.open(part) as stream:
-        for _, element in ET.iterparse(stream, events=("end",)):  # noqa: S314 - see above
-            if element.tag != f"{{{_SPREADSHEET_NS}}}mergeCell":
-                element.clear()
-                continue
-            ref = element.get("ref", "")
-            element.clear()
-            if not ref:
-                continue
-            try:
-                _, min_row, _, max_row = range_boundaries(ref)
-            except ValueError:
-                continue
-            if min_row is None or max_row is None:
-                continue
-            if min_row <= row <= max_row:
-                refs.append(ref)
-    return refs
+    workbook = _load(path, data_only=True, read_only=False)
+    try:
+        worksheet = workbook[sheet_name]
+        return [
+            str(merged)
+            for merged in worksheet.merged_cells.ranges
+            if merged.min_row <= row <= merged.max_row
+        ]
+    finally:
+        workbook.close()
 
 
 def _cell_text(value: object) -> str:
@@ -307,10 +252,7 @@ def _headers(
 
 
 def _guard_merged_header(path: Path, sheet_name: str, header_row: int) -> None:
-    part = _sheet_part(path, sheet_name)
-    if part is None:
-        return
-    merged = _merged_ranges_over_row(path, part, header_row)
+    merged = _merged_ranges_over_row(path, sheet_name, header_row)
     if merged:
         named = ", ".join(merged)
         raise _fail(

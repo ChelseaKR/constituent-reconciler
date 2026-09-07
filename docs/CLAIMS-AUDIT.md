@@ -24,6 +24,7 @@ Status values: **implemented** (the code does what the sentence says),
 | Claim | Where stated (file:line) | Code location | Status |
 | --- | --- | --- | --- |
 | Ingest reads a folder (or single file) of CSVs | README.md:57 ("What it does" step 1); CLAUDE.md "What this is" | `pipeline.py` `_ingest_source` routes `.csv` to the structured reader | implemented |
+| Ingest reads Excel workbooks (`.xlsx`, `.xlsm`) | README.md ("Reading from PDFs" routing note); docs/ADOPTION-KIT.md Step 1 | `excel.py`; `pipeline.py` `_route` returns `excel` and `read_workbook_records` reads it; `tests/test_excel_source.py` | implemented (read-only, values only, optional `excel` extra; `.xlsb` is not supported and is reported as a skipped file) |
 | Ingest reads digitally created (text-layer) PDFs | README.md:57 (step 1); README status note | `pipeline.py` `_ingest_source` routes `.pdf` to the extractor; `extract/pdf.py` `PdfplumberExtractor` | implemented (text layer only) |
 | Scanned-document (OCR) ingest | README.md "What it does" step 1 | `extract/ocr.py`; `pipeline.py` selects `pdfplumber+ocr`; `tests/test_ocr.py` | implemented (local Tesseract, optional `ocr` extra) |
 | Plain-text and email-body ingest | README.md "What it does" step 1 | `extract/text.py`; `_ingest_source` routes `.txt` and `.eml`; `tests/test_extract_text.py` | implemented (plain-text body only; attachments are not ingested) |

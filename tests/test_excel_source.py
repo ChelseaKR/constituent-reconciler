@@ -27,7 +27,6 @@ import csv
 import datetime as dt
 import json
 import shutil
-import zipfile
 from pathlib import Path
 
 import pytest
@@ -499,16 +498,3 @@ def test_the_defaults_are_first_sheet_and_row_one(tmp_path: Path) -> None:
     recipe = load_recipe(_recipe_with(tmp_path, 'id_column = "id"'))
     assert recipe.sheet is None
     assert recipe.header_row == 1
-
-
-def test_the_sheet_part_lookup_survives_a_package_without_rels(tmp_path: Path) -> None:
-    """A workbook whose package omits the rels part falls back, it does not crash."""
-
-    path = _one_sheet(tmp_path, [["First Name"], ["Ada"]])
-    stripped = tmp_path / "stripped.xlsx"
-    with zipfile.ZipFile(path) as source, zipfile.ZipFile(stripped, "w") as target:
-        for item in source.infolist():
-            if item.filename == "xl/_rels/workbook.xml.rels":
-                continue
-            target.writestr(item, source.read(item.filename))
-    assert excel._sheet_part(stripped, "Contacts") is None

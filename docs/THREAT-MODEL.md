@@ -23,8 +23,10 @@ or assistant surface changes.
 `constituent-reconcile run --config recipe.toml` (`src/constituent_reconciler/cli.py`)
 hands the recipe to the orchestrator in `src/constituent_reconciler/pipeline.py`.
 `_ingest_source()` routes each source path by extension: a `.csv` is read with
-the standard-library `csv` module in `read_records()`, and a `.pdf` is routed
-to `read_pdf_records()` only when the recipe sets `extract.backend` to
+the standard-library `csv` module in `read_records()`, an `.xlsx` or `.xlsm`
+is read by `read_workbook_records()` through
+`src/constituent_reconciler/excel.py`, and a `.pdf` is routed to
+`read_pdf_records()` only when the recipe sets `extract.backend` to
 something other than `"none"`. PDF extraction lives in
 `src/constituent_reconciler/extract/pdf.py`. It opens the file with
 pdfplumber, an optional dependency installed via the `extract` extra, which in
@@ -34,10 +36,24 @@ low-confidence case the heuristics below are built for.
 
 The boundaries that matter:
 
-1. **The file boundary.** Every byte of an operator-supplied CSV, PDF, or scan
-   is untrusted. Intake documents arrive from the public: a constituent, a
-   partner agency, an email inbox. The operator who runs the tool is trusted;
-   the files they feed it are not.
+1. **The file boundary.** Every byte of an operator-supplied CSV, workbook,
+   PDF, or scan is untrusted. Intake documents arrive from the public: a
+   constituent, a partner agency, an email inbox. The operator who runs the
+   tool is trusted; the files they feed it are not.
+
+   A workbook widens this boundary: an `.xlsx` is a zip of XML, so reading one
+   means a zip parser and an XML parser over hostile bytes. Every one of those
+   parses is openpyxl's, an optional dependency installed via the `excel`
+   extra; `excel.py` opens no archive and parses no XML of its own, so reading
+   a workbook adds exactly one parser to this boundary rather than two. The
+   workbook is opened read-only for its data, and once without read-only to
+   read the merge ranges that streaming mode does not expose, which makes the
+   memory ceiling on this reader one whole workbook. There is no sandbox
+   around it: unlike PDF parsing, workbook parsing runs in-process, so a
+   malformed workbook that exhausts memory takes the run with it rather than
+   failing closed to review. That is a known gap, recorded here rather than
+   implied away.
+
 2. **The process boundary at the parser.** Since 2026-07-17 the pipeline
    parses each PDF in a spawned child process by default
    (`src/constituent_reconciler/extract/sandbox.py`, wired through

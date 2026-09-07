@@ -27,8 +27,9 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   openpyxl's read-only worksheets do not expose merge ranges at all, so a
   merged header cell arrives as `None`, indistinguishable from an empty one; a
   merge at the end of the header row would be trimmed as a trailing blank and
-  its column silently dropped. The merge ranges are read from the sheet XML
-  instead, streamed. A formula whose result Excel never cached also arrives as
+  its column silently dropped. The merge check therefore costs one non-streaming
+  load of the workbook, which is this reader's memory ceiling; every other pass
+  streams. A formula whose result Excel never cached also arrives as
   `None` under `data_only=True`, so a second, formula-visible pass tells "never
   computed" apart from "empty". A workbook's used range routinely runs past its
   last real row, and minting records from those rows would invent people, so
