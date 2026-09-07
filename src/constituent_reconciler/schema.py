@@ -30,8 +30,12 @@ CONNECTOR_INTERFACE_VERSION = 1
 # the "repair-apply" provenance entry (ADR 0012, ``connectors/repair.py``'s
 # ``apply_repair``): the operation name and the distinct approver identities
 # that gated it, alongside a receipt digest in the existing content_hash
-# field. No prior key changed meaning. Version-1 logs still verify unchanged.
-REPORT_SCHEMA_VERSION = 5
+# field. No prior key changed meaning. Version 6 added the "withdraw-plan"
+# provenance entry (ADR 0012, ``repair.plan_withdraw``): the digest of a
+# consent-withdrawal plan, with an empty record id because the plan concerns
+# every written record under the manifest rather than one cluster. No prior key
+# changed meaning. Version-1 logs still verify unchanged.
+REPORT_SCHEMA_VERSION = 6
 
 # The decisions.json shape: approved/rejected lists of [left, right] record-id
 # pairs, written by the review session and consumed by ``constituent-reconcile apply``.
@@ -69,7 +73,22 @@ CUTOVER_CORRECTIONS_SCHEMA_VERSION = 2
 # a reader that ignores the new object behaves as before, which is why this is
 # a minor bump rather than a break. No release has been tagged, so no published
 # artifact carries version 1.
-REPAIR_PLAN_SCHEMA_VERSION = 2
+#
+# Version 3 adds a second artifact to this family and a key that tells the two
+# apart. ``withdraw_plan.json`` (``constituent-reconcile plan-withdraw``) lists the
+# written records whose consent has lapsed since the write, in the same
+# repair-protocol shape; every plan in the family now carries ``plan_kind``,
+# ``"split"`` or ``"withdraw"``, so a reader never has to infer which artifact it
+# holds from the presence of a key. Additive for the split plan: every version 2
+# key keeps its meaning and its value, and the only difference in a version 3
+# split plan is the new ``plan_kind`` discriminator.
+REPAIR_PLAN_SCHEMA_VERSION = 3
+
+# The two artifacts in the repair-plan family, and the value of every plan's
+# ``plan_kind``. ``apply-repair`` executes only ``PLAN_KIND_SPLIT``; a withdraw
+# plan is refused there by name rather than by a downstream key lookup failing.
+PLAN_KIND_SPLIT = "split"
+PLAN_KIND_WITHDRAW = "withdraw"
 
 # The auto_merges.json shape ``constituent-reconcile run`` writes: every pair the
 # matcher merged without a human, with the probability and band that decided it

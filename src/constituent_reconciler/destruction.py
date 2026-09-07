@@ -90,6 +90,12 @@ PII_ARTIFACTS: tuple[str, ...] = (
     "cutover_withheld.csv",
     "repair_plan.json",
     "repair_receipts.json",
+    # The withdrawal plan holds the ids and external ids of constituents whose
+    # consent has lapsed, which is a list of named people and a statement about
+    # each one. It carries no field values, but membership in it is itself the
+    # sensitive fact, so it is destroyed rather than kept as audit evidence;
+    # the provenance log keeps the plan's digest and a count, never the ids.
+    "withdraw_plan.json",
     "household_suggestions.csv",
     "ai_ocr_proposals.json",
 )

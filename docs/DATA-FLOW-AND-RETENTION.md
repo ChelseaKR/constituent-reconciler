@@ -132,6 +132,7 @@ appear in them, and they are checked by being written and then deleted.
 | `civicrm_import.csv`, `salesforce_import.csv` | `connectors/crm_csv.py` | the `--out` directory | Yes: import-shaped field values | Local files, so permitted under the `dv` pack. Skipped on `--dry-run`. |
 | Live CRM records | `connectors/civicrm.py`, `connectors/salesforce.py` | the remote CRM | Yes | Non-local; refused fail-closed under the `dv` pack (`pipeline.build_connector`). |
 | `repair_plan.json` | `repair.py` via `constituent-reconcile plan-split` | the run's `--out` directory, beside the manifest | Yes: proposed split records and restoration values for the members of one written cluster | Local only, never sent anywhere. The provenance log stores its digest, not its content. Regenerable at will from the manifest and sources, so destroying it loses nothing. |
+| `withdraw_plan.json` | `repair.py` via `constituent-reconcile plan-withdraw` | the run's `--out` directory, beside the manifest | Ids and a reason only: the cluster id, member record ids and destination external id of each written record whose consent has lapsed, with the withhold reason. No field values | Local only, never sent anywhere. Membership in it is itself the sensitive fact -- it is a list of named people and a statement about each one -- so it is in the destruction inventory (`destruction.PII_ARTIFACTS`) despite holding no field values. The provenance log records its digest and a count of lapsed records, never the ids. Regenerable from the manifest, the log and the sources at any `--as-of` date. |
 | `repair_receipts.json` | `repair.py` via `constituent-reconcile apply-repair` | the run's `--out` directory, beside the manifest | Yes: the before/after raw values of every operation an apply actually performed | Written only on a real (`--execute`) apply, never on a dry run. Unlike the plan file it is not freely regenerable -- it is the record of what was actually written to a live CiviCRM instance -- so it should follow the destination's own retention window rather than being deleted as soon as the repair looks done. The provenance log stores each operation's receipt digest, not its content. |
 | `repair_approvals.json` | `repair.py` via `constituent-reconcile approve-repair` | the run's `--out` directory, beside the manifest | Ids and names only | Reviewer names, verdicts, and timestamps keyed by the plan digest they approved. The same content class as `decisions.json`'s audit section; not in the destruction inventory for the same reason. |
 | `withheld.csv` | `pipeline._write_withheld` | the `--out` directory | Ids only | Cluster id, member record ids, reason. No field values, but ids resolve to people through the organization's own systems. |
@@ -172,6 +173,12 @@ The default pack enforces no confidentiality invariants beyond the ordinary
 fail-closed gate (`policy.py`), so retention is governed entirely by the
 organization's existing records schedule. The model:
 
+* `withdraw_plan.json` names the people whose consent has lapsed since a run
+  wrote them. It carries no field values, so it is less exposed than a repair
+  plan, but a list of constituents under the heading "consent withdrawn" is a
+  disclosure in its own right. Destroy it once the withdrawals have been made
+  in the destination; it can be regenerated for any date from the manifest,
+  the provenance log and the sources.
 * `review_queue.csv`, `resolved.csv`, the CRM import CSVs, and
   `repair_plan.json` carry the same personal data as the source CRM export
   they came from. Put them under the same schedule as that export, and delete

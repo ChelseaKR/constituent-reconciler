@@ -108,7 +108,7 @@ constituent-reconciler/
 │   │   ├── refusal.py             # deterministic prohibited-language scanner (EN/ES)
 │   │   ├── source_text.py         # reads real source-document text an OCR quote is checked against
 │   │   └── triage.py              # deterministic review-queue ordering; calls no model
-│   ├── cli.py                     # init/run/eval/compare(+-review/-apply)/review/apply/plan-split/approve-repair/apply-repair/report/validate/destroy/verify/schema/demo/ai-explain/ai-ask/ai-propose-corrections/ai-triage
+│   ├── cli.py                     # init/run/eval/compare(+-review/-apply)/review/apply/plan-split/plan-withdraw/approve-repair/apply-repair/report/validate/destroy/verify/schema/demo/ai-explain/ai-ask/ai-propose-corrections/ai-triage
 │   ├── compare.py                 # read-only migration cutover comparison (constituent-reconcile compare)
 │   ├── compare_apply.py           # reviewed, consent-gated local correction-file export (compare-apply)
 │   ├── config.py                  # recipe.toml loading: sources, connector, thresholds, policy pack
@@ -149,7 +149,7 @@ constituent-reconciler/
 │   ├── progress.py                # content-free progress events; no-op default, CLI renderer
 │   ├── provenance.py              # BLAKE2b hash chain plus optional RFC 3161 authority
 │   ├── quality.py                 # per-source data-quality aggregation
-│   ├── repair.py                  # split repair planning (read-only) + the gated apply path (UC-03); plans and receipts are local PII artifacts
+│   ├── repair.py                  # split repair planning + consent-withdrawal planning (both read-only) + the gated apply path (UC-03); plans and receipts are local PII artifacts
 │   ├── report.py                  # run summary + committed eval report renderers
 │   ├── review/                    # local queue UI, session, server, reviewer calibration
 │   ├── scaffold.py                # constituent-reconcile init: a starter recipe from CSV headers only,

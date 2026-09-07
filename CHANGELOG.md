@@ -7,6 +7,49 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Added
+- **`constituent-reconcile plan-withdraw`: consent that lapses after the write is now
+  an artifact, not a gap.** ADR 0013 makes a merged identity take its most
+  restrictive member's consent *at write time*, and nothing re-evaluated it
+  afterwards. So an `expires` date crossing, or a revocation arriving in a
+  later intake file, left a record sitting in CiviCRM or Salesforce that the
+  current consent evaluation would refuse to write, and no artifact in this
+  repository said which records those were. The gap was not a missing feature:
+  the project's own consent rule stopped being enforced the moment a run ended.
+
+  `plan-withdraw --config recipe.toml --manifest out/run_manifest.json --as-of
+  2026-10-01` replays consent evaluation over every record the run wrote, at
+  the given date, and writes `withdraw_plan.json`: per lapsed record the
+  destination external id, the withhold reason, each member's own reason, and
+  the operations the destination's `RepairDeclaration` covers. Read-only,
+  offline, no connector constructed. The plan's digest enters the provenance
+  chain; the ids do not, because `destroy` refuses to delete that log and a
+  permanent list of lapsed constituents is exactly what a destruction pass
+  exists to remove. `withdraw_plan.json` is in `destruction.PII_ARTIFACTS` and
+  the sentinel sweep drives its writer.
+
+  Three things it deliberately does not do. It declares no
+  `consent-withdraw` operation for any connector: enumerating one would assert
+  that CiviCRM's privacy flags or NPSP's flag field had been read from current
+  documentation and exercised against a live instance, which ADR 0012 requires
+  and which has not happened. So every plan is manual, `apply-repair` refuses a
+  withdrawal plan by kind, and the empty operations list is reported with the
+  operation named and the reason it is undeclared rather than shipped as a bare
+  `[]` that reads as "nothing to do". It takes no corrections file, because
+  `pipeline._group_corrections` refuses a correction outside `recipe.fields`
+  and the consent columns are not recipe fields, so no correction can change a
+  consent value. And under a recipe that does not require consent it reports
+  `applicability: "not-applicable-consent-not-required"` rather than zero
+  lapsed records: the write path applied no consent gate, so "nobody lapsed"
+  would be an answer to a question nobody asked.
+
+  Unlike `plan-split`, this verb does **not** refuse when the source files have
+  drifted from the manifest's input hashes. A revocation cannot arrive without
+  changing a source file, so refusing on drift would leave half the motivating
+  case undetectable by the only tool built to detect it. The recipe hash and
+  policy pack are still checked strictly, because they decide which columns
+  build each record's consent; the input drift is recorded as evidence instead,
+  named in the plan's `inputs_changed` and printed by the CLI.
+
 - **`auto_merges.json`: why every automatic merge happened.** `decisions.json`
   records who decided each pair a *person* saw, and it survives `destroy`
   because it is audit evidence carrying no field values. The pairs the matcher
@@ -29,6 +72,15 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   planted-sentinel test searches the rendered bytes for every raw field value
   in the run to keep that classification honest. This is the artifact an
   offline auditor's trace has to read.
+
+### Changed
+- `REPAIR_PLAN_SCHEMA_VERSION` 2 -> 3 and `REPORT_SCHEMA_VERSION` 5 -> 6, both
+  additive. The repair-plan family gained a second artifact
+  (`withdraw_plan.json`) and every plan in it now carries a `plan_kind`
+  discriminator, `"split"` or `"withdraw"`, so a reader never infers which
+  artifact it holds from the presence of a key. The provenance log gained a
+  `withdraw-plan` entry action. No prior key changed meaning, and older logs
+  still verify unchanged.
 
 ### Fixed
 - **The false-merge gate passed on zero evidence: a `0/0` rate published as a

@@ -24,7 +24,7 @@ scenario silently overwriting another's manifest:
 * ``cutover``: ``constituent-reconcile compare``, the review session ``constituent-reconcile
   compare-review`` serves, then ``constituent-reconcile compare-apply``.
 * ``repair``: ``constituent-reconcile run`` against a CiviCRM double, then ``plan-split``,
-  two ``approve-repair`` calls, and ``apply-repair --execute``.
+  two ``approve-repair`` calls, ``apply-repair --execute``, and ``plan-withdraw``.
 
 Coverage is no longer a comment. ``SWEPT_BY_CONTENT`` and
 ``SWEPT_BY_EXISTENCE`` classify every name on ``destruction.PII_ARTIFACTS``,
@@ -116,6 +116,10 @@ SWEPT_BY_CONTENT: dict[str, str] = {
 SWEPT_BY_EXISTENCE: dict[str, str] = {
     "withheld.csv": "constituent-reconcile run, on the revoked-consent record the fixture plants",
     "cutover_withheld.csv": "constituent-reconcile compare-apply, on that same revoked record",
+    "withdraw_plan.json": (
+        "constituent-reconcile plan-withdraw, after the repair scenario's write; the plan "
+        "carries cluster ids, external ids and a withhold reason, never a field value"
+    ),
 }
 
 
@@ -557,6 +561,9 @@ def _build_repair_scenario(root: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             ]
         )
         == 0
+    )
+    assert main(["plan-withdraw", "--config", str(recipe), "--manifest", str(manifest)]) == 0, (
+        "plan-withdraw did not write a plan for the sweep to destroy"
     )
     return out_dir
 
