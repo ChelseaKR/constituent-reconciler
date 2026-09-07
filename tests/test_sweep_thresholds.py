@@ -23,7 +23,11 @@ the cases that matter here need forty with known verdicts.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -492,24 +496,51 @@ def test_the_reports_hold_no_pair_id_and_are_kept_by_destroy(tmp_path: Path) -> 
     assert (out_dir / SWEEP_JSON_FILENAME).exists()
 
 
-def test_two_sweeps_of_one_run_are_byte_identical(tmp_path: Path) -> None:
+def test_two_sweeps_of_one_run_are_byte_identical_across_processes(tmp_path: Path) -> None:
+    """Determinism, measured where it can actually fail.
+
+    Running the sweep twice inside ONE interpreter proves very little. Python
+    randomizes only ``str``/``bytes`` hashing, and only per process, so a report
+    whose ordering depends on iterating a set of strings comes out identical on
+    both passes of a single-process test and differs between two real
+    invocations. That is the shape this test exists to catch, so each pass runs
+    in its own subprocess under a different ``PYTHONHASHSEED``.
+
+    (Float hashing is seed-independent, so a set of thresholds would not
+    reproduce the bug; the grid is sorted anyway.)
+    """
+
     recipe_path, out_dir = _labeled_run(
         tmp_path,
         approved_at=_spread(20, 0.81, 0.99),
         rejected_at=_spread(20, 0.81, 0.99),
     )
-    args = [
-        "sweep-thresholds",
-        "--config",
-        str(recipe_path),
-        "--decisions",
-        str(out_dir / "decisions.json"),
-        "--out",
-    ]
-    assert main([*args, str(tmp_path / "s1")]) == 0
-    assert main([*args, str(tmp_path / "s2")]) == 0
-    for name in (SWEEP_REPORT_FILENAME, SWEEP_JSON_FILENAME):
-        assert (tmp_path / "s1" / name).read_bytes() == (tmp_path / "s2" / name).read_bytes()
+    digests: dict[str, set[str]] = {SWEEP_REPORT_FILENAME: set(), SWEEP_JSON_FILENAME: set()}
+    for seed in ("0", "12345", "99991"):
+        target = tmp_path / f"s{seed}"
+        env = {**os.environ, "PYTHONHASHSEED": seed}
+        completed = subprocess.run(  # noqa: S603 - fixed argv, no shell, test-local paths
+            [
+                sys.executable,
+                "-m",
+                "constituent_reconciler.cli",
+                "sweep-thresholds",
+                "--config",
+                str(recipe_path),
+                "--decisions",
+                str(out_dir / "decisions.json"),
+                "--out",
+                str(target),
+            ],
+            env=env,
+            capture_output=True,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr.decode("utf-8", "replace")
+        for name in digests:
+            digests[name].add(hashlib.sha256((target / name).read_bytes()).hexdigest())
+    for name, seen in digests.items():
+        assert len(seen) == 1, f"{name} differed across hash seeds: {sorted(seen)}"
 
 
 def test_pair_ids_are_order_independent(tmp_path: Path) -> None:
