@@ -7,12 +7,16 @@ returns the same ``list[dict[str, str]]`` shape ``csv.DictReader`` yields, so
 the pipeline's row-to-Record path is shared byte for byte between the two
 readers and a workbook run resolves exactly as its CSV equivalent does.
 
-Read-only by construction: the workbook is opened in openpyxl's streaming
-read-only mode and never written. Values only, never formula text --
-``data_only=True`` asks for the result Excel last cached, and a formula whose
-result was never cached is refused by name rather than read as a blank cell,
-because a missing read published as an empty value is this project's most
-common defect class.
+The workbook is never written. Data is read through openpyxl's streaming
+read-only mode; the one exception is the merged-header check, which needs a
+full load because a ``ReadOnlyWorksheet`` does not carry merge ranges at all.
+That load is this reader's memory ceiling and is recorded in
+docs/THREAT-MODEL.md.
+
+Values only, never formula text -- ``data_only=True`` asks for the result Excel
+last cached, and a formula whose result was never cached is refused by name
+rather than read as a blank cell, because a missing read published as an empty
+value is this project's most common defect class.
 
 Every failure here is fail-closed and named: a missing sheet, a merged or blank
 header, duplicate headers, an empty sheet, a header row past the end of the
