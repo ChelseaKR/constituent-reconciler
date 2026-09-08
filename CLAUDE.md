@@ -92,7 +92,7 @@ src/constituent_reconciler`; docs/CLAIMS-AUDIT.md records the last audit.
 constituent-reconciler/
 ├── CLAUDE.md                      # this file
 ├── README.md                      # practitioner-facing
-├── pyproject.toml                 # PEP 621, console_scripts entry: constituent-reconcile (reconcile: deprecated alias until 0.9.0)
+├── pyproject.toml                 # PEP 621, console_scripts entry: constituent-reconcile (reconcile: deprecated alias until 0.10.0)
 ├── src/constituent_reconciler/
 │   ├── __init__.py                # public API surface, intentionally small
 │   ├── address.py                 # deterministic CASS-style standardizer, not USPS-certified

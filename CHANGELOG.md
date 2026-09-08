@@ -6,6 +6,27 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 ## [Unreleased]
 
+### Fixed
+- **The `reconcile` alias's removal version was the version it shipped in.**
+  0.9.0's changelog scheduled the deprecated console-script alias for removal
+  "in 0.9.0", and 0.9.0 shipped with the alias still installed and its stderr
+  notice still reading *"will be removed in 0.9.0"*. An operator running the
+  release was told the command they had just used disappears in the release
+  they were already running. The 0.9.0 entry is left as written — it is the
+  record of what that release said — and the schedule now names `0.10.0`, in
+  `cli.DEPRECATED_PROG_REMOVED_IN`, `pyproject.toml`, `README.md` and
+  `CLAUDE.md`.
+
+  Nothing caught it because every existing check asserted the removal version
+  was *present* in the notice and none asserted what it had to be.
+  `test_the_alias_promises_a_removal_that_has_not_already_happened` holds it
+  strictly ahead of the version `pyproject.toml` declares — two values,
+  neither derived from the other, so moving either alone fails it — and opens
+  by asserting the alias is still installed, because an inequality between two
+  constants passes just as happily when there is nothing left for either of
+  them to describe. **Whether to drop the alias at 0.10.0 or carry it further
+  is the maintainer's call; nothing here removes it.**
+
 ## [0.9.0] - 2026-09-07
 
 ### Added
