@@ -31,7 +31,8 @@ dependencies = [
 
 [project.scripts]
 constituent-reconcile = "constituent_reconciler.cli:main"
-# Deprecated alias, removed in 0.9.0. The original name collides with two
+# Deprecated alias, removed in 0.10.0 (it was scheduled for 0.9.0 and shipped
+# inside it instead; see CHANGELOG Unreleased). The original name collides with two
 # unrelated PyPI distributions (`reconcile`, `reconciler`) that install the
 # same bin/reconcile: whichever was installed last owns it, with no error.
 # Same entry function; cli.main prints a one-line stderr notice under this name.

@@ -1919,7 +1919,14 @@ def _cmd_ai_triage(args: argparse.Namespace) -> int:
 #: name. Both names point at :func:`main`; the old one prints a notice.
 PROG = "constituent-reconcile"
 DEPRECATED_PROG = "reconcile"
-DEPRECATED_PROG_REMOVED_IN = "0.9.0"
+
+#: The release the alias comes out in. It said ``0.9.0`` *inside* 0.9.0: the
+#: alias, the notice naming 0.9.0, and the changelog line scheduling the
+#: removal for 0.9.0 all shipped together, so every operator running the
+#: release was told the command would go in the release they were running.
+#: `tests/test_cli_entrypoint.py` now holds this strictly ahead of the version
+#: `pyproject.toml` declares, which is what the notice's "will be" means.
+DEPRECATED_PROG_REMOVED_IN = "0.10.0"
 
 
 def deprecated_alias_notice(argv0: str) -> str | None:

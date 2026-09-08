@@ -45,7 +45,7 @@ below.
 
 The command was named `reconcile` before 0.8.0. That name still runs, wired
 to the same entry point, and prints one line to stderr pointing here; it is
-removed in 0.9.0. It changed because PyPI already carries unrelated
+removed in 0.10.0. It changed because PyPI already carries unrelated
 `reconcile` and `reconciler` distributions, and two packages that each install
 a `bin/reconcile` do not error; whichever was installed last owns the name.
 
