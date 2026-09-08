@@ -198,11 +198,20 @@ table rather than left blank:
 * **SBOM:** Applies (release-producing repo) — enforced as of
   `.github/workflows/release.yml` (2026-07-10, closes P1-7): a CycloneDX 1.7
   SBOM of the released environment is generated and attached to every
-  GitHub Release, alongside a keyless build-provenance attestation. Not yet
-  exercised end-to-end — no `v*` tag has been cut yet.
-* **VEX:** N/A today — no disclosed vulnerability in a shipped release yet to
-  accompany with a VEX statement; revisit once the SBOM above has been
-  exercised by a real release.
+  GitHub Release, alongside a keyless build-provenance attestation. **Exercised
+  end-to-end as of `v0.9.0`** (2026-09-07): run
+  [34162996796](https://github.com/ChelseaKR/constituent-reconciler/actions/runs/34162996796)
+  passed all three jobs (`release-tests`, `build`, `github-release`) and the
+  release carries `constituent_reconciler-0.9.0-py3-none-any.whl`,
+  `constituent_reconciler-0.9.0.tar.gz` and `sbom.cdx.json`. The provenance
+  attestation verifies: `gh attestation verify
+  constituent_reconciler-0.9.0-py3-none-any.whl --repo
+  ChelseaKR/constituent-reconciler` exits 0 and resolves to that run and to the
+  tagged commit `dfcd35f3`.
+* **VEX:** N/A today — no disclosed vulnerability in a shipped release to
+  accompany with a VEX statement. The condition this entry previously waited on
+  (the SBOM being exercised by a real release) has now been met, so N/A here
+  rests only on there being nothing disclosed to state.
 * **Secret management:** N/A for this repo's own operation — it holds no
   service secrets itself; CRM API keys/tokens are supplied by the *operator*
   through their own environment (`CIVICRM_API_KEY`, `SF_TOKEN`) and are never
