@@ -7,6 +7,66 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [Unreleased]
 
 ### Fixed
+- **The scan that was meant to catch stale release prose read six files
+  carrying it and reported clean.** The check added a day earlier holds one
+  rule over every tracked file: once a release tag exists, no tracked prose
+  file may still say none does. Run against this tree it named nothing, while
+  six tracked files went on asserting, in the present tense, that nothing had
+  ever been released. Three reasons, each measured, each repaired here.
+
+  **It matched raw substrings, so a wrapped sentence was invisible.** Every one
+  of the six is wrapped across lines, and one of them is wrapped inside a
+  reStructuredText docstring behind double backticks where the vocabulary spelt
+  the same phrase with Markdown single ones. `_normalized` now strips line
+  markers and backticks and collapses whitespace, and two assertions in
+  `test_the_claim_vocabulary_is_real_and_not_self_matching` fail if either
+  stops working.
+
+  **It read this module's `__doc__` and nothing else.** The module docstring is
+  one of many in that file, and the stale sentence was in a function docstring:
+  the record that "the 0.8.0 wheel predates `reconcile demo`" and that
+  `git tag -l` prints nothing. Every docstring is now walked with `ast`, under
+  a floor on the count, because an empty list is what a parse that stopped
+  finding the file returns.
+
+  **Nothing held the vocabulary to the tree.** A denylist fails by being
+  narrower than the prose it reads, and no check was measuring that gap.
+  `test_every_claim_in_the_vocabulary_is_a_sentence_this_repository_wrote`
+  now requires every entry to be observed somewhere tracked, so an entry stops
+  earning its place the moment nothing says it. Three entries were added from
+  wordings already in the tree and matched by nothing: that no release has been
+  tagged, that operational supply-chain evidence remains blocked on the first
+  `v*` tag, and that the release workflow has never been exercised.
+
+  The seventh sentence was found by reading rather than by the check, which is
+  what a denylist is worth: a test docstring in this same module said the
+  project is pre-release on purpose and that the release workflow has never
+  been exercised. The widened reader is what put that paragraph in front of
+  anyone at all.
+
+  The six sentences the check names are corrected: four comments in `schema.py` justifying a
+  schema version by the absence of any release, the package docstring in
+  `demo.py` saying no `v*` tag has ever been cut and nothing has been published,
+  the DORA row in `docs/ROADMAP.md`, the resolved-finding paragraph in
+  `docs/BACKLOG-TRIAGE.md`, the R3 row in `docs/RESEARCH-ROADMAP.md`, and the
+  function docstring above. `docs/ROADMAP-MULTIYEAR.md` listed cutting the
+  first signed tag among the maintainer actions still open and is corrected too,
+  though deliberately without a vocabulary entry: that wording is an
+  instruction, and a denylist cannot tell an instruction from an assertion, so
+  an entry for it would fire on a runbook that is correct.
+
+  `docs/audits/scorecard-2026-07.md` is now exempt from the staleness scan for
+  the reason `CHANGELOG.md` already is. It says of itself that it is a dated
+  snapshot and asks for the next posture to be committed under a new date, so
+  rewriting its "no git tag or GitHub release exists yet" row would destroy the
+  record the scan exists to protect. Both files stay in the observation
+  universe, which is where a retired wording goes on being covered.
+
+  Measured on the release itself while checking which sentences had actually
+  gone stale: `v0.9.0` is an SSH-signed annotated tag, its release carries the
+  wheel, the sdist and `sbom.cdx.json`, and `gh attestation verify` exits 0
+  against all three published assets, with a tampered copy of the wheel
+  refused.
 - **The `reconcile` alias's removal version was the version it shipped in.**
   0.9.0's changelog scheduled the deprecated console-script alias for removal
   "in 0.9.0", and 0.9.0 shipped with the alias still installed and its stderr

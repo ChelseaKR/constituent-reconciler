@@ -71,8 +71,8 @@ CUTOVER_CORRECTIONS_SCHEMA_VERSION = 2
 # manual instructions of a consent-requiring recipe now name the members a
 # person must not create. Additive: every version 1 key keeps its meaning, and
 # a reader that ignores the new object behaves as before, which is why this is
-# a minor bump rather than a break. No release has been tagged, so no published
-# artifact carries version 1.
+# a minor bump rather than a break. No release has ever shipped version 1:
+# v0.9.0, the first one cut, carries version 3.
 #
 # Version 3 adds a second artifact to this family and a key that tells the two
 # apart. ``withdraw_plan.json`` (``constituent-reconcile plan-withdraw``) lists the
@@ -96,8 +96,8 @@ PLAN_KIND_WITHDRAW = "withdraw"
 # longer apply, and the consent-withheld delta. Versioned on its own, like the
 # migration summary and the repair plan, because it is read by a data manager
 # defending one month's numbers against the last, not by the run report's
-# consumers. Version 1 from its first byte; no release has been tagged, so no
-# published artifact predates it.
+# consumers. Version 1 from its first byte, and no published artifact carries
+# an earlier one.
 RUN_DIFF_SCHEMA_VERSION = 1
 
 # The calibration_report.json written by ``constituent-reconcile sweep-thresholds``: one row
@@ -116,7 +116,7 @@ SWEEP_SCHEMA_VERSION = 1
 # and the repair plan, because it is read by an auditor rather than by the run
 # report's consumers, and because it is the counterpart to decisions.json --
 # which records who decided the pairs a person saw. Version 1 from its first
-# byte; no release has been tagged, so no published artifact predates it.
+# byte, and no published artifact carries an earlier one.
 AUTO_MERGE_SCHEMA_VERSION = 1
 
 # The explain_trace.json shape ``constituent-reconcile explain`` writes: one cluster's
@@ -125,8 +125,7 @@ AUTO_MERGE_SCHEMA_VERSION = 1
 # write time, and the provenance entry chained to the manifest. Versioned on its
 # own, like the run diff and the calibration report, because its reader is an
 # auditor holding one record rather than a consumer of the run report. Version 1
-# from its first byte; no release has been tagged, so no published artifact
-# predates it.
+# from its first byte, and no published artifact carries an earlier one.
 EXPLAIN_TRACE_SCHEMA_VERSION = 1
 
 # The connector repair-capability declaration shape (connectors/repair.py):

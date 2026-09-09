@@ -238,8 +238,8 @@ ownership rows rather than an assumption.
 
 Reviewed quarterly, computed from `gh` CLI queries rather than a dashboard,
 because four numbers a solo repo can compute in one command gain nothing from
-automation. Deployment frequency: release tags pushed (currently zero; no
-release has been tagged, see the tagging item in the audit remediation).
+automation. Deployment frequency: release tags pushed (one so far, `v0.9.0` on
+2026-09-07; read it from `git tag --list` rather than from this sentence).
 Lead time for changes: PR open-to-merge from
 `gh pr list --state merged --json createdAt,mergedAt`. Change failure rate:
 post-merge fix commits referencing a prior PR. Time to restore: not

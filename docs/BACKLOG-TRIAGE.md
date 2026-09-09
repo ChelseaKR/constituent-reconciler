@@ -259,8 +259,10 @@ one to prefer.** Every `split_records` entry now carries a `consent` object
 (`required_by_recipe`, `withhold_reason`, `blocks_creation`), and under a
 consent-requiring recipe the manual instructions state the rule and name the
 members a person must not create. `REPAIR_PLAN_SCHEMA_VERSION` is 2. The bump
-is additive and no release has been tagged, so no published artifact carries
-version 1. The paragraphs below are kept as written, because the reasoning
+is additive and, on the day this was written, the repository carried no tag, so
+no published artifact carried version 1. (Still true after `v0.9.0`, cut
+2026-09-07: it ships `REPAIR_PLAN_SCHEMA_VERSION` 3, and version 1 has never
+been released.) The paragraphs below are kept as written, because the reasoning
 about which window is actually reachable is what made the fix testable, and
 because the schema-bump caveat was the maintainer's to overrule rather than
 mine to delete. One correction to them: the window is narrower than "lapsed or
