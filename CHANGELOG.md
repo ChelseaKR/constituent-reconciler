@@ -33,12 +33,18 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   narrower than the prose it reads, and no check was measuring that gap.
   `test_every_claim_in_the_vocabulary_is_a_sentence_this_repository_wrote`
   now requires every entry to be observed somewhere tracked, so an entry stops
-  earning its place the moment nothing says it. Two entries were added from
+  earning its place the moment nothing says it. Three entries were added from
   wordings already in the tree and matched by nothing: that no release has been
-  tagged, and that operational supply-chain evidence remains blocked on the
-  first `v*` tag.
+  tagged, that operational supply-chain evidence remains blocked on the first
+  `v*` tag, and that the release workflow has never been exercised.
 
-  The six sentences are corrected: four comments in `schema.py` justifying a
+  The seventh sentence was found by reading rather than by the check, which is
+  what a denylist is worth: a test docstring in this same module said the
+  project is pre-release on purpose and that the release workflow has never
+  been exercised. The widened reader is what put that paragraph in front of
+  anyone at all.
+
+  The six sentences the check names are corrected: four comments in `schema.py` justifying a
   schema version by the absence of any release, the package docstring in
   `demo.py` saying no `v*` tag has ever been cut and nothing has been published,
   the DORA row in `docs/ROADMAP.md`, the resolved-finding paragraph in

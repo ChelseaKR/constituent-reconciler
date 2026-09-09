@@ -137,11 +137,11 @@ def _require_readable_tags() -> list[str]:
 def test_the_declared_version_is_held_to_the_tags_that_exist() -> None:
     """No tag is a legitimate state. Not saying so is not.
 
-    Nothing here demands a tag: this project is pre-release on purpose and the
-    release workflow has never been exercised. What it demands is that the
-    repository state which of the two situations it is in — no tag at all, or a
-    declared version that ran ahead of the newest one — where a reader looking
-    for something to install will see it.
+    Nothing here demands a tag: a project is entitled to be pre-release, and
+    this one was until `v0.9.0`. What it demands is that the repository state
+    which of the two situations it is in, no tag at all or a declared version
+    that ran ahead of the newest one, where a reader looking for something to
+    install will see it.
     """
     tags = _require_readable_tags()
     declared = _manifest_version()
@@ -298,6 +298,7 @@ CLAIMS_OF_NO_RELEASE: tuple[str, ...] = (
     "there is no GitHub Release",
     "no release has been tagged",
     "blocked on the first v* tag",
+    "release workflow has never been exercised",
 )
 
 #: Suffixes worth reading. A binary, a lockfile or a fixture does not carry a
