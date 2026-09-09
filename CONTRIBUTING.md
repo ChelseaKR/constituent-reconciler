@@ -54,3 +54,12 @@ pre-commit install
 
 See [SECURITY.md](SECURITY.md). Please do not open a public issue for a
 vulnerability or a data-exposure concern.
+
+## Commercial solicitation
+
+Issues here are not open to bids. They are design records — written so a decision is
+reconstructable later — not scope documents for outside quoting, and unsolicited offers to
+implement one for a fee will be declined.
+
+Contributions through the normal fork-and-PR process are welcome, and `good first issue` is the
+place to start.
