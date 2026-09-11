@@ -15,12 +15,14 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 import pytest
 from tools.benchmark import febrl_multi
 from tools.benchmark.febrl4 import UPSTREAM_COMMIT
 
+from constituent_reconciler.controls import ControlOutcome, ControlsReport
 from constituent_reconciler.decisions import band_pairs
 from constituent_reconciler.evaluate import evaluate
 from constituent_reconciler.models import Band
@@ -173,7 +175,7 @@ def test_run_scores_the_sample_and_reports_flow_through(
     raw_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _repin(monkeypatch, raw_dir)
-    markdown, report, _gate_pass = febrl_multi.run(
+    markdown, report, _gate_pass, _controls = febrl_multi.run(
         1, tmp_path / "out", gate=1.0, offline=True, raw_dir=raw_dir
     )
     assert report.n_records == 7
@@ -227,3 +229,115 @@ def test_threshold_sweep_reorders_bands_without_rescoring() -> None:
         band_pairs(scored, auto_threshold=0.90, review_threshold=0.20), truth, n_records=6
     )
     assert by_threshold[0.90] == direct
+
+
+def test_controls_are_off_by_default_and_render_when_asked(
+    raw_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--controls` is what puts a control run behind the published numbers.
+
+    Before this, `docs/BENCHMARK.md` said in terms that the FEBRL runners did
+    not pass the controls through, so the external benchmark numbers -- the
+    ones this project points at when it claims measured accuracy -- had no
+    committed control run behind them while the synthetic fixture eval did.
+    """
+
+    _repin(monkeypatch, raw_dir)
+    plain, _report, _gate, controls_passed = febrl_multi.run(
+        1, tmp_path / "plain", gate=1.0, offline=True, raw_dir=raw_dir
+    )
+    assert "## Controls" not in plain
+    assert controls_passed is True, "a run that did not ask for controls has not failed them"
+
+    withc, _report2, _gate2, _passed2 = febrl_multi.run(
+        1, tmp_path / "withc", gate=1.0, offline=True, raw_dir=raw_dir, controls=True
+    )
+    assert "## Controls" in withc
+    assert "shuffled-labels" in withc
+    assert "Controls gate:" in withc
+    # Never blended into the headline.
+    headline, _, _controls_section = withc.partition("## Controls")
+    assert "shuffled-labels" not in headline
+
+
+def test_a_failing_control_does_not_report_itself_as_a_false_merge_failure(
+    raw_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The two verdicts are separate, and neither is reported under the other's name.
+
+    Measured on FEBRL dataset2, where the `identity` control genuinely fails
+    while the false-merge rate is 0.00% (0/1155): a single return value would
+    have printed "false-merge rate 0.00%, gate FAIL", which is a false
+    statement about the gate that actually held.
+    """
+
+    _repin(monkeypatch, raw_dir)
+
+    def _failing(*args: object, **kwargs: object) -> ControlsReport:
+        return ControlsReport(
+            seed=1,
+            outcomes=(
+                ControlOutcome(
+                    name="identity",
+                    rules_out="planted",
+                    expectation="planted",
+                    observed="planted",
+                    passed=False,
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(febrl_multi, "run_controls", _failing)
+    _markdown, report, gate_pass, controls_passed = febrl_multi.run(
+        1, tmp_path / "out", gate=1.0, offline=True, raw_dir=raw_dir, controls=True
+    )
+
+    assert report.false_merge_rate in (None, 0.0)
+    assert gate_pass is True, "the false-merge gate held and must still say so"
+    assert controls_passed is False
+
+
+def test_the_runner_exits_nonzero_when_a_control_fails(
+    raw_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A headline nothing has shown could be otherwise is not publishable.
+
+    Driven through the real ``main`` rather than a stubbed ``run``, so the exit
+    code comes from the same path the Makefile uses.
+    """
+
+    _repin(monkeypatch, raw_dir)
+
+    def _failing(*args: object, **kwargs: object) -> ControlsReport:
+        return ControlsReport(
+            seed=1,
+            outcomes=(
+                ControlOutcome(
+                    name="identity",
+                    rules_out="planted",
+                    expectation="planted",
+                    observed="planted",
+                    passed=False,
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(febrl_multi, "run_controls", _failing)
+    # `main` has no --raw-dir; it always reads <out-dir>/raw, so the pinned
+    # fixture corpus is placed where the real command would find it.
+    out_dir = tmp_path / "out"
+    shutil.copytree(raw_dir, out_dir / "raw")
+    argv = [
+        "--dataset",
+        "1",
+        "--out-dir",
+        str(out_dir),
+        "--report-out",
+        str(tmp_path / "r.md"),
+        "--gate",
+        "1.0",
+        "--offline",
+    ]
+    assert febrl_multi.main(argv) == 0, "without --controls the run is unaffected"
+    assert febrl_multi.main([*argv, "--controls"]) == 1
+    assert "Controls gate: **FAIL**" in (tmp_path / "r.md").read_text(encoding="utf-8")

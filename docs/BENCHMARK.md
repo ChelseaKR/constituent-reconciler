@@ -445,10 +445,32 @@ Stated so a partial control is not read as a whole one:
   because it runs the real matcher over twice the sample. The report states the
   sample size next to the population it was drawn from, so a control that
   covered 250 of 50,000 never reads as one that covered all of them.
-* The controls are wired into `constituent-reconcile eval` and
-  `constituent-reconcile eval-extraction`. The FEBRL runners in
-  `tools/benchmark/` do not yet pass them through, so the numbers at the top of
-  this page have no committed control run behind them.
+* The controls are wired into `constituent-reconcile eval`,
+  `constituent-reconcile eval-extraction`, and both FEBRL runners in
+  `tools/benchmark/` (`--controls`). Every committed `eval/febrl*-report.md`
+  now carries a **Controls** section, so the numbers at the top of this page
+  have a committed control run behind them. The runners report the false-merge
+  gate and the controls verdict **separately**: folding a failed control into
+  the gate's verdict would print "false-merge rate 0.00%, gate FAIL" and name
+  the wrong thing.
+* **The `identity` control fails on FEBRL dataset2, and the failure is real.**
+  One of the 250 sampled records, `existing:rec-3688-org`, has both name fields
+  empty and carries only a date of birth and a street address. Given a
+  byte-identical twin, the pair scores **0.9604** — below the 0.97 auto
+  threshold — so it lands in review and the control's "every exact twin
+  auto-merges" expectation does not hold. Two records agreeing on every field
+  they populate, including an exact DOB and a full street address, are not
+  auto-merged because the two fields they *both* leave empty carry the model's
+  heaviest weights. Whether that is correct conservatism or a tuning defect is
+  an open question and is deliberately not settled here.
+* **That failure is also seed-dependent, which is a limit of the control
+  itself.** The identity control samples 250 records. Dataset2 contains exactly
+  **1** record with no name at all (of 5,000); dataset3 contains **6**;
+  dataset1 contains none. So dataset2 fails because its seeded sample happened
+  to draw its single nameless record, and dataset3 passes because its sample
+  happened to miss all six. A control whose colour depends on the draw is
+  measuring the sample as much as the matcher. The sample size and seed are
+  printed in every report's scope line so this is visible rather than implied.
 * `shuffled-extraction-labels` holds the **predictions** fixed and swaps whole
   label sets between documents. It rules out truth that is not read at all; it
   does not rule out truth that is read and mis-normalized *within* a document,
