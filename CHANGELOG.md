@@ -6,7 +6,53 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 ## [Unreleased]
 
+### Added
+- **Photographed and scanned intake forms are read as documents (#143).**
+  Under `[extract] backend = "pdfplumber+ocr"`, a folder source now reads
+  `.jpg`, `.jpeg`, `.png`, `.tif` and `.tiff` files through the local
+  Tesseract path an image-only PDF page already used (`extract/image.py`).
+  Each image is one page and each frame of a multi-page TIFF one more; each
+  field's span names the image, the page, and a box in the image's pixels as a
+  viewer shows it, and reaches the review queue CSV and the review page
+  unchanged. A page photographed sideways or upside down is turned upright, by
+  its EXIF orientation tag and then by Tesseract's orientation detection,
+  whose turn is kept only when the page reads better for it. Refused with a
+  named reason and listed as unreadable, never counted as a page: undecodable
+  or truncated data, more than 50 frames, a frame over 50,000,000 pixels
+  (judged from its header before decoding), and pixels deeper than eight bits,
+  which Pillow would clip to white. `eval/extraction-report.md` scores the
+  image fixtures as a row of their own, 24 of 24 predicted fields correct and
+  24 of 25 labeled fields found, the miss being the planted worded date. Not
+  in this change: HEIC, merging a form photographed page by page into one
+  record, and any claim about handwriting.
+- **CI runs the real Tesseract binary.** The `verify` job installs
+  `tesseract-ocr` with its `eng` and `osd` data and sets
+  `CONSTITUENT_RECONCILER_REQUIRE_TESSERACT=1`, which turns the real-OCR
+  tests' skip into a failure there. Before this no test ran the binary
+  anywhere: every OCR test substituted its output, so the scanned-PDF path
+  had never executed against Tesseract. `make install` now installs the `ocr`
+  extra.
+
 ### Fixed
+- **A killed OCR parse left a copy of the intake page in the system
+  temporary directory.** pytesseract writes each page image to `tempfile`'s
+  directory for the Tesseract binary to read and deletes it in a `finally`,
+  which the sandbox's SIGKILL at a limit skips; the Tesseract subprocess also
+  kept running after the kill. Each parse now gets a scratch directory the
+  parent removes once the child exits or is killed, and the child leads a
+  process group the parent kills whole. `docs/DATA-FLOW-AND-RETENTION.md` said
+  inputs are "never copied", which was untrue of every OCR'd page; it now says
+  what is copied, where, and for how long.
+- **Two documents said a low-confidence OCR page goes to review; nothing
+  sends it there.** `extract/ocr.py` said such a page "routes to review", and
+  `docs/THREAT-MODEL.md` that low-confidence values "inherit" the page score.
+  The threshold has one effect, offering the page to a model seam when one is
+  enabled, and `pdfplumber+ocr` enables none; no record carries an extraction
+  confidence. Both now say so. Whether a page below the threshold should be
+  held for a person is an open decision, not something this change settles.
+- **The test of the OCR-unavailable message ran only where OCR could not.**
+  `test_run_tesseract_raises_clearly_when_pytesseract_unavailable` skipped
+  wherever pytesseract was installed. It now simulates the absence.
 - **A document the tool could not read was reported as a blank page.** When
   the sandboxed parse of an intake document failed closed (the child was
   killed at the wall-clock or CPU limit, the input was over the size cap, or

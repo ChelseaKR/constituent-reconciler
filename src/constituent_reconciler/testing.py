@@ -110,3 +110,33 @@ def make_form_image(
         draw.text((150, top), line, fill=0, font=font)
         top += int(font_px * 1.9)
     return image
+
+
+#: Set to "1" where a skip of the real-OCR tests must count as a failure (CI).
+REQUIRE_TESSERACT_ENV = "CONSTITUENT_RECONCILER_REQUIRE_TESSERACT"
+
+
+def require_real_ocr() -> None:
+    """Return if real Tesseract OCR can run here; otherwise skip, or fail under CI.
+
+    A test that exists to show what Tesseract reads cannot pass by substituting
+    its answer. Where Tesseract, its ``eng`` and ``osd`` language data, or
+    pytesseract is missing, this skips the calling test and names what is
+    missing, unless ``REQUIRE_TESSERACT_ENV`` is ``"1"``: then the same absence
+    fails it. CI sets that on the job that installs Tesseract, so a runner that
+    lost the binary cannot turn every real-OCR test into a skip and report
+    green. pytest is imported here, not at module level, so the rest of this
+    module works without it.
+    """
+    import os
+
+    import pytest
+
+    from constituent_reconciler.extract.image import ocr_unavailable_reason
+
+    reason = ocr_unavailable_reason()
+    if reason is None:
+        return
+    if os.environ.get(REQUIRE_TESSERACT_ENV) == "1":
+        pytest.fail(f"{REQUIRE_TESSERACT_ENV}=1 and real OCR cannot run: {reason}")
+    pytest.skip(f"real OCR cannot run here: {reason}")

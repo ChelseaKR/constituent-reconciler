@@ -66,7 +66,10 @@ python3.11 -m venv .venv
 
 `--no-index` guarantees pip never attempts the network; everything resolves
 from the wheelhouse. For PDF extraction, install
-`"constituent-reconciler[extract]"` instead. The wheelhouse also carries the
+`"constituent-reconciler[extract]"` instead. The wheelhouse does not carry
+the `ocr` extra, and no wheelhouse can carry the system `tesseract` binary it
+needs, so a machine installed from this bundle alone does not read scanned
+pages or photographed forms. The wheelhouse also carries the
 dev tools, used in step 5.
 
 ## 4. Load the Docker image (optional)

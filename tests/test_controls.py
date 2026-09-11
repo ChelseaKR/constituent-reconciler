@@ -513,6 +513,7 @@ def test_the_extraction_report_renders_the_controls_in_their_own_section() -> No
     assert "Controls gate: **PASS**" in controls_section
 
 
+@pytest.mark.usefixtures("real_ocr")
 def test_the_cli_renders_controls_on_the_committed_fixtures(tmp_path: Path) -> None:
     """End to end on the real fixture set, through the real extractor."""
 
@@ -538,6 +539,7 @@ def test_the_cli_renders_controls_on_the_committed_fixtures(tmp_path: Path) -> N
     assert "Controls gate: **PASS**" in content
 
 
+@pytest.mark.usefixtures("real_ocr")
 def test_the_cli_exits_nonzero_when_an_extraction_control_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

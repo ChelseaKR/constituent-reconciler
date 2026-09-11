@@ -7,7 +7,7 @@ metric and whether it passed, not a single headline number.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence
 
 from constituent_reconciler.controls import ControlsReport
 from constituent_reconciler.evaluate import (
@@ -389,6 +389,26 @@ def render_eval_markdown(
     return "\n".join(lines) + "\n"
 
 
+def extraction_targets_met(
+    parts: Iterable[ExtractionReport], *, precision_target: float, recall_target: float
+) -> bool:
+    """Whether every report in ``parts`` meets both ledger targets on its own.
+
+    ``None`` means an empty denominator: the target was never demonstrated,
+    so it is not met. The eval command passes the combined report and one per
+    document type, so a strong type cannot carry a weak one past the gate. The
+    report's verdict and the command's exit status both come from here, so the
+    two cannot disagree.
+    """
+    return all(
+        part.precision is not None
+        and part.recall is not None
+        and part.precision >= precision_target
+        and part.recall >= recall_target
+        for part in parts
+    )
+
+
 def render_extraction_markdown(
     report: ExtractionReport,
     *,
@@ -396,12 +416,16 @@ def render_extraction_markdown(
     precision_target: float = 0.95,
     recall_target: float = 0.90,
     controls: ControlsReport | None = None,
+    by_type: Mapping[str, ExtractionReport] | None = None,
 ) -> str:
-    # None means the denominator was empty, so the target was not demonstrated.
-    # Fail closed: an unmeasured extractor has not met a ledger target.
-    precision_ok = report.precision is not None and report.precision >= precision_target
-    recall_ok = report.recall is not None and report.recall >= recall_target
-    verdict = "MET" if precision_ok and recall_ok else "NOT MET"
+    types = dict(by_type or {})
+
+    def meets(*parts: ExtractionReport) -> bool:
+        return extraction_targets_met(
+            parts, precision_target=precision_target, recall_target=recall_target
+        )
+
+    verdict = "MET" if meets(report, *types.values()) else "NOT MET"
 
     lines = [
         "# Extraction eval report",
@@ -414,7 +438,9 @@ def render_extraction_markdown(
         "",
         "## What is measured",
         "",
-        "Field-level precision and recall of the offline PDF extractor. A "
+        "Field-level precision and recall of the offline extractors: the PDF "
+        "text-layer reader over the fixture PDFs and, where the set holds page "
+        "images, the Tesseract OCR reader over those. A "
         "predicted field is correct when its field name and normalized value "
         "match a labeled field in the same document, using the same "
         "normalizers the matching pipeline applies, so formatting differences "
@@ -436,6 +462,27 @@ def render_extraction_markdown(
         f"| Recall | {_pct(report.recall)} "
         f"({report.tp}/{report.tp + report.fn}) | {_ci(report.recall_ci)} |",
         "",
+    ]
+    if types:
+        lines += [
+            "## Results by document type",
+            "",
+            "Each type is scored on its own documents against the same labels, and "
+            "each must meet the targets on its own. The image rows are read by the "
+            "real Tesseract binary; the command refuses to write this report where "
+            "it cannot run, rather than write it without them.",
+            "",
+            "| Document type | Documents | Labeled | Predicted | Precision | Recall |",
+            "|---------------|-----------|---------|-----------|-----------|--------|",
+        ]
+        for kind, part in types.items():
+            lines.append(
+                f"| {kind} | {part.n_docs} | {part.n_truth_fields} | {part.n_predicted_fields} "
+                f"| {_pct(part.precision)} ({part.tp}/{part.tp + part.fp}) "
+                f"| {_pct(part.recall)} ({part.tp}/{part.tp + part.fn}) |"
+            )
+        lines.append("")
+    lines += [
         "## Per-field breakdown",
         "",
         "| Field | TP | FP | FN | Precision | Recall |",
@@ -454,6 +501,11 @@ def render_extraction_markdown(
         f"at least {_pct(recall_target)}. Observed: precision "
         f"{_pct(report.precision)}, recall {_pct(report.recall)}. **{verdict}**.",
     ]
+    for kind, part in types.items():
+        lines.append(
+            f"- {kind}: precision {_pct(part.precision)}, recall {_pct(part.recall)}, "
+            f"{'met' if meets(part) else 'NOT MET'}."
+        )
     if report.fn > 0:
         lines += [
             "",

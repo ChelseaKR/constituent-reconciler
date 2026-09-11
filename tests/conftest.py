@@ -17,34 +17,21 @@ every test observes requests the same way.
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
 
-from constituent_reconciler.testing import make_pdf
+from constituent_reconciler.testing import make_pdf, require_real_ocr
 
 
 @pytest.fixture()
 def real_ocr() -> None:
-    """Skip unless real Tesseract OCR can run here; fail instead where CI demands it.
+    """Real Tesseract OCR, or a skip naming what is missing (a failure in CI).
 
-    A test that exists to show what Tesseract reads cannot pass by substituting
-    its answer, so it takes this fixture instead. Where Tesseract, its ``eng``
-    and ``osd`` language data, or pytesseract is missing it skips, naming what
-    is missing, unless ``CONSTITUENT_RECONCILER_REQUIRE_TESSERACT=1``: then the
-    same absence is a failure. CI sets it on the job that installs Tesseract,
-    so a runner that lost the binary cannot turn every real-OCR test into a
-    skip and report green.
+    For a test that exists to show what Tesseract reads; see
+    ``testing.require_real_ocr``.
     """
-    from constituent_reconciler.extract.image import ocr_unavailable_reason
-
-    reason = ocr_unavailable_reason()
-    if reason is None:
-        return
-    if os.environ.get("CONSTITUENT_RECONCILER_REQUIRE_TESSERACT") == "1":
-        pytest.fail(f"CONSTITUENT_RECONCILER_REQUIRE_TESSERACT=1 and real OCR cannot run: {reason}")
-    pytest.skip(f"real OCR cannot run here: {reason}")
+    require_real_ocr()
 
 
 class FakeAirtableTransport:

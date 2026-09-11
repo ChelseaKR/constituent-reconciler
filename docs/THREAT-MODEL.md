@@ -37,7 +37,7 @@ low-confidence case the heuristics below are built for.
 The boundaries that matter:
 
 1. **The file boundary.** Every byte of an operator-supplied CSV, workbook,
-   PDF, or scan is untrusted. Intake documents arrive from the public: a
+   PDF, scan, or photo is untrusted. Intake documents arrive from the public: a
    constituent, a partner agency, an email inbox. The operator who runs the
    tool is trusted; the files they feed it are not.
 
@@ -53,6 +53,12 @@ The boundaries that matter:
    malformed workbook that exhausts memory takes the run with it rather than
    failing closed to review. That is a known gap, recorded here rather than
    implied away.
+
+   A page image widens it as well: a `.jpg`, `.png` or `.tif` is decoded by
+   Pillow's bundled codecs, C code over hostile bytes. That decoding runs in
+   the same sandboxed child as a PDF parse (`extract/image.py`), and a frame's
+   declared size is checked against a 50,000,000-pixel budget before anything
+   is decoded.
 
 2. **The process boundary at the parser.** Since 2026-07-17 the pipeline
    parses each PDF in a spawned child process by default
@@ -120,10 +126,15 @@ The boundaries that matter:
   (`test_dv_pack_refuses_a_non_local_write_target`).
 - **Confidence heuristics on every page (T3).** `_page_confidence()` in
   `extract/pdf.py` scores near-empty pages and garbled-OCR pages (average word
-  length above 15 characters) below 0.5. Low-confidence values inherit that
-  score, and the pipeline never auto-merges on uncertainty: ambiguous pairs are
-  banded to the human review queue, where the reviewer sees the source span
-  beside the candidate. A page that yields neither a first nor a last name
+  length above 15 characters) below 0.5. That score has one effect: a page
+  below the recipe's threshold is offered to a model seam when one is enabled.
+  It does not travel with the values it produced (no record carries an
+  extraction confidence, and until 2026-09-11 this line said they "inherit"
+  it), so under a backend with no seam, such as `pdfplumber+ocr`, a
+  low-confidence page's fields reach the matcher like any other's. What stands
+  between them and a false merge is the matcher's banding: ambiguous pairs go
+  to the human review queue, where the reviewer sees the source span beside
+  the candidate. A page that yields neither a first nor a last name
   produces no record at all.
 - **Consent enforced before the connector (T3, T4).** Records without granted
   consent under a consent-required policy are withheld before any connector is
@@ -156,13 +167,38 @@ The boundaries that matter:
   address space where the platform enforces it), a parent-side wall-clock
   timeout, and an input-size cap refused before any parse. Every failure leg
   fails closed to a zero-confidence page whose note names the reason without
-  embedding page content, so the document lands in human review.
+  embedding page content, and the pipeline lists the document, with that
+  reason, as unreadable in the ingest report. (Until 2026-09-11 this said the
+  document "lands in human review"; nothing sent it there, and the pipeline
+  counted it as a blank page.)
   `tests/test_sandbox.py` exercises the happy path and each fail-closed leg;
   `tests/test_extract.py` proves the pipeline default contains a corrupt PDF
   that crashes an in-process parse. Two honest limits: the child keeps the
   pipeline's privileges (containment, not a syscall sandbox), and when a
   cloud or local seam is enabled for a low-confidence page, the page render
   for the seam still happens in the parent process.
+
+### Present (added 2026-09-11)
+
+- **Page images inside the sandbox, with a pixel budget (T1, T2).**
+  Photographed and scanned page images (`extract/image.py`) are decoded in
+  the same child as a PDF parse. A frame over 50,000,000 pixels is refused
+  from its header before any pixel is decoded; Pillow's own decompression-bomb
+  refusal, which starts far higher, is reported the same way; a file of more
+  than 50 frames is refused unread; and pixels deeper than eight bits are
+  refused rather than clipped to a blank page. Each refusal lands in the
+  ingest report as an unreadable document with its reason.
+  `tests/test_image_extract.py` covers each one and asserts OCR was never
+  reached.
+- **No page image left behind by a killed parse (T2, T4).** OCR hands the
+  Tesseract binary a temporary copy of each page image (pytesseract's `save`)
+  and deletes it in a `finally` that a SIGKILL skips. The child now writes its
+  temporary files into a scratch directory the parent creates for that one
+  parse and removes after the child exits or is killed, and the child leads
+  its own process group, so the parent's kill also reaches the Tesseract
+  subprocess. `tests/test_sandbox.py` covers both. The limit: a parent that is
+  itself killed leaves its scratch directory, named
+  `constituent-reconciler-extract-*` under the system temporary directory.
 
 ### Added 2026-08-03: the repair-plan surface (UC-03, ADR 0012)
 

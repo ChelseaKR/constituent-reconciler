@@ -503,3 +503,106 @@ def test_an_image_read_in_the_sandbox_matches_the_in_process_read(tmp_path: Path
     assert sandboxed.note is None
     assert _fields(sandboxed) == _ALICE_FIELDS == _fields(extract_image(tmp_path / "sideways.png"))
     assert list(scratch.iterdir()) == []
+
+
+_REVIEW_RECIPE = """[input]
+existing = "existing.csv"
+incoming = "intake"
+id_column = "id"
+
+[mapping]
+first_name = "first"
+last_name  = "last"
+dob        = "dob"
+email      = "email"
+phone      = "phone"
+
+[extract]
+backend = "pdfplumber+ocr"
+
+[consent]
+column = "consent"
+
+[thresholds]
+prior  = 0.01
+auto   = 0.97
+review = 0.80
+"""
+
+
+@pytest.mark.usefixtures("real_ocr")
+def test_a_photographed_intake_form_reaches_the_review_queue_with_its_spans(
+    tmp_path: Path,
+) -> None:
+    """#143's first criterion, end to end through the sandboxed pipeline.
+
+    The photographed form and the CRM's record are the same person with the
+    day and month of birth transposed: close enough to pair, not close enough
+    to merge unseen (measured at 0.857 against a 0.80-0.97 review band). Both
+    places a reviewer reads a span are checked, the queue CSV and the page.
+    """
+    from constituent_reconciler.config import load_recipe
+    from constituent_reconciler.review.render import render_pair
+    from constituent_reconciler.review.session import ReviewSession
+
+    intake = tmp_path / "intake"
+    intake.mkdir()
+    make_form_image(_ALICE, background=236).convert("RGB").save(intake / "photo.jpg", quality=85)
+    (tmp_path / "existing.csv").write_text(
+        "id,first,last,dob,email,phone,consent\nE001,Alice,Walker,1970-05-21,,,granted\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "recipe.toml").write_text(_REVIEW_RECIPE, encoding="utf-8")
+    recipe = load_recipe(tmp_path / "recipe.toml")
+
+    result = pipeline.run(recipe)
+    assert [pair.band.name for pair in result.pairs] == ["REVIEW"]
+
+    queue = pipeline._write_review_queue(result, recipe, tmp_path).read_text(encoding="utf-8")
+    assert "photo.jpg:p1:x=" in queue
+
+    session = ReviewSession(result, recipe.fields, tmp_path / "decisions.json", reviewer="casey")
+    view = session.view(0)
+    assert view is not None
+    page = render_pair(session, view, apply_command="constituent-reconcile apply")
+    assert "source: photo.jpg:p1:x=" in page
+
+
+# ---------------------------------------------------------------------------
+# The gate that decides whether the real-OCR tests may skip
+# ---------------------------------------------------------------------------
+
+
+def test_the_real_ocr_gate_skips_outside_ci_and_fails_inside_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from constituent_reconciler import testing
+
+    monkeypatch.setattr(image_module, "ocr_unavailable_reason", lambda: "no tesseract here")
+    monkeypatch.delenv(testing.REQUIRE_TESSERACT_ENV, raising=False)
+    with pytest.raises(pytest.skip.Exception, match="no tesseract here"):
+        testing.require_real_ocr()
+    monkeypatch.setenv(testing.REQUIRE_TESSERACT_ENV, "1")
+    with pytest.raises(pytest.fail.Exception, match="no tesseract here"):
+        testing.require_real_ocr()
+    monkeypatch.setattr(image_module, "ocr_unavailable_reason", lambda: None)
+    testing.require_real_ocr()
+
+
+def test_ocr_unavailable_names_missing_language_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytesseract = pytest.importorskip("pytesseract")
+    monkeypatch.setattr(pytesseract, "get_languages", lambda config="": ["eng", "snum"])
+    assert image_module.ocr_unavailable_reason() == "tesseract has no osd language data"
+
+
+def test_ocr_unavailable_names_a_binary_that_does_not_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytesseract = pytest.importorskip("pytesseract")
+
+    def absent(config: str = "") -> list[str]:
+        raise pytesseract.TesseractNotFoundError()
+
+    monkeypatch.setattr(pytesseract, "get_languages", absent)
+    reason = image_module.ocr_unavailable_reason()
+    assert reason is not None and reason.startswith("the tesseract binary did not answer")

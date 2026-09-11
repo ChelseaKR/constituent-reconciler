@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     # the assistant package or its provider/rate-limit types at runtime.
     from constituent_reconciler.assistant.provider import Provider
     from constituent_reconciler.assistant.rate_limit import RateLimiter
+    from constituent_reconciler.extract.base import ExtractedField
 from constituent_reconciler.config import Recipe, RecipeError, load_recipe
 from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.consent import partition_by_consent
@@ -78,6 +79,7 @@ from constituent_reconciler.progress import ConsoleProgressRenderer
 from constituent_reconciler.provenance import ProvenanceLog, verify_log
 from constituent_reconciler.quality import SourceQuality
 from constituent_reconciler.report import (
+    extraction_targets_met,
     render_eval_markdown,
     render_extraction_markdown,
     render_run_summary,
@@ -370,10 +372,73 @@ def _cmd_eval(args: argparse.Namespace) -> int:
     return 0 if gates_pass else 1
 
 
-def _cmd_eval_extraction(args: argparse.Namespace) -> int:
-    from constituent_reconciler.extract.base import ExtractedField
+#: Document types in the extraction report, in the order its rows are printed.
+_PDF_DOCUMENTS = "PDF text layer"
+_IMAGE_DOCUMENTS = "Image OCR"
+
+
+def _extraction_fixture_documents(fixtures: Path) -> dict[str, list[Path]]:
+    """The fixture documents by type: PDFs, and page images, each sorted."""
+    from constituent_reconciler.extract.base import IMAGE_SUFFIXES
+
+    documents: dict[str, list[Path]] = {_PDF_DOCUMENTS: [], _IMAGE_DOCUMENTS: []}
+    for path in sorted(fixtures.iterdir()):
+        suffix = path.suffix.lower()
+        if suffix == ".pdf":
+            documents[_PDF_DOCUMENTS].append(path)
+        elif suffix in IMAGE_SUFFIXES:
+            documents[_IMAGE_DOCUMENTS].append(path)
+    return {kind: paths for kind, paths in documents.items() if paths}
+
+
+def _ocr_refusal(images: list[Path]) -> str | None:
+    """Why the image fixtures cannot be scored here, or ``None`` when they can.
+
+    Writing the report without the image rows would publish a smaller fixture
+    set under the same headline, which reads as a measurement of the whole set.
+    """
+    if not images:
+        return None
+    from constituent_reconciler.extract.image import ocr_unavailable_reason
+
+    unavailable = ocr_unavailable_reason()
+    if unavailable is None:
+        return None
+    return (
+        f"eval-extraction: {len(images)} image fixture(s) are read by real OCR, "
+        f"which cannot run here: {unavailable}. No report was written."
+    )
+
+
+def _read_extraction_fixtures(
+    by_type: dict[str, list[Path]],
+) -> tuple[dict[str, list[ExtractedField]], list[str]]:
+    """Each fixture document's predicted fields, and the documents its reader refused.
+
+    A fixture its reader refused is a broken fixture or a broken installation,
+    not a document with nothing on it; scored, it would turn into false
+    negatives with no reason attached, so the caller writes no report.
+    """
+    from constituent_reconciler.extract.base import Extractor
+    from constituent_reconciler.extract.image import ImageOcrExtractor
     from constituent_reconciler.extract.pdf import PdfplumberExtractor
 
+    extractors: dict[str, Extractor] = {
+        _PDF_DOCUMENTS: PdfplumberExtractor(),
+        _IMAGE_DOCUMENTS: ImageOcrExtractor(),
+    }
+    predicted: dict[str, list[ExtractedField]] = {}
+    unread: list[str] = []
+    for kind, paths in by_type.items():
+        for path in paths:
+            result = extractors[kind].extract(path)
+            if result.note is not None:
+                unread.append(f"{path.name}: {result.note}")
+            predicted[path.name] = [field for page in result.pages for field in page.fields]
+    return predicted, unread
+
+
+def _cmd_eval_extraction(args: argparse.Namespace) -> int:
     fixtures = Path(args.fixtures)
     labels_path = fixtures / "labels.json"
     if not labels_path.is_file():
@@ -381,22 +446,32 @@ def _cmd_eval_extraction(args: argparse.Namespace) -> int:
         return 2
     labels = json.loads(labels_path.read_text(encoding="utf-8"))
 
-    pdf_paths = sorted(fixtures.glob("*.pdf"))
-    if not pdf_paths:
-        print(f"no fixture PDFs found in: {fixtures}", file=sys.stderr)
+    by_type = _extraction_fixture_documents(fixtures)
+    if not by_type:
+        print(f"no fixture documents (PDFs or page images) found in: {fixtures}", file=sys.stderr)
         return 2
-
-    extractor = PdfplumberExtractor()
-    predicted: dict[str, list[ExtractedField]] = {}
+    refusal = _ocr_refusal(by_type.get(_IMAGE_DOCUMENTS, []))
+    if refusal is not None:
+        print(refusal, file=sys.stderr)
+        return 2
     try:
-        for pdf_path in pdf_paths:
-            result = extractor.extract(pdf_path)
-            predicted[pdf_path.name] = [field for page in result.pages for field in page.fields]
+        predicted, unread = _read_extraction_fixtures(by_type)
     except ImportError as error:
         print(f"extraction error: {error}", file=sys.stderr)
         return 2
+    for line in unread:
+        print(f"eval-extraction: fixture could not be read: {line}", file=sys.stderr)
+    if unread:
+        return 2
 
     report = extraction_metrics(predicted, labels)
+    type_reports = {
+        kind: extraction_metrics(
+            {path.name: predicted[path.name] for path in paths},
+            {path.name: labels[path.name] for path in paths if path.name in labels},
+        )
+        for kind, paths in by_type.items()
+    }
     controls_report = None
     if args.controls:
         controls_report = run_extraction_controls(predicted, labels, seed=args.seed)
@@ -406,18 +481,17 @@ def _cmd_eval_extraction(args: argparse.Namespace) -> int:
         precision_target=args.precision_target,
         recall_target=args.recall_target,
         controls=controls_report,
+        by_type=type_reports,
     )
     if args.out:
         Path(args.out).write_text(markdown, encoding="utf-8")
         print(f"wrote extraction eval report: {args.out}")
     else:
         print(markdown)
-    # None means an empty denominator, so the target was never demonstrated.
-    met = (
-        report.precision is not None
-        and report.recall is not None
-        and report.precision >= args.precision_target
-        and report.recall >= args.recall_target
+    met = extraction_targets_met(
+        (report, *type_reports.values()),
+        precision_target=args.precision_target,
+        recall_target=args.recall_target,
     )
     # A failed control means the numbers above cannot be trusted, so it is
     # merge-blocking in its own right rather than a note beside a passing run.
@@ -2029,12 +2103,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     exeval_parser = sub.add_parser(
         "eval-extraction",
-        help="score the PDF extractor against a labeled fixture set",
+        help="score the PDF extractor and the image OCR reader against a labeled fixture set",
     )
     exeval_parser.add_argument(
         "--fixtures",
         required=True,
-        help="directory containing the fixture PDFs and labels.json",
+        help="directory containing the fixture PDFs, page images and labels.json",
     )
     exeval_parser.add_argument("--out", help="write the report here instead of stdout")
     exeval_parser.add_argument(

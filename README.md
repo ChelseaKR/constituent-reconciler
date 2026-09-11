@@ -86,10 +86,12 @@ with a review queue a volunteer can run, is what this project builds.
 
 The pipeline runs as a sequence of logged, deterministic-by-default steps:
 
-1. **Ingest** a folder of CSVs and PDFs, digitally created or scanned.
-   Image-only scanned pages run through a local Tesseract OCR backend
-   (`[extract] backend = "pdfplumber+ocr"`, the optional `ocr` extra) so a
-   paper intake form yields fields instead of an empty page. Plain-text and
+1. **Ingest** a folder of CSVs, PDFs (digitally created or scanned), and phone
+   photos or scans of paper forms (`.jpg`, `.jpeg`, `.png`, `.tif`, `.tiff`).
+   Image-only scanned pages and page images run through a local Tesseract OCR
+   backend (`[extract] backend = "pdfplumber+ocr"`, the optional `ocr` extra
+   and a system `tesseract`) so a paper intake form yields fields instead of
+   an empty page. Plain-text and
    `.eml` intake bodies use the offline text extractor with line/column spans.
 2. **Extract** field and value pairs with a source-span pointer and a
    confidence score. Extraction runs offline by default; an optional Bedrock
@@ -185,6 +187,14 @@ For PDF extraction, install the optional extract extra:
 
 ```sh
 pip install -e ".[extract]"
+```
+
+To read scanned pages and photographed forms, add the OCR extra and the
+Tesseract binary with its English and orientation data:
+
+```sh
+pip install -e ".[extract,ocr]"
+brew install tesseract          # or: apt-get install tesseract-ocr
 ```
 
 (Not yet published to PyPI — `pip install` above is a local editable install, not
@@ -461,6 +471,30 @@ It contributes no records, and it is not counted as a blank page. This is contai
 same privileges; see `docs/THREAT-MODEL.md`). Set `sandbox = false` under
 `[extract]` to parse in-process, accepting that exposure; the caps live in
 `src/constituent_reconciler/extract/sandbox.py`.
+
+### Reading photographed and scanned forms
+
+With `backend = "pdfplumber+ocr"`, a folder source also reads page images:
+`.jpg`, `.jpeg`, `.png`, `.tif` and `.tiff`. Each image is one page, and each
+frame of a multi-page TIFF (a faxed intake, say) is one more. They go through
+the same Tesseract path, field patterns and confidence rule as an image-only
+PDF page, inside the same sandbox, and each field's span names the image, the
+page, and a box in the image's pixels as a photo viewer shows it. A page
+photographed sideways or upside down is turned upright: by the photo's EXIF
+orientation tag first, then by Tesseract's orientation detection, whose turn
+is kept only when the page reads better for it. Under any other backend an
+image is skipped with that reason. As with a PDF, each page that carries a
+name becomes its own record; a paper form photographed page by page is not
+merged into one.
+
+An image the tool cannot read is listed in the ingest report as unreadable,
+with its reason, and the run continues: bytes no decoder recognizes, data that
+ends early, more than 50 pages in one file, a page over 50,000,000 pixels
+(refused from its header before anything is decoded, the defence against a
+decompression bomb), or pixels deeper than eight bits. HEIC, the iPhone
+default, is not read; export such photos as JPEG. The fixtures and tests are
+printed forms, so nothing here measures handwriting and no claim is made
+about it.
 
 Pages with fewer than five words, or where the average word length looks garbled
 (over 15 characters), score below 0.5 and are flagged as low-confidence. They

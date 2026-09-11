@@ -289,7 +289,13 @@ _FIXTURES = Path(__file__).resolve().parents[1] / "eval" / "fixtures" / "extract
 def _score_committed_fixtures() -> tuple[int, ExtractionReport]:
     from constituent_reconciler.extract.pdf import PdfplumberExtractor
 
-    labels = json.loads((_FIXTURES / "labels.json").read_text(encoding="utf-8"))
+    labels = {
+        name: fields
+        for name, fields in json.loads(
+            (_FIXTURES / "labels.json").read_text(encoding="utf-8")
+        ).items()
+        if name.endswith(".pdf")
+    }
     extractor = PdfplumberExtractor()
     predicted: dict[str, list[ExtractedField]] = {}
     pdf_paths = sorted(_FIXTURES.glob("*.pdf"))
@@ -316,6 +322,7 @@ def test_committed_fixture_meets_ledger_targets() -> None:
     assert report.fn >= 1
 
 
+@pytest.mark.usefixtures("real_ocr")
 def test_eval_extraction_cli_writes_report(tmp_path: Path) -> None:
     pytest.importorskip("pdfplumber", reason="pdfplumber not installed")
     from constituent_reconciler.cli import main
@@ -327,6 +334,66 @@ def test_eval_extraction_cli_writes_report(tmp_path: Path) -> None:
     assert "# Extraction eval report" in content
     assert "Per-field breakdown" in content
     assert "**MET**" in content
+    assert "## Results by document type" in content
+    assert "| PDF text layer | 4 |" in content
+    assert "| Image OCR | 5 |" in content
+
+
+def _fixture_document_names() -> set[str]:
+    from constituent_reconciler.extract.base import IMAGE_SUFFIXES
+
+    return {
+        path.name
+        for path in _FIXTURES.iterdir()
+        if path.suffix.lower() == ".pdf" or path.suffix.lower() in IMAGE_SUFFIXES
+    }
+
+
+def test_every_fixture_document_is_labeled_and_every_label_names_one() -> None:
+    """Both directions: an unlabeled document scores only false positives, and a
+    label naming no document scores only false negatives. Either is a fixture
+    set the report misdescribes."""
+    labels = json.loads((_FIXTURES / "labels.json").read_text(encoding="utf-8"))
+    documents = _fixture_document_names()
+    assert len(documents) >= 9, "the fixture set has shrunk; the floor is 4 PDFs and 5 images"
+    assert set(labels) == documents
+
+
+@pytest.mark.usefixtures("real_ocr")
+def test_committed_image_fixtures_meet_ledger_targets() -> None:
+    from constituent_reconciler.extract.base import IMAGE_SUFFIXES
+    from constituent_reconciler.extract.image import ImageOcrExtractor
+
+    labels = json.loads((_FIXTURES / "labels.json").read_text(encoding="utf-8"))
+    images = sorted(p for p in _FIXTURES.iterdir() if p.suffix.lower() in IMAGE_SUFFIXES)
+    extractor = ImageOcrExtractor()
+    predicted: dict[str, list[ExtractedField]] = {}
+    for path in images:
+        result = extractor.extract(path)
+        assert result.note is None, f"{path.name} was refused: {result.note}"
+        predicted[path.name] = [f for page in result.pages for f in page.fields]
+    report = extraction_metrics(predicted, {path.name: labels[path.name] for path in images})
+    assert report.n_docs == len(images) >= 5
+    assert report.precision is not None and report.precision >= 0.95
+    assert report.recall is not None and report.recall >= 0.90
+    # The worded date is photographed too, so the planted miss is in this row.
+    assert report.fn >= 1
+
+
+def test_eval_extraction_refuses_rather_than_drop_the_image_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pytest.importorskip("pdfplumber", reason="pdfplumber not installed")
+    from constituent_reconciler.cli import main
+    from constituent_reconciler.extract import image as image_module
+
+    monkeypatch.setattr(image_module, "ocr_unavailable_reason", lambda: "tesseract is absent")
+    out = tmp_path / "extraction-report.md"
+    assert main(["eval-extraction", "--fixtures", str(_FIXTURES), "--out", str(out)]) == 2
+    assert not out.exists()
+    err = capsys.readouterr().err
+    assert "5 image fixture(s)" in err
+    assert "tesseract is absent" in err
 
 
 def test_f1_is_the_harmonic_mean() -> None:
@@ -435,3 +502,57 @@ def test_format_rate_names_the_absence_instead_of_printing_a_number() -> None:
     assert format_rate(0.0) == "0.0%"
     assert format_rate(0.12345) == "12.3%"
     assert format_rate(0.12345, digits=2) == "12.35%"
+
+
+def test_a_document_type_below_target_fails_although_the_combined_numbers_pass() -> None:
+    """Nineteen perfect documents of one type and one half-read document of another.
+
+    Combined, recall is 20 of 21 (95.2%) and clears 90%; the weak type alone
+    is 1 of 2. The gate must fail on the type, in the verdict and in the rule
+    the command's exit status uses.
+    """
+    from constituent_reconciler.report import extraction_targets_met, render_extraction_markdown
+
+    strong_pred = {f"s{i}.pdf": [ExtractedField("first_name", f"Name{i}", 1.0)] for i in range(19)}
+    strong_truth = {
+        f"s{i}.pdf": [{"field_name": "first_name", "value": f"Name{i}"}] for i in range(19)
+    }
+    weak_pred = {"w.png": [ExtractedField("first_name", "Alice", 1.0)]}
+    weak_truth = {
+        "w.png": [
+            {"field_name": "first_name", "value": "Alice"},
+            {"field_name": "last_name", "value": "Walker"},
+        ]
+    }
+    strong = extraction_metrics(strong_pred, strong_truth)
+    weak = extraction_metrics(weak_pred, weak_truth)
+    combined = extraction_metrics({**strong_pred, **weak_pred}, {**strong_truth, **weak_truth})
+
+    targets = {"precision_target": 0.95, "recall_target": 0.90}
+    assert extraction_targets_met((combined,), **targets)
+    assert not extraction_targets_met((combined, strong, weak), **targets)
+    markdown = render_extraction_markdown(
+        combined, dataset="unit", by_type={"Strong": strong, "Weak": weak}
+    )
+    assert "**NOT MET**" in markdown
+    assert "- Weak: precision 100.0%, recall 50.0%, NOT MET." in markdown
+    assert "- Strong: precision 100.0%, recall 100.0%, met." in markdown
+
+
+def test_eval_extraction_refuses_a_fixture_its_reader_could_not_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A refused fixture would otherwise score as false negatives with no reason."""
+    from constituent_reconciler.cli import main
+    from constituent_reconciler.extract import image as image_module
+
+    monkeypatch.setattr(image_module, "ocr_unavailable_reason", lambda: None)
+    (tmp_path / "broken.png").write_bytes(b"not an image")
+    (tmp_path / "labels.json").write_text(
+        json.dumps({"broken.png": [{"field_name": "first_name", "value": "Alice"}]}),
+        encoding="utf-8",
+    )
+    out = tmp_path / "extraction-report.md"
+    assert main(["eval-extraction", "--fixtures", str(tmp_path), "--out", str(out)]) == 2
+    assert not out.exists()
+    assert "broken.png: could not decode image" in capsys.readouterr().err

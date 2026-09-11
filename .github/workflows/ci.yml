@@ -49,6 +49,11 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The real-OCR tests skip where Tesseract is absent. Here that absence is a
+    # failure instead (tests/conftest.py, real_ocr), so a runner that lost the
+    # binary cannot report green by skipping every one of them.
+    env:
+      CONSTITUENT_RECONCILER_REQUIRE_TESSERACT: "1"
     steps:
       # Actions are pinned to a full commit SHA per the portfolio supply-chain
       # standard; the trailing comment records the human-readable version.
@@ -69,6 +74,17 @@ jobs:
       # `make verify` does locally.
         with:
           enable-cache: true
+      # The Tesseract binary and its eng and osd data. Two things in this job
+      # read with it: the real-OCR tests, and `make eval-extraction`, whose
+      # image rows it measures. Before this step existed, the scanned-PDF OCR
+      # path had never run against the binary anywhere.
+      - name: Install Tesseract (eng, osd)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            tesseract-ocr tesseract-ocr-eng tesseract-ocr-osd
+          tesseract --version
+          tesseract --list-langs
       - name: Install
         run: make install
       - name: Verify (ruff format --check, ruff check, mypy --strict, pytest)
