@@ -442,6 +442,49 @@ and an unanswerable-question suite, all against synthetic fixtures, with
 provider/model/prompt-version/commit/date on every result — are in
 [eval/ai/report.md](eval/ai/report.md), regenerated with `make eval-ai`.
 
+### Pulling the existing side from a CRM
+
+`existing` is normally a CSV export the operator produces by hand, and a stale
+export is the most common way a returning-client batch merges against contacts
+the CRM has since changed or deleted. A recipe can pull it instead:
+
+```toml
+[input]
+existing = "connector:civicrm"   # instead of a path
+incoming = "intake/"
+
+[source]
+endpoint = "https://crm.example.org/civicrm/ajax/api4"
+auth_env = "CIVICRM_API_KEY"     # the variable holding the key, never the key
+```
+
+`[source]` is separate from `[output]` on purpose: the system a run reads from
+is often not the one it writes to, and inheriting a write target's endpoint
+would point a read at the wrong server. The pull writes everything it read to
+`out/existing_snapshot.csv`, in this recipe's own column names, and the run
+reads that file. Pointing `existing` at the snapshot replays the same run
+against the same bytes, and the run manifest records the snapshot's digest,
+the connector and the API version so a replay can say what it replayed.
+
+Three refusals are worth knowing before you rely on it:
+
+* **Consent is never inferred.** Every pulled record carries an unmapped
+  consent token, which the consent lifecycle treats as withheld. Mapping a
+  vendor's privacy flags onto a consent scope is a judgement with legal weight
+  that differs per organization, so no default ships; under a
+  consent-requiring pack, merged records stay withheld until a mapping exists.
+* **A pack that requires local targets refuses the pull**, before a request is
+  built. Reading constituent records out of a hosted CRM is an egress as
+  surely as writing them, and the `dv` pack forbids both.
+* **A pull that fails part way through writes no snapshot at all.** A short
+  one would read as a complete CRM with people missing, and each missing
+  person becomes a duplicate on the next write. `--dry-run` makes no network
+  call, so it refuses a recipe that pulls rather than running against no
+  existing side.
+
+`out/existing_snapshot.csv` holds real constituent records and is destroyed
+with them by `constituent-reconcile destroy`.
+
 ### Reading from PDFs
 
 With the `extract` extra installed, point the recipe's `incoming` at a folder

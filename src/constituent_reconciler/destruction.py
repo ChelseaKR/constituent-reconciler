@@ -79,6 +79,10 @@ from constituent_reconciler.stage_cache import CACHE_DIR_NAME, EXTRACT_STAGE, NO
 # no test has ever watched being earned.
 PII_ARTIFACTS: tuple[str, ...] = (
     "resolved.csv",
+    # What a pull of the existing side wrote (``pipeline.pull_existing``): a
+    # copy of real constituent records, taken out of the CRM and written to
+    # the out directory, so it destroys with the records it copies.
+    "existing_snapshot.csv",
     "review_queue.csv",
     "withheld.csv",
     "corrections.json",

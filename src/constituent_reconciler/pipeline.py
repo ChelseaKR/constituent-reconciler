@@ -14,7 +14,7 @@ import hashlib
 import json
 import time
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 
@@ -29,15 +29,26 @@ from constituent_reconciler import (
     suppression,
 )
 from constituent_reconciler.config import Recipe
-from constituent_reconciler.connectors import get_factory
+from constituent_reconciler.connectors import get_factory, get_source_factory
 from constituent_reconciler.connectors.airtable import Transport as AirtableTransport
-from constituent_reconciler.connectors.base import Connector, WriteResult
+from constituent_reconciler.connectors.base import (
+    SNAPSHOT_CONSENT_COLUMN,
+    SNAPSHOT_ID_COLUMN,
+    Connector,
+    SourceConnector,
+    WriteResult,
+)
 from constituent_reconciler.connectors.civicrm import Transport
 from constituent_reconciler.connectors.crm_csv import CrmCsvConnector
 from constituent_reconciler.connectors.salesforce import Transport as SalesforceTransport
 from constituent_reconciler.connectors.webhook import Transport as WebhookTransport
 from constituent_reconciler.extract.base import IMAGE_SUFFIXES, ExtractedField, ExtractionResult
-from constituent_reconciler.manifest import build_manifest, manifest_hash, write_manifest
+from constituent_reconciler.manifest import (
+    build_manifest,
+    file_digest,
+    manifest_hash,
+    write_manifest,
+)
 from constituent_reconciler.models import (
     Consent,
     Correction,
@@ -1382,6 +1393,140 @@ def build_connector(
     return connector
 
 
+def build_source_connector(
+    recipe: Recipe,
+    *,
+    transport: Transport | None = None,
+) -> SourceConnector:
+    """Construct the read-only source this recipe pulls the existing side from.
+
+    The mirror of ``build_connector``, refusing on the same rule: under a
+    policy pack that requires local targets, a pull that crosses the network is
+    refused before a byte moves. Reading a constituent file out of a hosted CRM
+    is an egress as surely as writing one, and the DV pack forbids both.
+    """
+
+    if recipe.existing_connector is None:
+        raise ValueError(
+            "this recipe reads the existing side from a file; there is no source connector "
+            'to build (set [input] existing = "connector:<name>" to pull one)'
+        )
+    transports: dict[str, object] = {}
+    if transport is not None:
+        transports["civicrm"] = transport
+    source = get_source_factory(recipe.existing_connector)(recipe.source, transports)
+
+    if recipe.require_local_targets and not source.is_local:
+        raise PolicyViolation(
+            f"policy pack {recipe.policy_pack!r} forbids pulling the existing side from the "
+            f"non-local source {source.name!r}: reading constituent records out of a hosted "
+            f"system is an egress the same as writing them. Export them to a local file and "
+            f"point [input] existing at that file."
+        )
+    return source
+
+
+#: Where a pull writes the records it read. Named here rather than in the CLI
+#: because ``destruction.PII_ARTIFACTS`` classifies it: it is a copy of real
+#: constituent records, and it is destroyed with the rest of them.
+SNAPSHOT_FILENAME = "existing_snapshot.csv"
+
+
+@dataclass(frozen=True)
+class SourceSnapshot:
+    """What one pull wrote, so a later run can say what it replayed.
+
+    Counts and digests only. No field value reaches this object, which is what
+    lets ``as_manifest_entry`` go into the run manifest unchanged.
+    """
+
+    path: Path
+    connector: str
+    api_version: str
+    rows: int
+    digest: str
+
+    def as_manifest_entry(self) -> dict[str, object]:
+        return {
+            "connector": self.connector,
+            "api_version": self.api_version,
+            "rows": self.rows,
+            "digest": self.digest,
+            "file": self.path.name,
+        }
+
+
+def _snapshot_columns(recipe: Recipe) -> tuple[list[str], list[tuple[str, str]]]:
+    """The snapshot's header, and the canonical-to-column pairs filling it.
+
+    The header is written in the recipe's own column names, not canonical
+    ones, so pointing ``[input] existing`` at the snapshot replays the same
+    run: a canonical header would need a different mapping to read back, and a
+    replay that needs an edited recipe is not a replay.
+    """
+
+    pairs = [(name, recipe.mapping[name]) for name in recipe.fields if name in recipe.mapping]
+    header = [recipe.id_column or SNAPSHOT_ID_COLUMN, *(column for _, column in pairs)]
+    if recipe.consent_column:
+        header.append(recipe.consent_column)
+    return header, pairs
+
+
+def pull_existing(
+    recipe: Recipe,
+    out_dir: Path,
+    *,
+    transport: Transport | None = None,
+) -> tuple[Recipe, SourceSnapshot]:
+    """Pull the existing side into a snapshot, and return a recipe that reads it.
+
+    The snapshot is written to a hidden partial file and renamed into place
+    only once the last row is written, so a pull that fails part way through
+    leaves no snapshot at all. A short one would be worse than none: it reads
+    as a complete CRM with people missing, and every missing person becomes a
+    duplicate on the next write.
+
+    The returned recipe reads that file, with ``existing_connector`` cleared,
+    so nothing downstream can pull a second time or see both a path and a
+    connector. Consent is whatever the source supplied, which today is the
+    unmapped token for every row (see ``connectors.base.UNMAPPED_CONSENT``).
+    """
+
+    source = build_source_connector(recipe, transport=transport)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    final = out_dir / SNAPSHOT_FILENAME
+    partial = out_dir / f".{SNAPSHOT_FILENAME}.partial"
+    header, pairs = _snapshot_columns(recipe)
+
+    rows = 0
+    completed = False
+    try:
+        with partial.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(header)
+            for row in source.read_all():
+                values = [row.get(SNAPSHOT_ID_COLUMN, "")]
+                values += [row.get(canonical, "") for canonical, _ in pairs]
+                if recipe.consent_column:
+                    values.append(row.get(SNAPSHOT_CONSENT_COLUMN, ""))
+                writer.writerow(values)
+                rows += 1
+        completed = True
+    finally:
+        if not completed:
+            partial.unlink(missing_ok=True)
+    partial.replace(final)
+
+    snapshot = SourceSnapshot(
+        path=final,
+        connector=source.name,
+        api_version=source.api_version,
+        rows=rows,
+        digest=file_digest(final),
+    )
+    return replace(recipe, existing=final, existing_connector=None), snapshot
+
+
 @dataclass(frozen=True)
 class ExportSummary:
     write_results: tuple[WriteResult, ...]
@@ -1479,6 +1624,7 @@ def export(
     webhook_transport: WebhookTransport | None = None,
     airtable_transport: AirtableTransport | None = None,
     confirmed_households: Iterable[str] = (),
+    source_snapshot: dict[str, object] | None = None,
     progress: ProgressSink = NULL_SINK,
 ) -> ExportSummary:
     """Write resolved records through the configured connector.
@@ -1558,7 +1704,13 @@ def export(
     logged = 0
     if not dry_run:
         input_paths = [p for p in (recipe.existing, recipe.incoming) if p is not None]
-        manifest = build_manifest(recipe.recipe_path, input_paths, recipe, cache=result.cache)
+        manifest = build_manifest(
+            recipe.recipe_path,
+            input_paths,
+            recipe,
+            cache=result.cache,
+            source_snapshot=source_snapshot,
+        )
         manifest_path = write_manifest(manifest, out_dir)
         log = ProvenanceLog(provenance_path, log_authority)
         log.append_run_start(manifest_hash(manifest))

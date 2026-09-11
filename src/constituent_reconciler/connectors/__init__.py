@@ -21,7 +21,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import cast
 
-from constituent_reconciler.config import OutputConfig
+from constituent_reconciler.config import OutputConfig, SourceConfig
 from constituent_reconciler.connectors.airtable import (
     AirtableConfig,
     AirtableConnector,
@@ -33,6 +33,7 @@ from constituent_reconciler.connectors.base import (
     WRITE_ACTIONS,
     Connector,
     ConnectorError,
+    SourceConnector,
     WriteResult,
 )
 from constituent_reconciler.connectors.civicrm import (
@@ -41,6 +42,7 @@ from constituent_reconciler.connectors.civicrm import (
     Transport,
     UrllibTransport,
 )
+from constituent_reconciler.connectors.civicrm_source import CivicrmSource
 from constituent_reconciler.connectors.crm_csv import (
     CIVICRM_IMPORT_MAP,
     SALESFORCE_IMPORT_MAP,
@@ -109,6 +111,52 @@ def register(name: str) -> Callable[[ConnectorFactory], ConnectorFactory]:
         return factory
 
     return decorate
+
+
+#: A source factory takes the recipe's ``[source]`` config and the same
+#: transports mapping a connector factory gets, and returns a read-only
+#: source. Registered separately from the destinations: reading a system and
+#: writing to it are different capabilities, and a name registered for one
+#: must never answer for the other.
+SourceFactory = Callable[[SourceConfig, Mapping[str, object]], SourceConnector]
+
+SOURCE_REGISTRY: dict[str, SourceFactory] = {}
+
+
+def register_source(name: str) -> Callable[[SourceFactory], SourceFactory]:
+    """Register a read-only source factory under the name a recipe uses."""
+
+    def decorate(factory: SourceFactory) -> SourceFactory:
+        SOURCE_REGISTRY[name] = factory
+        return factory
+
+    return decorate
+
+
+def get_source_factory(name: str) -> SourceFactory:
+    """Look up a source factory by name, failing with the known names."""
+    try:
+        return SOURCE_REGISTRY[name]
+    except KeyError:
+        known = ", ".join(sorted(SOURCE_REGISTRY)) or "none"
+        raise ValueError(
+            f"unknown source connector: {name!r} (known source connectors: {known})"
+        ) from None
+
+
+@register_source("civicrm")
+def _build_civicrm_source(
+    source: SourceConfig, transports: Mapping[str, object]
+) -> SourceConnector:
+    config = CivicrmConfig(
+        endpoint=source.endpoint,
+        api_key=os.environ.get(source.auth_env, ""),
+        auth_header=source.auth_header,
+        auth_scheme=source.auth_scheme,
+        external_id_field=source.external_id_field,
+    )
+    transport = cast("Transport | None", transports.get("civicrm"))
+    return CivicrmSource(config, transport=transport, page_size=source.page_size)
 
 
 def get_factory(name: str) -> ConnectorFactory:
