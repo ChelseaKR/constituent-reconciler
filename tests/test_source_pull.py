@@ -218,6 +218,17 @@ def test_the_manifest_records_the_pull_and_the_snapshot_replays_it(
     assert replayed == pulled
 
 
+def test_a_run_without_a_pull_records_no_snapshot_at_all(tmp_path: Path) -> None:
+    """Absent, not empty: "a pull that returned nothing" is a different fact
+    from "no pull", and a key present with zeros would state the first."""
+    (tmp_path / "existing.csv").write_text(_EXISTING_CSV, encoding="utf-8")
+    out_dir = tmp_path / "out"
+    recipe_path = _write(tmp_path, existing="existing.csv")
+    assert main(["run", "--config", str(recipe_path), "--out", str(out_dir)]) == 0
+    manifest = json.loads((out_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    assert "existing_snapshot" not in manifest
+
+
 def test_an_http_error_part_way_through_leaves_no_snapshot(tmp_path: Path) -> None:
     """#144's fourth criterion. A short snapshot is worse than none: it reads
     as a complete CRM with people missing, and each one becomes a duplicate."""

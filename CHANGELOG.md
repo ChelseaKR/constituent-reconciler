@@ -32,6 +32,35 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   anywhere: every OCR test substituted its output, so the scanned-PDF path
   had never executed against Tesseract. `make install` now installs the `ocr`
   extra.
+- **The existing side can be pulled from a live CRM instead of exported by
+  hand (#144, CiviCRM first).** A recipe says `[input] existing =
+  "connector:civicrm"` and a `[source]` section carries that system's endpoint
+  and the name of the environment variable holding its credential; `[output]`
+  is deliberately not reused, because the system a run reads from is often not
+  the one it writes to. The pull writes `out/existing_snapshot.csv` in the
+  recipe's own column names, and the run reads that file, so pointing
+  `existing` at the snapshot replays the same run against the same bytes. The
+  run manifest records the connector, the API version, the row count and the
+  snapshot's digest, and is absent entirely when no pull happened, so "a pull
+  that returned nothing" and "no pull" stay apart.
+
+  Fail-closed throughout: a pack that requires local targets refuses the pull
+  before a request is built (reading constituent records out of a hosted CRM
+  is an egress as surely as writing them); a pull that fails part way through
+  leaves no snapshot at all, because a short one reads as a complete CRM with
+  people missing; `--dry-run` makes no network call and refuses a recipe that
+  pulls rather than matching every incoming record against nothing; the query
+  excludes trashed contacts and fixes a deterministic order, without which two
+  pulls of an unchanged database could differ and the recorded digest would
+  mean nothing; and paging is bounded, so a server that always answers with a
+  full page is refused rather than read forever.
+
+  **Consent is never inferred from the CRM.** Every pulled record carries an
+  unmapped token that the consent lifecycle withholds on. Deciding that a
+  particular vendor privacy flag means consent for a particular scope is a
+  judgement with legal weight that differs per organization, so no default
+  ships; under a consent-requiring pack, merged records stay withheld until a
+  mapping exists. `existing_snapshot.csv` is on the destruction inventory.
 
 ### Fixed
 - **A killed OCR parse left a copy of the intake page in the system

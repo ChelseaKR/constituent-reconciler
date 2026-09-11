@@ -73,8 +73,8 @@ The boundaries that matter:
    enforced on macOS, and Windows has only the timeout. A recipe may also
    turn it off (`[extract] sandbox = false`), returning to in-process
    parsing.
-3. **The network boundary.** The pipeline is offline by default. It has two
-   deliberate egress points, both policy-gated. The cloud extraction seam
+3. **The network boundary.** The pipeline is offline by default. It has three
+   deliberate network paths, every one of them policy-gated. The cloud extraction seam
    (`src/constituent_reconciler/extract/seam.py`) may send a low-confidence
    page to a Claude model on Amazon Bedrock, and only when the active policy
    pack allows cloud calls, the page falls below the recipe's confidence
@@ -82,7 +82,14 @@ The boundaries that matter:
    `make_seam()` returns a `NoOpSeam` at construction time, so no code path
    can reach a network call. The CRM connectors are the second egress; under a
    pack that requires local targets, `build_connector()` refuses a non-local
-   connector before anything is written.
+   connector before anything is written. The third is a read rather than a
+   write: a recipe may pull the existing side from a live CRM
+   (`connectors/civicrm_source.py`), which authenticates to a hosted system
+   and brings constituent records onto this machine.
+   `build_source_connector()` refuses it under the same rule and before a
+   request is built, because reading a constituent file out of a hosted system
+   is an egress as surely as writing one. What it reads lands in
+   `out/existing_snapshot.csv`, which is on the destruction inventory.
 4. **The local web boundary.** `constituent-reconcile review`
    (`src/constituent_reconciler/review/server.py`) is a second untrusted-input
    surface: the reviewer's own browser can be turned against a local server.

@@ -46,6 +46,13 @@ names a different local directory as its retention boundary. A URL-shaped
 `dir` is refused at recipe load, and under the `dv` pack the default keeps
 every retained artifact inside the output root.
 
+A recipe may also pull the existing side rather than read it from a file
+(`[input] existing = "connector:civicrm"`, `pipeline.pull_existing`). That is a
+network read against a hosted CRM, refused before any request under a pack
+that requires local targets, and what it reads is written to
+`out/existing_snapshot.csv` and destroyed with the other record-bearing
+artifacts. A pull that fails part way through leaves no snapshot.
+
 Two classes of paths can move data off the machine, and both are policy-gated:
 
 * The optional cloud extraction seam (`extract/seam.py`) may send a
@@ -165,6 +172,7 @@ appear in them, and they are checked by being written and then deleted.
 | `run_manifest.json` | `manifest.py` via `constituent-reconcile run` | the `--out` directory | No field values | Input file digests, column mappings, thresholds, and versions, for reproducing a run. |
 | `run_summary.json` | `pipeline._write_run_summary` | the `--out` directory | No | Per-stage counts, cache hit counts, and durations; content-free by construction. |
 | `run_report.json` | `cli._write_run_report` over `quality.py` | the `--out` directory | No | Run counts, the paths of files read, skipped and unreadable (each skip and each unreadable document with its reason), plus the per-source data-quality aggregate (completeness, normalization failure rates, consent coverage, duplicate density), already small-cell suppressed under the active policy. |
+| `existing_snapshot.csv` | `pipeline.pull_existing` | the `--out` directory | Yes: every record the CRM returned, in the recipe's own column names | Written only by a run whose `[input] existing` names a connector. A copy of real constituent records, so it is on `destruction.PII_ARTIFACTS`; the run manifest keeps its digest, row count and API version, never its contents. |
 | `comparable_report.json` | `pipeline._write_comparable_report` over `suppression.py` | the `--out` directory | No | The comparable-database posture's suppressed aggregate. Cell values are integers or the string `suppressed`, never a record id or a field value. |
 | `eval/report.md` | `report.py` via `constituent-reconcile eval` | the path given to `--out` | No | Match-quality rates on seeded synthetic fixtures; the fixtures contain no real personal data. |
 | Terminal output | `report.render_run_summary`, `suppression.render_summary` | the operator's terminal | No | Per-stage counts and the suppressed aggregate. |
