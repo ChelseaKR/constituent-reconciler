@@ -11,14 +11,18 @@ on CPU seconds and address space, POSIX only) and a wall-clock timeout enforced
 by the parent. Input files over a size cap are refused before any parsing
 starts. Every failure mode — oversize input, timeout, nonzero exit, crash,
 missing result — fails closed: the extractor returns a single zero-confidence
-page with no fields plus a ``note`` explaining why, so ``read_pdf_records``
-routes the document to human review instead of crashing the run.
+page with no fields plus a ``note`` explaining why, instead of crashing the
+run. The pipeline reads that note as "this document could not be read": the
+document contributes no records and no page counts, and is listed with the note
+as its reason under the ingest report's unreadable documents, which is where the
+operator sees it. It is not routed to the review queue, which holds record
+pairs; there is no record here to pair.
 
 The pipeline uses this extractor by default for every PDF backend (see
 ``config.ExtractConfig.sandbox``); ``ocr=True`` selects the OCR-fallback
 extractor inside the child for ``backend = "pdfplumber+ocr"``. OCR is heavier
 than a text-layer parse, so a large legitimate scan can hit the CPU cap; that
-still fails closed to human review, and a recipe that needs unbounded OCR can
+still fails closed to the unreadable list, and a recipe that needs unbounded OCR can
 set ``sandbox = false`` and accept the in-process risk.
 
 Non-goals, stated honestly: this is containment, not a syscall sandbox. The
@@ -206,7 +210,10 @@ class SandboxedExtractor:
 
 
 def _fail_closed(path: Path, reason: str) -> ExtractionResult:
-    """A zero-confidence, fieldless result that routes the document to review."""
+    """A zero-confidence, fieldless result whose note says why the read failed.
+
+    The pipeline accounts it as an unreadable document (``pipeline._unreadable``).
+    """
     return ExtractionResult(
         source_file=path.name,
         pages=[PageResult(page_num=1, confidence=0.0)],

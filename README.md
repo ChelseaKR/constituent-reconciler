@@ -455,8 +455,9 @@ back to where the value was read.
 
 PDFs parse in a resource-limited child process by default: a malformed or
 hostile intake file that hangs, balloons memory, or crashes the parser is
-contained and its document routed to human review instead of taking the run
-down. This is containment, not a full syscall sandbox (the child keeps the
+contained and listed, with the reason, as an unreadable document in the ingest
+report (the run summary and `run_report.json`) instead of taking the run down.
+It contributes no records, and it is not counted as a blank page. This is containment, not a full syscall sandbox (the child keeps the
 same privileges; see `docs/THREAT-MODEL.md`). Set `sandbox = false` under
 `[extract]` to parse in-process, accepting that exposure; the caps live in
 `src/constituent_reconciler/extract/sandbox.py`.

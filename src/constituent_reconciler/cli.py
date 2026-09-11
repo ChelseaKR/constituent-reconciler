@@ -217,6 +217,12 @@ def _write_run_report(
             "pages_extracted": ingest.pages_extracted,
             "pages_dropped": ingest.pages_dropped,
             "normalization_failures": ingest.normalization_failures,
+            # A document whose extraction failed closed: no page of it was read,
+            # so it is in neither page count above and is named here instead.
+            "documents_unreadable": [
+                {"path": document.path, "reason": document.reason}
+                for document in ingest.documents_unreadable
+            ],
         },
         # Per-source completeness, normalization failures, consent coverage,
         # and duplicate density (quality.py), suppressed under the active

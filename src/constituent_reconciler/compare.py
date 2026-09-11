@@ -479,8 +479,9 @@ def _ingest_counts(ingest: IngestReport) -> dict[str, int]:
 
     ``IngestReport`` promises that no row, page, or file is silent, and the
     migration summary carries that promise in count form so a dropped PDF
-    page shows up even when only the JSON artifact is read. File paths stay
-    out; the terminal summary lists them locally.
+    page, or a document that could not be read at all, shows up even when only
+    the JSON artifact is read. File paths stay out; the terminal summary lists
+    them locally.
     """
 
     return {
@@ -488,6 +489,7 @@ def _ingest_counts(ingest: IngestReport) -> dict[str, int]:
         "files_skipped": len(ingest.files_skipped),
         "pages_extracted": ingest.pages_extracted,
         "pages_dropped": ingest.pages_dropped,
+        "documents_unreadable": len(ingest.documents_unreadable),
     }
 
 
@@ -657,6 +659,9 @@ def _ingest_lines(label: str, ingest: IngestReport) -> list[str]:
     if ingest.files_skipped:
         lines.append(f"{label + ' files skipped:':<22}{len(ingest.files_skipped)}")
         lines += [f"    {skipped.path} ({skipped.reason})" for skipped in ingest.files_skipped]
+    if ingest.documents_unreadable:
+        lines.append(f"{label + ' unreadable:':<22}{len(ingest.documents_unreadable)}")
+        lines += [f"    {doc.path} ({doc.reason})" for doc in ingest.documents_unreadable]
     if ingest.pages_extracted or ingest.pages_dropped:
         lines.append(
             f"{label + ' pdf pages:':<22}{ingest.pages_extracted} extracted, "

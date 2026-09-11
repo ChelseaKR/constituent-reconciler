@@ -24,7 +24,7 @@ from constituent_reconciler.compare import CompareError, CompareResult, Identity
 from constituent_reconciler.config import NormalizeConfig, Recipe
 from constituent_reconciler.decisions import DEFAULT_FILL_POLICY
 from constituent_reconciler.manifest import file_digest
-from constituent_reconciler.models import IngestReport, Record, SkippedFile
+from constituent_reconciler.models import IngestReport, Record, SkippedFile, UnreadableDocument
 from constituent_reconciler.schema import MIGRATION_SUMMARY_SCHEMA_VERSION
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "compare"
@@ -341,6 +341,7 @@ def test_a_dv_pack_pdf_compare_side_fuses_the_cloud_seam_off(
         "files_skipped": 0,
         "pages_extracted": 1,
         "pages_dropped": 0,
+        "documents_unreadable": 0,
     }
 
 
@@ -562,11 +563,20 @@ def test_render_compare_summary_reports_skips_pages_and_failures() -> None:
             files_read=("left.csv",),
             files_skipped=(SkippedFile(path="notes.docx", reason="unsupported extension: .docx"),),
         ),
-        right_ingest=IngestReport(files_read=("right.pdf",), pages_extracted=3, pages_dropped=1),
+        right_ingest=IngestReport(
+            files_read=("right.pdf", "scan.pdf"),
+            pages_extracted=3,
+            pages_dropped=1,
+            documents_unreadable=(
+                UnreadableDocument(path="scan.pdf", reason="extraction failed: child exited"),
+            ),
+        ),
         normalization_failures={"dob": {"left": 2}},
     )
     text = compare.render_compare_summary(outcome)
     assert "notes.docx (unsupported extension: .docx)" in text
+    assert "right unreadable:" in text
+    assert "scan.pdf (extraction failed: child exited)" in text
     assert "right pdf pages:" in text
     assert "3 extracted, 1 dropped (no name found)" in text
     assert "dob: left: 2" in text
@@ -580,11 +590,22 @@ def test_migration_summary_carries_count_only_ingest_accounting(
     payload = json.loads(
         compare.write_migration_summary(result, tmp_path).read_text(encoding="utf-8")
     )
-    assert payload["ingest"] == {
-        "left": {"files_read": 1, "files_skipped": 0, "pages_extracted": 0, "pages_dropped": 0},
-        "right": {"files_read": 1, "files_skipped": 0, "pages_extracted": 0, "pages_dropped": 0},
+    empty = {
+        "files_read": 1,
+        "files_skipped": 0,
+        "pages_extracted": 0,
+        "pages_dropped": 0,
+        "documents_unreadable": 0,
     }
+    assert payload["ingest"] == {"left": empty, "right": empty}
     assert "left.csv" not in json.dumps(payload)
+    # The count is a count of documents, and no path reaches the payload.
+    unreadable = IngestReport(
+        files_read=("scan.pdf",),
+        documents_unreadable=(UnreadableDocument(path="scan.pdf", reason="could not decode"),),
+    )
+    assert compare._ingest_counts(unreadable)["documents_unreadable"] == 1
+    assert "scan.pdf" not in json.dumps(compare._ingest_counts(unreadable))
 
 
 def test_cli_compare_reports_a_bad_side_and_exits_2(

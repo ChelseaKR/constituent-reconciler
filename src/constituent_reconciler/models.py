@@ -332,6 +332,21 @@ class SkippedFile:
 
 
 @dataclass(frozen=True)
+class UnreadableDocument:
+    """A document the ingest step opened and could not read, with the reason why.
+
+    Not the same thing as a page that was read and held no name, which is what
+    ``IngestReport.pages_dropped`` counts. Here the read itself failed: a parse
+    the sandbox ended at a resource limit, bytes no decoder could make sense of,
+    an input over a size cap. Nothing is known about such a document's content,
+    including whether it was empty, so it is never counted as though it were.
+    """
+
+    path: str
+    reason: str
+
+
+@dataclass(frozen=True)
 class IngestReport:
     """Accounting for everything ingestion saw: no row, page, or file is silent.
 
@@ -342,6 +357,11 @@ class IngestReport:
     and were discarded. ``normalization_failures`` maps a canonical field name
     to per-source counts of nonempty raw values that normalized to ``""``
     (which the matcher treats as no evidence), e.g. an unparseable date.
+
+    ``documents_unreadable`` names the documents among ``files_read`` whose
+    extraction failed closed, each with its reason. Such a document adds
+    nothing to either page count, because no page of it was read: counting it
+    as a dropped page would publish a failed read as a blank one.
     """
 
     files_read: tuple[str, ...] = ()
@@ -349,6 +369,7 @@ class IngestReport:
     pages_extracted: int = 0
     pages_dropped: int = 0
     normalization_failures: dict[str, dict[str, int]] = field(default_factory=dict)
+    documents_unreadable: tuple[UnreadableDocument, ...] = ()
 
 
 @dataclass(frozen=True)

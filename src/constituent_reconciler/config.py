@@ -146,8 +146,9 @@ class ExtractConfig:
 
     ``sandbox`` (default true) parses each PDF in a resource-limited child
     process (see ``extract/sandbox.py``): a crafted intake file that hangs,
-    balloons memory, or crashes the parser is contained and routed to human
-    review instead of taking the run down. Setting it false parses in-process;
+    balloons memory, or crashes the parser is contained and listed, with the
+    reason, as an unreadable document in the ingest report instead of taking
+    the run down. Setting it false parses in-process;
     the recipe author accepts the threat-model risk that the threat model's
     "missing process boundary" section describes. It has no effect unless
     ``backend`` selects a PDF extractor.

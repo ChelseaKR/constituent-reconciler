@@ -123,6 +123,9 @@ def _render_ingest(ingest: IngestReport) -> list[str]:
     if ingest.files_skipped:
         lines.append(f"  files skipped:     {len(ingest.files_skipped)}")
         lines += [f"    {skipped.path} ({skipped.reason})" for skipped in ingest.files_skipped]
+    if ingest.documents_unreadable:
+        lines.append(f"  unreadable docs:   {len(ingest.documents_unreadable)}")
+        lines += [f"    {doc.path} ({doc.reason})" for doc in ingest.documents_unreadable]
     if ingest.pages_extracted or ingest.pages_dropped:
         lines.append(
             f"  pdf pages:         {ingest.pages_extracted} extracted, "

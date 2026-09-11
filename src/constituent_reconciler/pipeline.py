@@ -49,6 +49,7 @@ from constituent_reconciler.models import (
     SkippedFile,
     SourceSpan,
     TextSpan,
+    UnreadableDocument,
 )
 from constituent_reconciler.policy import PolicyViolation
 from constituent_reconciler.progress import NULL_SINK, ProgressEvent, ProgressSink
@@ -236,12 +237,23 @@ class IngestAccumulator:
     pages_extracted: int = 0
     pages_dropped: int = 0
     normalization_failures: dict[str, dict[str, int]] = field(default_factory=dict)
+    documents_unreadable: list[UnreadableDocument] = field(default_factory=list)
 
     def note_read(self, path: Path) -> None:
         self.files_read.append(str(path))
 
     def note_skipped(self, path: Path, reason: str) -> None:
         self.files_skipped.append(SkippedFile(path=str(path), reason=reason))
+
+    def note_unreadable(self, path: Path, reason: str) -> None:
+        self.documents_unreadable.append(UnreadableDocument(path=str(path), reason=reason))
+
+    def note_extracted(self, path: Path, extracted: stage_cache.ExtractedRows) -> None:
+        """Add one document's page accounting, or record that it could not be read."""
+        self.pages_extracted += extracted.pages_extracted
+        self.pages_dropped += extracted.pages_dropped
+        if extracted.unreadable is not None:
+            self.note_unreadable(path, extracted.unreadable)
 
     def freeze(self) -> IngestReport:
         return IngestReport(
@@ -252,6 +264,7 @@ class IngestAccumulator:
             normalization_failures={
                 name: dict(counts) for name, counts in self.normalization_failures.items()
             },
+            documents_unreadable=tuple(self.documents_unreadable),
         )
 
 
@@ -300,12 +313,12 @@ def _extract_pdf_rows(path: Path, recipe: Recipe) -> stage_cache.ExtractedRows:
 
     Unless the recipe sets ``[extract] sandbox = false``, the parse runs in a
     resource-limited child process (``extract/sandbox.py``): a hostile or
-    malformed PDF fails closed to a zero-confidence page that is dropped and
-    accounted for here, instead of crashing the run. A parse the sandbox
-    ended early (``extraction.note`` is set) is marked not cacheable, because
-    a resource-limit kill reflects the machine's load rather than the file
-    bytes; the stage cache must not freeze it as this document's permanent
-    result.
+    malformed PDF fails closed instead of crashing the run, and is accounted
+    for here as an unreadable document carrying the sandbox's reason (see
+    ``_unreadable``), never as a dropped page. It is also marked not
+    cacheable, because a resource-limit kill reflects the machine's load
+    rather than the file bytes; the stage cache must not freeze it as this
+    document's permanent result.
     """
     from constituent_reconciler.extract.base import Extractor
     from constituent_reconciler.extract.pdf import PdfplumberExtractor
@@ -329,6 +342,8 @@ def _extract_pdf_rows(path: Path, recipe: Recipe) -> stage_cache.ExtractedRows:
         local_model_id=recipe.extract.local_model_id,
     )
     extraction = extractor.extract(path)
+    if extraction.note is not None:
+        return _unreadable(extraction.note)
 
     rows: list[stage_cache.Row] = []
     pages_extracted = 0
@@ -357,6 +372,23 @@ def _extract_pdf_rows(path: Path, recipe: Recipe) -> stage_cache.ExtractedRows:
     )
 
 
+def _unreadable(reason: str) -> stage_cache.ExtractedRows:
+    """The accounting for a document whose extraction failed closed.
+
+    An extractor that did not run to completion still returns a result, with
+    ``note`` saying why and a zero-confidence placeholder page so the caller
+    has something to hold. That placeholder is not a page anyone read. Counting
+    it as dropped would put a parse the sandbox killed, or bytes nothing could
+    decode, in the same column as a blank sheet of paper, and the operator
+    reading the ingest report could not tell which documents to re-send. So it
+    contributes no page at all, and the note becomes the document's reason in
+    ``IngestReport.documents_unreadable``.
+    """
+    return stage_cache.ExtractedRows(
+        rows=[], pages_extracted=0, pages_dropped=0, cacheable=False, unreadable=reason
+    )
+
+
 def _extract_text_rows(path: Path, recipe: Recipe) -> stage_cache.ExtractedRows:
     """Parse one .txt or .eml file into kept rows plus page accounting.
 
@@ -370,6 +402,8 @@ def _extract_text_rows(path: Path, recipe: Recipe) -> stage_cache.ExtractedRows:
         extraction = extract_eml(path)
     else:
         extraction = extract_text_file(path)
+    if extraction.note is not None:
+        return _unreadable(extraction.note)
 
     rows: list[stage_cache.Row] = []
     pages_extracted = 0
@@ -446,8 +480,7 @@ def read_pdf_records(
         extract_fresh=lambda: _extract_pdf_rows(path, recipe),
     )
     if accounting is not None:
-        accounting.pages_extracted += extracted.pages_extracted
-        accounting.pages_dropped += extracted.pages_dropped
+        accounting.note_extracted(path, extracted)
     seen = _seen if _seen is not None else {}
     return _mint_document_records(extracted.rows, source, id_prefix=id_prefix, seen=seen)
 
@@ -478,8 +511,7 @@ def read_text_records(
         extract_fresh=lambda: _extract_text_rows(path, recipe),
     )
     if accounting is not None:
-        accounting.pages_extracted += extracted.pages_extracted
-        accounting.pages_dropped += extracted.pages_dropped
+        accounting.note_extracted(path, extracted)
     seen = _seen if _seen is not None else {}
     return _mint_document_records(extracted.rows, source, id_prefix=id_prefix, seen=seen)
 

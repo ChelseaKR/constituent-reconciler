@@ -101,12 +101,17 @@ class ExtractedRows:
     than the file bytes, so storing it would freeze a transient failure
     under the file's content digest. A clean parse that keeps zero rows
     stays cacheable: it would compute the same emptiness again.
+
+    ``unreadable`` carries the reason when the document could not be read at
+    all (its extraction failed closed). Such a result holds no rows and no
+    pages, and is never cacheable.
     """
 
     rows: list[Row]
     pages_extracted: int
     pages_dropped: int
     cacheable: bool = True
+    unreadable: str | None = None
 
 
 class StageCache(Protocol):

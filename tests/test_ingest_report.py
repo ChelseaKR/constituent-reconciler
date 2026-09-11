@@ -2,8 +2,10 @@
 
 The run report must let an operator reconcile a reporting cycle: every path
 ingestion saw is either read or skipped with a reason, every PDF page is
-counted as extracted or dropped, and a nonempty value that normalized to ""
-(no evidence) is counted per field and source instead of vanishing silently.
+counted as extracted or dropped, a document that could not be read at all is
+named as unreadable with its reason rather than counted as a blank page, and a
+nonempty value that normalized to "" (no evidence) is counted per field and
+source instead of vanishing silently.
 """
 
 from __future__ import annotations
@@ -76,6 +78,40 @@ def test_pdf_pages_counted_as_extracted_or_dropped(mixed_folder: Path) -> None:
     # form.pdf yields Alice Walker; blank.pdf's only page has no name.
     assert result.ingest.pages_extracted == 1
     assert result.ingest.pages_dropped == 1
+
+
+#: Bytes that announce a PDF and are not one. The sandboxed parse dies on them in
+#: the child, which is the fail-closed leg the next tests read the accounting of.
+_HOSTILE_PDF = b"%PDF-1.7 but not really: crafted garbage"
+
+
+def test_a_document_that_could_not_be_read_is_unreadable_not_a_dropped_page(
+    mixed_folder: Path,
+) -> None:
+    """A failed read and a read that found nothing are different facts.
+
+    Both leave no record behind, which is why they were once one number. The
+    blank page was read and held no name; the hostile file was never read at
+    all, and the operator needs to know which of the two to re-send. Each
+    assertion below fails if the two are conflated in either direction.
+    """
+    hostile = mixed_folder / "hostile.pdf"
+    hostile.write_bytes(_HOSTILE_PDF)
+
+    result = pipeline.run(_recipe(mixed_folder, backend="pdfplumber"))
+    ingest = result.ingest
+
+    # form.pdf kept, blank.pdf read and dropped; hostile.pdf in neither count.
+    assert ingest.pages_extracted == 1
+    assert ingest.pages_dropped == 1
+    assert [document.path for document in ingest.documents_unreadable] == [str(hostile)]
+    assert ingest.documents_unreadable[0].reason.startswith("extraction failed:")
+    # It was opened, so it is still answered for among the files read.
+    assert str(hostile) in ingest.files_read
+
+    summary = render_run_summary(result)
+    assert "unreadable docs:   1" in summary
+    assert f"{hostile} (extraction failed:" in summary
 
 
 def test_pdf_skipped_with_reason_when_extraction_disabled(tmp_path: Path) -> None:
@@ -181,3 +217,31 @@ def test_cli_run_writes_machine_readable_run_report(tmp_path: Path) -> None:
     assert ingest["pages_extracted"] == 0
     assert ingest["pages_dropped"] == 0
     assert ingest["normalization_failures"] == {"dob": {"incoming": 1}}
+    assert ingest["documents_unreadable"] == []
+
+
+def test_cli_run_report_names_an_unreadable_document_with_its_reason(tmp_path: Path) -> None:
+    pytest.importorskip("pdfplumber", reason="pdfplumber not installed")
+    from constituent_reconciler.cli import main
+
+    folder = tmp_path / "incoming"
+    folder.mkdir()
+    (folder / "batch.csv").write_text("first,last,dob\nWei,Chen,1968-01-22\n", encoding="utf-8")
+    hostile = folder / "hostile.pdf"
+    hostile.write_bytes(_HOSTILE_PDF)
+    recipe_path = tmp_path / "recipe.toml"
+    recipe_path.write_text(
+        '[input]\nincoming = "incoming"\n\n'
+        '[mapping]\nfirst_name = "first"\nlast_name = "last"\ndob = "dob"\n\n'
+        '[extract]\nbackend = "pdfplumber"\n',
+        encoding="utf-8",
+    )
+    out_dir = tmp_path / "out"
+
+    assert main(["run", "--config", str(recipe_path), "--out", str(out_dir)]) == 0
+
+    ingest = json.loads((out_dir / "run_report.json").read_text(encoding="utf-8"))["ingest"]
+    assert [entry["path"] for entry in ingest["documents_unreadable"]] == [str(hostile)]
+    assert ingest["documents_unreadable"][0]["reason"].startswith("extraction failed:")
+    assert ingest["pages_extracted"] == 0
+    assert ingest["pages_dropped"] == 0

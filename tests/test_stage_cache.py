@@ -659,7 +659,13 @@ def test_sandbox_kill_marks_the_extraction_not_cacheable(
     outcome = pipeline._extract_pdf_rows(doc, recipe)
     assert outcome.cacheable is False
     assert outcome.rows == []
-    assert outcome.pages_dropped == 1
+    # This assertion used to read `pages_dropped == 1`, which pinned the
+    # defect: the killed parse's placeholder page was counted as a page read
+    # and found blank. No page of this document was read, so it is in neither
+    # page count and carries the sandbox's reason instead.
+    assert outcome.pages_extracted == 0
+    assert outcome.pages_dropped == 0
+    assert outcome.unreadable == "extraction exceeded the 60.0s wall-clock limit; child killed"
 
 
 def test_sandbox_failure_is_not_stored_and_the_document_is_reparsed(

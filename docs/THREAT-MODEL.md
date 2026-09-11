@@ -59,7 +59,9 @@ The boundaries that matter:
    (`src/constituent_reconciler/extract/sandbox.py`, wired through
    `read_pdf_records()`): best-effort rlimits on CPU and address space inside
    the child, a wall-clock timeout and input-size cap in the parent, and a
-   fail-closed zero-confidence result that routes the document to review. The
+   fail-closed result that the pipeline records as an unreadable document,
+   with the reason, in the ingest report (the run summary and
+   `run_report.json`), rather than as a blank page. The
    boundary is containment, not privilege separation — the child runs the
    same interpreter with the same filesystem view, `RLIMIT_AS` is not
    enforced on macOS, and Windows has only the timeout. A recipe may also
