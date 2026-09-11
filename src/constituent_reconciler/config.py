@@ -126,7 +126,10 @@ class ExtractConfig:
       - ``"pdfplumber+ocr"``: offline extraction that also OCRs (via
         Tesseract, the optional ``ocr`` extra) any page with no embedded text
         layer, so an image-only scanned page yields fields instead of an
-        empty record.
+        empty record. It is also the one backend that reads photographed or
+        scanned images (``.jpg``, ``.jpeg``, ``.png``, ``.tif``, ``.tiff``,
+        see ``extract/image.py``); under any other an image file is skipped
+        with that reason.
       - ``"bedrock"``: route low-confidence pages to Claude on Bedrock (cloud
         call; forbidden under DV and HIPAA packs regardless of this setting).
       - ``"local"``: route low-confidence pages to a model server on this
@@ -151,7 +154,7 @@ class ExtractConfig:
     the run down. Setting it false parses in-process;
     the recipe author accepts the threat-model risk that the threat model's
     "missing process boundary" section describes. It has no effect unless
-    ``backend`` selects a PDF extractor.
+    ``backend`` selects a document extractor.
     """
 
     backend: str = "none"

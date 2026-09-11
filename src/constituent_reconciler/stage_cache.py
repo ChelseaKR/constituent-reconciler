@@ -250,6 +250,8 @@ def _extractor_version(reader: str) -> str | None:
 
     if reader == "text":
         return "stdlib"
+    if reader == "image":
+        return None
     return _distribution_version("pdfplumber")
 
 
@@ -359,6 +361,11 @@ def extraction_cacheable(recipe: Recipe, *, reader: str) -> bool:
 
     if reader == "text":
         return True
+    if reader == "image":
+        # Every image is OCR'd, and OCR output depends on the installed
+        # Tesseract and its language data, neither of which the package pins:
+        # there is no version to key on.
+        return False
     if recipe.extract.backend != "pdfplumber":
         return False
     return _extractor_version(reader) is not None

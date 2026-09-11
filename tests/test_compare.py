@@ -331,7 +331,7 @@ def test_a_dv_pack_pdf_compare_side_fuses_the_cloud_seam_off(
     assert outcome.left_ingest.pages_extracted == 1
     assert outcome.left_ingest.pages_dropped == 0
     text = compare.render_compare_summary(outcome)
-    assert "left pdf pages:" in text
+    assert "left document pages:" in text
     assert "1 extracted, 0 dropped (no name found)" in text
     payload = json.loads(
         compare.write_migration_summary(outcome, tmp_path).read_text(encoding="utf-8")
@@ -577,7 +577,7 @@ def test_render_compare_summary_reports_skips_pages_and_failures() -> None:
     assert "notes.docx (unsupported extension: .docx)" in text
     assert "right unreadable:" in text
     assert "scan.pdf (extraction failed: child exited)" in text
-    assert "right pdf pages:" in text
+    assert "right document pages:" in text
     assert "3 extracted, 1 dropped (no name found)" in text
     assert "dob: left: 2" in text
 

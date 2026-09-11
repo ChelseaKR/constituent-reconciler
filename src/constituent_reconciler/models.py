@@ -18,8 +18,11 @@ class SourceSpan:
     """Location of an extracted value within its source document.
 
     Coordinates follow pdfplumber convention: x0/x1 are horizontal, top/bottom
-    are measured from the top of the page. All values are in PDF user units
-    (1/72 inch). ``page`` is 1-indexed.
+    are measured from the top of the page. On a PDF page the values are PDF
+    user units (1/72 inch); on a photographed or scanned image
+    (``extract/image.py``) they are pixels of the image as an EXIF-aware viewer
+    displays it. ``page`` is 1-indexed: an image file is one page, and each
+    frame of a multi-page TIFF is one more.
     """
 
     source_file: str

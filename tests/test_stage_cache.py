@@ -391,6 +391,9 @@ enabled = true
         ("local", "pdf", False),
         ("bedrock", "text", True),
         ("pdfplumber", "text", True),
+        # Every image is OCR'd, so no backend makes an image read cacheable.
+        ("pdfplumber+ocr", "image", False),
+        ("pdfplumber", "image", False),
     ],
 )
 def test_extraction_cacheable_only_for_deterministic_readers(

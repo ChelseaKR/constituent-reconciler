@@ -664,7 +664,7 @@ def _ingest_lines(label: str, ingest: IngestReport) -> list[str]:
         lines += [f"    {doc.path} ({doc.reason})" for doc in ingest.documents_unreadable]
     if ingest.pages_extracted or ingest.pages_dropped:
         lines.append(
-            f"{label + ' pdf pages:':<22}{ingest.pages_extracted} extracted, "
+            f"{label + ' document pages:':<22}{ingest.pages_extracted} extracted, "
             f"{ingest.pages_dropped} dropped (no name found)"
         )
     return lines

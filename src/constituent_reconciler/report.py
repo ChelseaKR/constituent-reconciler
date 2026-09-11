@@ -128,7 +128,7 @@ def _render_ingest(ingest: IngestReport) -> list[str]:
         lines += [f"    {doc.path} ({doc.reason})" for doc in ingest.documents_unreadable]
     if ingest.pages_extracted or ingest.pages_dropped:
         lines.append(
-            f"  pdf pages:         {ingest.pages_extracted} extracted, "
+            f"  document pages:    {ingest.pages_extracted} extracted, "
             f"{ingest.pages_dropped} dropped (no name found)"
         )
     if ingest.normalization_failures:

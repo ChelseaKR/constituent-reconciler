@@ -13,7 +13,7 @@ import csv
 import hashlib
 import json
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -36,7 +36,7 @@ from constituent_reconciler.connectors.civicrm import Transport
 from constituent_reconciler.connectors.crm_csv import CrmCsvConnector
 from constituent_reconciler.connectors.salesforce import Transport as SalesforceTransport
 from constituent_reconciler.connectors.webhook import Transport as WebhookTransport
-from constituent_reconciler.extract.base import ExtractedField
+from constituent_reconciler.extract.base import IMAGE_SUFFIXES, ExtractedField, ExtractionResult
 from constituent_reconciler.manifest import build_manifest, manifest_hash, write_manifest
 from constituent_reconciler.models import (
     Consent,
@@ -342,34 +342,11 @@ def _extract_pdf_rows(path: Path, recipe: Recipe) -> stage_cache.ExtractedRows:
         local_model_id=recipe.extract.local_model_id,
     )
     extraction = extractor.extract(path)
-    if extraction.note is not None:
-        return _unreadable(extraction.note)
 
-    rows: list[stage_cache.Row] = []
-    pages_extracted = 0
-    pages_dropped = 0
-    for page in extraction.pages:
-        page_fields = list(page.fields)
+    def refine(page_num: int) -> list[ExtractedField]:
+        return seam.refine(path, page_num)
 
-        if page.confidence < recipe.extract.confidence_threshold and seam.is_enabled():
-            refined = seam.refine(path, page.page_num)
-            if refined:
-                page_fields = refined
-
-        raw, spans = _collect_mapped_fields(page_fields, recipe.mapping)
-
-        if not raw.get("first_name") and not raw.get("last_name"):
-            pages_dropped += 1
-            continue
-        pages_extracted += 1
-        rows.append((raw, spans))
-
-    return stage_cache.ExtractedRows(
-        rows=rows,
-        pages_extracted=pages_extracted,
-        pages_dropped=pages_dropped,
-        cacheable=extraction.note is None,
-    )
+    return _kept_rows(extraction, recipe, refine=refine if seam.is_enabled() else None)
 
 
 def _unreadable(reason: str) -> stage_cache.ExtractedRows:
@@ -389,6 +366,44 @@ def _unreadable(reason: str) -> stage_cache.ExtractedRows:
     )
 
 
+def _kept_rows(
+    extraction: ExtractionResult,
+    recipe: Recipe,
+    *,
+    refine: Callable[[int], list[ExtractedField]] | None = None,
+) -> stage_cache.ExtractedRows:
+    """Turn one document's extraction into kept rows and page accounting.
+
+    The one loop every document reader shares, so a PDF, a text body and a
+    photographed page are counted by the same rule: a page that yields neither
+    a first nor a last name is dropped and counted. ``refine``, when given, is
+    offered each page below the recipe's confidence threshold and replaces its
+    fields if it returns any; it is the model seam's hook, and only the PDF
+    reader passes one. A document whose extraction failed closed has no pages
+    to account (``_unreadable``).
+    """
+    if extraction.note is not None:
+        return _unreadable(extraction.note)
+    rows: list[stage_cache.Row] = []
+    pages_extracted = 0
+    pages_dropped = 0
+    for page in extraction.pages:
+        page_fields = list(page.fields)
+        if refine is not None and page.confidence < recipe.extract.confidence_threshold:
+            refined = refine(page.page_num)
+            if refined:
+                page_fields = refined
+        raw, spans = _collect_mapped_fields(page_fields, recipe.mapping)
+        if not raw.get("first_name") and not raw.get("last_name"):
+            pages_dropped += 1
+            continue
+        pages_extracted += 1
+        rows.append((raw, spans))
+    return stage_cache.ExtractedRows(
+        rows=rows, pages_extracted=pages_extracted, pages_dropped=pages_dropped
+    )
+
+
 def _extract_text_rows(path: Path, recipe: Recipe) -> stage_cache.ExtractedRows:
     """Parse one .txt or .eml file into kept rows plus page accounting.
 
@@ -402,27 +417,29 @@ def _extract_text_rows(path: Path, recipe: Recipe) -> stage_cache.ExtractedRows:
         extraction = extract_eml(path)
     else:
         extraction = extract_text_file(path)
-    if extraction.note is not None:
-        return _unreadable(extraction.note)
+    return _kept_rows(extraction, recipe)
 
-    rows: list[stage_cache.Row] = []
-    pages_extracted = 0
-    pages_dropped = 0
-    for page in extraction.pages:
-        raw, spans = _collect_mapped_fields(page.fields, recipe.mapping)
 
-        if not raw.get("first_name") and not raw.get("last_name"):
-            pages_dropped += 1
-            continue
-        pages_extracted += 1
-        rows.append((raw, spans))
+def _extract_image_rows(path: Path, recipe: Recipe) -> stage_cache.ExtractedRows:
+    """Read one photographed or scanned image into kept rows plus page accounting.
 
-    return stage_cache.ExtractedRows(
-        rows=rows,
-        pages_extracted=pages_extracted,
-        pages_dropped=pages_dropped,
-        cacheable=extraction.note is None,
-    )
+    The image goes through Tesseract (``extract/image.py``), inside the same
+    resource-limited child a PDF is parsed in unless the recipe sets
+    ``[extract] sandbox = false``. No model seam is consulted. An image is read
+    only under ``backend = "pdfplumber+ocr"``, for which ``make_seam`` builds
+    none, so a page below the confidence threshold keeps the fields OCR read,
+    exactly as an image-only PDF page does under the same backend.
+    """
+    from constituent_reconciler.extract.base import Extractor
+    from constituent_reconciler.extract.image import ImageOcrExtractor
+    from constituent_reconciler.extract.sandbox import SandboxedExtractor
+
+    extractor: Extractor
+    if recipe.extract.sandbox:
+        extractor = SandboxedExtractor(image=True)
+    else:
+        extractor = ImageOcrExtractor()
+    return _kept_rows(extractor.extract(path), recipe)
 
 
 def _mint_document_records(
@@ -516,14 +533,46 @@ def read_text_records(
     return _mint_document_records(extracted.rows, source, id_prefix=id_prefix, seen=seen)
 
 
+def read_image_records(
+    path: Path,
+    source: str,
+    *,
+    recipe: Recipe,
+    id_prefix: str,
+    _seen: dict[str, int] | None = None,
+    accounting: IngestAccumulator | None = None,
+    active_cache: stage_cache.ActiveCache | None = None,
+) -> list[Record]:
+    """Extract records from a photographed or scanned intake image.
+
+    Each page (each frame, for a multi-page TIFF) that yields at least a
+    first_name or last_name becomes one Record, with ``SourceSpan`` spans in
+    the image's own pixels. The read is described on ``_extract_image_rows``.
+    OCR output is never cached (``stage_cache.extraction_cacheable``), so an
+    active cache is consulted and bypassed.
+    """
+
+    extracted = stage_cache.extraction_via_cache(
+        active_cache,
+        path,
+        recipe,
+        reader="image",
+        extract_fresh=lambda: _extract_image_rows(path, recipe),
+    )
+    if accounting is not None:
+        accounting.note_extracted(path, extracted)
+    seen = _seen if _seen is not None else {}
+    return _mint_document_records(extracted.rows, source, id_prefix=id_prefix, seen=seen)
+
+
 _PlanItem = tuple[str, Path]
 """One unit of planned ingest work: a reader kind and a file.
 
-The kinds are "csv" and "excel" (structured sources, read directly) and "pdf"
-and "text" (documents, which go through extraction).
+The kinds are "csv" and "excel" (structured sources, read directly) and "pdf",
+"text" and "image" (documents, which go through extraction).
 """
 
-_DOCUMENT_KINDS = frozenset({"pdf", "text"})
+_DOCUMENT_KINDS = frozenset({"pdf", "text", "image"})
 """Reader kinds whose files are documents, and so count toward extract progress.
 
 Named rather than tested as ``kind != "csv"``: the structured readers are now
@@ -541,6 +590,9 @@ def _route(path: Path, recipe: Recipe) -> tuple[str, str]:
     extractor, with the document readers available only while
     ``extract.backend`` is not "none". Workbooks carry no such switch: reading
     one is parsing a structured file, not extracting fields from a document.
+    An image (``extract.base.IMAGE_SUFFIXES``) is read only under
+    ``backend = "pdfplumber+ocr"``, because OCR is the only way to read one;
+    under any other backend it is skipped with a reason naming that backend.
     """
 
     suffix = path.suffix.lower()
@@ -556,6 +608,15 @@ def _route(path: Path, recipe: Recipe) -> tuple[str, str]:
         if recipe.extract.backend != "none":
             return "text", ""
         return "", 'text extraction disabled (extract.backend = "none")'
+    if suffix in IMAGE_SUFFIXES:
+        if recipe.extract.backend == "pdfplumber+ocr":
+            return "image", ""
+        if recipe.extract.backend == "none":
+            return "", 'image extraction disabled (extract.backend = "none")'
+        return "", (
+            'an image is read only through OCR (extract.backend = "pdfplumber+ocr"); '
+            f'this recipe sets "{recipe.extract.backend}"'
+        )
     return "", f"unsupported extension: {suffix or '(none)'}"
 
 
@@ -709,6 +770,16 @@ def _read_plan(
             )
         elif kind == "pdf":
             records += read_pdf_records(
+                child,
+                source,
+                recipe=recipe,
+                id_prefix=id_prefix,
+                _seen=seen,
+                accounting=accounting,
+                active_cache=active_cache,
+            )
+        elif kind == "image":
+            records += read_image_records(
                 child,
                 source,
                 recipe=recipe,
