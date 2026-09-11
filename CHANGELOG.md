@@ -71,9 +71,11 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   `pages_dropped == 1` for a killed parse, which pinned the defect, and now
   asserts the corrected accounting.
 
-  The same fix corrects four sentences (in `README.md`, `docs/THREAT-MODEL.md`,
-  `config.py` and `extract/sandbox.py`) that said such a document is "routed
-  to human review". Nothing routed it anywhere: the review queue holds record
+  The same fix corrects six sentences that said such a document is "routed to
+  human review", in `README.md`, `docs/THREAT-MODEL.md`, `config.py` and
+  `extract/sandbox.py`, which held three of them; a seventh, in the threat
+  model's sandbox entry, said it "lands in human review" and is corrected in
+  the same series. Nothing routed it anywhere: the review queue holds record
   pairs, and a document nobody could read produces no record to pair. It is now
   listed where the operator reads the run's accounting, with the reason.
 

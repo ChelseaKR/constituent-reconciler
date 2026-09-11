@@ -21,6 +21,7 @@ from __future__ import annotations
 import io
 import struct
 import zlib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -573,6 +574,24 @@ def test_a_photographed_intake_form_reaches_the_review_queue_with_its_spans(
 # ---------------------------------------------------------------------------
 
 
+def _outcome_of(call: Callable[[], None]) -> tuple[str, str]:
+    """What ``call`` raised, by name, with its message; or ``("returned", "")``.
+
+    ``pytest.raises(pytest.fail.Exception)`` is the wrong instrument for this.
+    ``Skipped`` and ``Failed`` are siblings, not parent and child, so a gate
+    that skips where it should fail does not fail this test: the ``Skipped``
+    escapes and *the test itself is skipped*, which is not red. Measured, and
+    the reason this is written the long way -- the control that removed the
+    environment check below reddened nothing at all until the outcome was read
+    by name.
+    """
+    try:
+        call()
+    except (pytest.skip.Exception, pytest.fail.Exception) as exc:
+        return type(exc).__name__, str(exc)
+    return "returned", ""
+
+
 def test_the_real_ocr_gate_skips_outside_ci_and_fails_inside_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -580,13 +599,17 @@ def test_the_real_ocr_gate_skips_outside_ci_and_fails_inside_it(
 
     monkeypatch.setattr(image_module, "ocr_unavailable_reason", lambda: "no tesseract here")
     monkeypatch.delenv(testing.REQUIRE_TESSERACT_ENV, raising=False)
-    with pytest.raises(pytest.skip.Exception, match="no tesseract here"):
-        testing.require_real_ocr()
+    outcome, message = _outcome_of(testing.require_real_ocr)
+    assert outcome == "Skipped"
+    assert "no tesseract here" in message
+
     monkeypatch.setenv(testing.REQUIRE_TESSERACT_ENV, "1")
-    with pytest.raises(pytest.fail.Exception, match="no tesseract here"):
-        testing.require_real_ocr()
+    outcome, message = _outcome_of(testing.require_real_ocr)
+    assert outcome == "Failed"
+    assert "no tesseract here" in message
+
     monkeypatch.setattr(image_module, "ocr_unavailable_reason", lambda: None)
-    testing.require_real_ocr()
+    assert _outcome_of(testing.require_real_ocr) == ("returned", "")
 
 
 def test_ocr_unavailable_names_missing_language_data(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -606,3 +629,56 @@ def test_ocr_unavailable_names_a_binary_that_does_not_answer(
     monkeypatch.setattr(pytesseract, "get_languages", absent)
     reason = image_module.ocr_unavailable_reason()
     assert reason is not None and reason.startswith("the tesseract binary did not answer")
+
+
+def _job_block(workflow: str, job: str) -> str:
+    """One job's lines from a workflow, comment lines dropped.
+
+    A job starts at its two-space-indented ``<name>:`` line and ends at the
+    next line indented exactly two spaces. Comments are dropped first: a
+    sentence about the variable must not satisfy a check for the variable.
+    """
+    lines = [line for line in workflow.splitlines() if not line.lstrip().startswith("#")]
+    start = lines.index(f"  {job}:")
+    block = [lines[start]]
+    for line in lines[start + 1 :]:
+        if line.startswith("  ") and not line.startswith("   ") and line.strip():
+            break
+        block.append(line)
+    return "\n".join(block)
+
+
+def test_ci_verify_job_requires_the_real_ocr_tests() -> None:
+    """The floor under every real-OCR test is two lines of CI, held here.
+
+    Delete the variable and every test taking ``real_ocr`` skips in CI while
+    the required check stays green; drop the ``osd`` package and every
+    sideways page reads as blank. Neither would turn anything red without this.
+    """
+    from constituent_reconciler.testing import REQUIRE_TESSERACT_ENV
+
+    workflow = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+    verify = _job_block(workflow, "verify")
+    assert f'{REQUIRE_TESSERACT_ENV}: "1"' in verify
+    for package in ("tesseract-ocr", "tesseract-ocr-eng", "tesseract-ocr-osd"):
+        assert package in verify, f"the verify job no longer installs {package}"
+    # The job that installs Tesseract is the job that runs the tests.
+    assert verify.index("tesseract-ocr-osd") < verify.index("run: make verify")
+
+
+def test_the_job_block_reader_sees_neither_comments_nor_the_next_job() -> None:
+    workflow = (
+        "jobs:\n"
+        "  verify:\n"
+        '    # CONSTITUENT_RECONCILER_REQUIRE_TESSERACT: "1" (a comment, not a setting)\n'
+        "    steps: []\n"
+        "  other:\n"
+        "    env:\n"
+        '      CONSTITUENT_RECONCILER_REQUIRE_TESSERACT: "1"\n'
+    )
+    block = _job_block(workflow, "verify")
+    assert "CONSTITUENT_RECONCILER_REQUIRE_TESSERACT" not in block
+    assert "steps: []" in block
+    assert "CONSTITUENT_RECONCILER_REQUIRE_TESSERACT" in _job_block(workflow, "other")
