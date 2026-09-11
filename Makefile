@@ -8,8 +8,13 @@
 # and exits 1 when it is not, so a dependency edit that was never locked is
 # caught here instead of drifting silently. Run `uv lock` after editing
 # pyproject.toml and commit the result.
+#
+# The ocr extra (pytesseract, Pillow) is installed so the image and scanned-PDF
+# readers can be tested; the tests that run the real `tesseract` binary also
+# need it on PATH with its eng and osd language data (`brew install tesseract`,
+# `apt-get install tesseract-ocr`), and skip without it outside CI.
 install:
-	uv sync --locked --python 3.12 --group dev --extra extract --extra excel
+	uv sync --locked --python 3.12 --group dev --extra extract --extra excel --extra ocr
 
 format-check:
 	.venv/bin/ruff format --check src tests tools
@@ -71,7 +76,9 @@ eval:
 # extractor or to eval/fixtures/extraction. Exits nonzero below the ledger
 # targets (precision 0.95, recall 0.90), and --controls makes it exit nonzero
 # when the label-shuffle control stops distinguishing read labels from unread
-# ones, so CI's `git diff --exit-code` covers the Controls section too.
+# ones, so CI's `git diff --exit-code` covers the Controls section too. The page
+# images are read by the real `tesseract` binary; without it the command refuses
+# and writes nothing, rather than a report missing their rows.
 eval-extraction:
 	.venv/bin/constituent-reconcile eval-extraction \
 		--fixtures eval/fixtures/extraction \

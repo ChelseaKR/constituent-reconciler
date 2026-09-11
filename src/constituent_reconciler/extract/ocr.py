@@ -13,9 +13,18 @@ through Tesseract via ``pytesseract``, reusing the same label-adjacent field
 patterns (``extract.pdf._FIELD_PATTERNS``) and the same word-count/
 plausibility confidence heuristic (``extract.pdf._page_confidence``) as the
 text-layer path, blended with Tesseract's own per-word confidence. A
-low-confidence OCR page routes to review or the cloud seam exactly like a
-low-confidence text-layer page -- there is no separate, weaker code path for
-scans, and OCR does not get an easier confidence bar than a native PDF.
+low-confidence OCR page is treated exactly like a low-confidence text-layer
+page -- there is no separate, weaker code path for scans, and OCR does not get
+an easier confidence bar than a native PDF.
+
+What that treatment is deserves saying plainly, because this docstring used to
+say such a page "routes to review". The confidence threshold has one effect:
+a page below it is offered to a model seam, when one is enabled. The
+``pdfplumber+ocr`` backend enables none (``make_seam`` builds a no-op for it),
+so under this backend a low-confidence page keeps the fields OCR read, and
+nothing sends it to the review queue, which holds uncertain record pairs chosen
+by the matcher. ``extract/image.py`` reads photographed and scanned images
+through the functions below, under the same rule.
 
 Both ``pytesseract`` and the system ``tesseract`` binary are optional. The
 import is deferred to extraction time so the rest of the package works

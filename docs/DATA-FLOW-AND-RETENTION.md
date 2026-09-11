@@ -21,8 +21,15 @@ ships; the operator and counsel still set it.
 
 Source data enters through the readers in `pipeline.py`: CSVs via
 `read_records`, intake PDFs via `read_pdf_records` and the offline extractor in
-`extract/pdf.py`. Inputs are read in place and never copied; the tool holds no
-staging copy of the source files. When a recipe opts into the stage cache
+`extract/pdf.py`, and photographed or scanned page images via
+`read_image_records` and `extract/image.py`. Inputs are read in place and the
+tool holds no staging copy of the source files, with one transient exception:
+OCR, of a scanned PDF page or of any page image, hands the Tesseract binary a
+temporary copy of the page image. That copy is written into a scratch
+directory the extraction sandbox makes for the one document and removes when
+its child exits or is killed (see the inventory below). Until 2026-09-11 this
+paragraph said inputs are "never copied", which was untrue of every OCR'd
+page. When a recipe opts into the stage cache
 (`[cache]` in the recipe, `stage_cache.py`), extraction and normalization
 results are stored as content-addressed local files. These are derived field
 values rather than copies of the sources, and they are PII artifacts covered
@@ -125,7 +132,8 @@ appear in them, and they are checked by being written and then deleted.
 
 | Artifact | Written by | Where it lives | Holds individual records? | Notes |
 | --- | --- | --- | --- | --- |
-| Source CSVs and intake PDFs | the operator; read by `pipeline._ingest_source` | wherever the operator keeps them | Yes | Read in place. Destruction of inputs is the operator's procedure, not the tool's. |
+| Source CSVs, intake PDFs and page images | the operator; read by `pipeline._ingest_source` | wherever the operator keeps them | Yes | Read in place. Destruction of inputs is the operator's procedure, not the tool's. |
+| Transient OCR page images | pytesseract (`save`), inside the extraction child | a scratch directory per document, `constituent-reconciler-extract-*` under the system temporary directory | Yes: a copy of the page | Removed by the parent when the child exits or is killed (`extract/sandbox.py`); left behind only if the parent itself is killed. Under `[extract] sandbox = false` pytesseract writes to the system temporary directory and removes each copy itself, which a killed process skips. Outside `--out`, so not in `destruction.PII_ARTIFACTS`. |
 | `review_queue.csv` | `pipeline._write_review_queue` | the `--out` directory | Yes: field values of both records in every uncertain pair, plus source spans when extracted | Written on every `constituent-reconcile run`, including `--dry-run`. |
 | `household_suggestions.csv` | `pipeline._write_household_suggestions` | the `--out` directory | Yes: the standardized street address and surname shared by one candidate household, plus its member cluster ids | Written only when a recipe sets `[household] enabled = true`; the grouping step is off by default. A suggestion, never a match decision. In the destruction inventory (`destruction.PII_ARTIFACTS`). |
 | `resolved.csv` | `connectors/csv_out.py` | the `--out` directory | Yes: golden-record field values, member ids, consent | The default write target. Skipped on `--dry-run`. |
@@ -156,7 +164,7 @@ appear in them, and they are checked by being written and then deleted.
 | `ai_usage.json` | `assistant/rate_limit.py`, via any `ai-*` command that calls a provider | the `--out` directory | No | A list of call timestamps backing the per-minute and daily caps. No record id, prompt, or field value. Not in the destruction inventory. |
 | `run_manifest.json` | `manifest.py` via `constituent-reconcile run` | the `--out` directory | No field values | Input file digests, column mappings, thresholds, and versions, for reproducing a run. |
 | `run_summary.json` | `pipeline._write_run_summary` | the `--out` directory | No | Per-stage counts, cache hit counts, and durations; content-free by construction. |
-| `run_report.json` | `cli._write_run_report` over `quality.py` | the `--out` directory | No | Run counts plus the per-source data-quality aggregate (completeness, normalization failure rates, consent coverage, duplicate density), already small-cell suppressed under the active policy. |
+| `run_report.json` | `cli._write_run_report` over `quality.py` | the `--out` directory | No | Run counts, the paths of files read, skipped and unreadable (each skip and each unreadable document with its reason), plus the per-source data-quality aggregate (completeness, normalization failure rates, consent coverage, duplicate density), already small-cell suppressed under the active policy. |
 | `comparable_report.json` | `pipeline._write_comparable_report` over `suppression.py` | the `--out` directory | No | The comparable-database posture's suppressed aggregate. Cell values are integers or the string `suppressed`, never a record id or a field value. |
 | `eval/report.md` | `report.py` via `constituent-reconcile eval` | the path given to `--out` | No | Match-quality rates on seeded synthetic fixtures; the fixtures contain no real personal data. |
 | Terminal output | `report.render_run_summary`, `suppression.render_summary` | the operator's terminal | No | Per-stage counts and the suppressed aggregate. |

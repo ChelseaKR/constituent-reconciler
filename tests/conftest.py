@@ -21,7 +21,17 @@ from pathlib import Path
 
 import pytest
 
-from constituent_reconciler.testing import make_pdf
+from constituent_reconciler.testing import make_pdf, require_real_ocr
+
+
+@pytest.fixture()
+def real_ocr() -> None:
+    """Real Tesseract OCR, or a skip naming what is missing (a failure in CI).
+
+    For a test that exists to show what Tesseract reads; see
+    ``testing.require_real_ocr``.
+    """
+    require_real_ocr()
 
 
 class FakeAirtableTransport:

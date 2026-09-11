@@ -6,9 +6,16 @@ dependency on reportlab, fpdf2, or any PDF-creation library, and its output is
 byte-for-byte deterministic for a given input. The test suite uses it to build
 throwaway intake forms, and ``eval/fixtures/extraction/make_fixtures.py`` uses
 it to regenerate the committed labeled extraction fixtures.
+
+``make_form_image`` is its counterpart for photographed and scanned pages.
 """
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from PIL.Image import Image
 
 
 def make_pdf(lines: list[str]) -> bytes:
@@ -74,3 +81,62 @@ def make_pdf(lines: list[str]) -> bytes:
     w(trailer.encode("latin-1"))
 
     return b"".join(parts)
+
+
+def make_form_image(
+    lines: list[str],
+    *,
+    size: tuple[int, int] = (1700, 2200),
+    font_px: int = 44,
+    background: int = 255,
+) -> Image:
+    """Render intake-form lines as an upright greyscale page image.
+
+    The image counterpart of ``make_pdf``: black text in Pillow's bundled
+    scalable font on a plain page, one entry per line, at a size Tesseract reads
+    reliably. The default page is 1700 x 2200 pixels, a letter page at 200 dots
+    per inch. Deterministic for a given Pillow, which bundles both the font and
+    the rasterizer. Pillow is imported here rather than at module level so the
+    rest of this module works without it.
+    """
+    from PIL import Image as PILImage
+    from PIL import ImageDraw, ImageFont
+
+    image = PILImage.new("L", size, background)
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default(size=font_px)
+    top = 160
+    for line in lines:
+        draw.text((150, top), line, fill=0, font=font)
+        top += int(font_px * 1.9)
+    return image
+
+
+#: Set to "1" where a skip of the real-OCR tests must count as a failure (CI).
+REQUIRE_TESSERACT_ENV = "CONSTITUENT_RECONCILER_REQUIRE_TESSERACT"
+
+
+def require_real_ocr() -> None:
+    """Return if real Tesseract OCR can run here; otherwise skip, or fail under CI.
+
+    A test that exists to show what Tesseract reads cannot pass by substituting
+    its answer. Where Tesseract, its ``eng`` and ``osd`` language data, or
+    pytesseract is missing, this skips the calling test and names what is
+    missing, unless ``REQUIRE_TESSERACT_ENV`` is ``"1"``: then the same absence
+    fails it. CI sets that on the job that installs Tesseract, so a runner that
+    lost the binary cannot turn every real-OCR test into a skip and report
+    green. pytest is imported here, not at module level, so the rest of this
+    module works without it.
+    """
+    import os
+
+    import pytest
+
+    from constituent_reconciler.extract.image import ocr_unavailable_reason
+
+    reason = ocr_unavailable_reason()
+    if reason is None:
+        return
+    if os.environ.get(REQUIRE_TESSERACT_ENV) == "1":
+        pytest.fail(f"{REQUIRE_TESSERACT_ENV}=1 and real OCR cannot run: {reason}")
+    pytest.skip(f"real OCR cannot run here: {reason}")

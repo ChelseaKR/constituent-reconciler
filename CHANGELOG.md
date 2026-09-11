@@ -6,7 +6,79 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 ## [Unreleased]
 
+### Added
+- **Photographed and scanned intake forms are read as documents (#143).**
+  Under `[extract] backend = "pdfplumber+ocr"`, a folder source now reads
+  `.jpg`, `.jpeg`, `.png`, `.tif` and `.tiff` files through the local
+  Tesseract path an image-only PDF page already used (`extract/image.py`).
+  Each image is one page and each frame of a multi-page TIFF one more; each
+  field's span names the image, the page, and a box in the image's pixels as a
+  viewer shows it, and reaches the review queue CSV and the review page
+  unchanged. A page photographed sideways or upside down is turned upright, by
+  its EXIF orientation tag and then by Tesseract's orientation detection,
+  whose turn is kept only when the page reads better for it. Refused with a
+  named reason and listed as unreadable, never counted as a page: undecodable
+  or truncated data, more than 50 frames, a frame over 50,000,000 pixels
+  (judged from its header before decoding), and pixels deeper than eight bits,
+  which Pillow would clip to white. `eval/extraction-report.md` scores the
+  image fixtures as a row of their own, 24 of 24 predicted fields correct and
+  24 of 25 labeled fields found, the miss being the planted worded date. Not
+  in this change: HEIC, merging a form photographed page by page into one
+  record, and any claim about handwriting.
+- **CI runs the real Tesseract binary.** The `verify` job installs
+  `tesseract-ocr` with its `eng` and `osd` data and sets
+  `CONSTITUENT_RECONCILER_REQUIRE_TESSERACT=1`, which turns the real-OCR
+  tests' skip into a failure there. Before this no test ran the binary
+  anywhere: every OCR test substituted its output, so the scanned-PDF path
+  had never executed against Tesseract. `make install` now installs the `ocr`
+  extra.
+
 ### Fixed
+- **A killed OCR parse left a copy of the intake page in the system
+  temporary directory.** pytesseract writes each page image to `tempfile`'s
+  directory for the Tesseract binary to read and deletes it in a `finally`,
+  which the sandbox's SIGKILL at a limit skips; the Tesseract subprocess also
+  kept running after the kill. Each parse now gets a scratch directory the
+  parent removes once the child exits or is killed, and the child leads a
+  process group the parent kills whole. `docs/DATA-FLOW-AND-RETENTION.md` said
+  inputs are "never copied", which was untrue of every OCR'd page; it now says
+  what is copied, where, and for how long.
+- **Two documents said a low-confidence OCR page goes to review; nothing
+  sends it there.** `extract/ocr.py` said such a page "routes to review", and
+  `docs/THREAT-MODEL.md` that low-confidence values "inherit" the page score.
+  The threshold has one effect, offering the page to a model seam when one is
+  enabled, and `pdfplumber+ocr` enables none; no record carries an extraction
+  confidence. Both now say so. Whether a page below the threshold should be
+  held for a person is an open decision, not something this change settles.
+- **The test of the OCR-unavailable message ran only where OCR could not.**
+  `test_run_tesseract_raises_clearly_when_pytesseract_unavailable` skipped
+  wherever pytesseract was installed. It now simulates the absence.
+- **A document the tool could not read was reported as a blank page.** When
+  the sandboxed parse of an intake document failed closed (the child was
+  killed at the wall-clock or CPU limit, the input was over the size cap, or
+  the parser crashed on the bytes), the extractor returned a zero-confidence
+  placeholder page carrying a note that said why. The pipeline used the note
+  only to keep the result out of the stage cache, then counted the placeholder
+  in `pages_dropped`, the column for a page that was read and held no name. So
+  a hostile file and a blank sheet of paper produced the same line in the run
+  summary and the same number in `run_report.json`, and the reason was
+  discarded. A new `IngestReport.documents_unreadable` names each such
+  document with its reason; it is in neither page count, it appears in the run
+  summary as `unreadable docs:`, in `run_report.json` as `documents_unreadable`
+  and in the migration summary as a count. The field is additive; the meaning
+  of `pages_dropped` is unchanged, and it is now what that field always said it
+  was. `test_sandbox_kill_marks_the_extraction_not_cacheable` asserted
+  `pages_dropped == 1` for a killed parse, which pinned the defect, and now
+  asserts the corrected accounting.
+
+  The same fix corrects six sentences that said such a document is "routed to
+  human review", in `README.md`, `docs/THREAT-MODEL.md`, `config.py` and
+  `extract/sandbox.py`, which held three of them; a seventh, in the threat
+  model's sandbox entry, said it "lands in human review" and is corrected in
+  the same series. Nothing routed it anywhere: the review queue holds record
+  pairs, and a document nobody could read produces no record to pair. It is now
+  listed where the operator reads the run's accounting, with the reason.
+
 - **The scan that was meant to catch stale release prose read six files
   carrying it and reported clean.** The check added a day earlier holds one
   rule over every tracked file: once a release tag exists, no tracked prose
