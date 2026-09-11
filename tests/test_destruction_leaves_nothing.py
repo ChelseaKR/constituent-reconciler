@@ -62,6 +62,7 @@ import constituent_reconciler.destruction as destruction
 from constituent_reconciler import compare, compare_apply, pipeline
 from constituent_reconciler.assistant.provider import ProviderResult
 from constituent_reconciler.cli import main
+from constituent_reconciler.connectors import civicrm_source
 from constituent_reconciler.destruction import PROVENANCE_FILENAME, destroy
 from constituent_reconciler.provenance import ProvenanceLog, verify_log
 from constituent_reconciler.review.session import APPROVED, ReviewSession
@@ -92,6 +93,7 @@ VERIFIED_CIVICRM_VERSION = "6.17.2"
 #: destruction pass and none of them may be readable anywhere afterwards.
 SWEPT_BY_CONTENT: dict[str, str] = {
     "resolved.csv": "constituent-reconcile run, csv connector",
+    "existing_snapshot.csv": "constituent-reconcile run, existing side pulled from a connector",
     "review_queue.csv": "constituent-reconcile run, on the uncertain pair the fixture plants",
     "civicrm_import.csv": "constituent-reconcile run, civicrm_csv connector",
     "salesforce_import.csv": "constituent-reconcile run, salesforce_csv connector",
@@ -309,6 +311,80 @@ def _text_sourced_record_id(out_dir: Path) -> str:
             if not member.startswith("existing:"):
                 return member
     raise AssertionError("the text intake produced no record id")
+
+
+class _PullingCivicrm:
+    """A CiviCRM double whose contacts carry planted values.
+
+    One page shorter than the default page size, so the pull makes one call
+    and stops. The point of the scenario is the file the pull writes: a copy
+    of real constituent records, taken out of a CRM into the out directory.
+    """
+
+    def post(self, url: str, *, headers: dict[str, str], body: bytes) -> tuple[int, bytes]:
+        contacts = [
+            {
+                "id": 501,
+                "external_identifier": "E501",
+                "first_name": "Maria",
+                "last_name": SENTINEL_SURNAME,
+                "birth_date": "1985-03-14",
+                "email_primary.email": SENTINEL_EMAIL,
+                "phone_primary.phone": "530-555-0101",
+            }
+        ]
+        return 200, json.dumps({"values": contacts}).encode("utf-8")
+
+
+def _build_pull_scenario(root: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """``constituent-reconcile run`` with the existing side pulled from a CiviCRM double.
+
+    Absolute paths throughout: another scenario has already chdir'd, and a
+    recipe resolves its inputs against its own directory either way.
+    """
+
+    work = root / "pull"
+    work.mkdir()
+    out_dir = work / "out"
+    (work / "intake.csv").write_text(
+        "First Name,Last Name,DOB,Email,Phone,Consent\n"
+        f"Maria,{SENTINEL_SURNAME},1985-03-14,{SENTINEL_EMAIL},530-555-0101,granted\n",
+        encoding="utf-8",
+    )
+    recipe = work / "recipe.toml"
+    recipe.write_text(
+        textwrap.dedent("""\
+            [input]
+            incoming = "intake.csv"
+            existing = "connector:civicrm"
+            id_column = "id"
+
+            [mapping]
+            first_name = "First Name"
+            last_name  = "Last Name"
+            dob        = "DOB"
+            email      = "Email"
+            phone      = "Phone"
+
+            [consent]
+            column = "Consent"
+
+            [source]
+            endpoint = "https://crm.invalid/civicrm/ajax/api4"
+
+            [output]
+            connector = "csv"
+            """),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CIVICRM_API_KEY", "sweep-key")
+    monkeypatch.setattr(civicrm_source, "UrllibTransport", lambda *a, **k: _PullingCivicrm())
+    assert main(["run", "--config", str(recipe), "--out", str(out_dir)]) == 0
+    snapshot = out_dir / "existing_snapshot.csv"
+    assert SENTINEL_SURNAME.lower() in snapshot.read_text(encoding="utf-8").lower(), (
+        "the pulled snapshot must carry a planted value, or its destruction proves nothing"
+    )
+    return out_dir
 
 
 def _build_run_scenario(root: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -653,6 +729,7 @@ def _built_out_dirs(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[s
             "run": _build_run_scenario(root, monkeypatch),
             "cutover": _build_cutover_scenario(root),
             "repair": _build_repair_scenario(root, monkeypatch),
+            "pull": _build_pull_scenario(root, monkeypatch),
         }
 
 

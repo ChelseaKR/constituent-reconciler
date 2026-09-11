@@ -246,6 +246,32 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print(f"policy error: {error}", file=sys.stderr)
         return 2
     out_dir = Path(args.out)
+    snapshot = None
+    if recipe.existing_connector is not None:
+        if args.dry_run:
+            # --dry-run is network-free, and a pull is a network read. Running
+            # without the existing side instead would silently match every
+            # incoming record against nothing and call them all new.
+            print(
+                f"dry run: this recipe pulls the existing side from "
+                f"{recipe.existing_connector!r}, and a dry run makes no network call. "
+                f"Run without --dry-run to pull, or point [input] existing at a snapshot "
+                f"file to replay one.",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            recipe, snapshot = pipeline.pull_existing(recipe, out_dir)
+        except PolicyViolation as error:
+            print(f"policy error: {error}", file=sys.stderr)
+            return 2
+        except ConnectorError as error:
+            print(f"connector error: {error}", file=sys.stderr)
+            return 2
+        print(
+            f"pulled {snapshot.rows} existing record(s) from {snapshot.connector} "
+            f"({snapshot.api_version}) into {snapshot.path}"
+        )
     # A dry run must not touch disk, so it also runs without the stage cache:
     # neither reading a stale entry nor writing a fresh one.
     cache = None if args.dry_run else stage_cache.for_recipe(recipe, out_dir)
@@ -263,7 +289,12 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print(render_run_summary(result, withheld=len(withheld)))
         try:
             summary = pipeline.export(
-                result, recipe, out_dir=out_dir, dry_run=args.dry_run, progress=progress
+                result,
+                recipe,
+                out_dir=out_dir,
+                dry_run=args.dry_run,
+                source_snapshot=snapshot.as_manifest_entry() if snapshot else None,
+                progress=progress,
             )
         except PolicyViolation as error:
             print(f"\npolicy error: {error}", file=sys.stderr)
