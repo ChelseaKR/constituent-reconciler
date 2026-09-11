@@ -29,9 +29,9 @@ from constituent_reconciler import (
     suppression,
 )
 from constituent_reconciler.config import Recipe
-from constituent_reconciler.connectors import get_factory
+from constituent_reconciler.connectors import get_factory, get_source_factory
 from constituent_reconciler.connectors.airtable import Transport as AirtableTransport
-from constituent_reconciler.connectors.base import Connector, WriteResult
+from constituent_reconciler.connectors.base import Connector, SourceConnector, WriteResult
 from constituent_reconciler.connectors.civicrm import Transport
 from constituent_reconciler.connectors.crm_csv import CrmCsvConnector
 from constituent_reconciler.connectors.salesforce import Transport as SalesforceTransport
@@ -1380,6 +1380,39 @@ def build_connector(
             f"Use the csv connector or a local target."
         )
     return connector
+
+
+def build_source_connector(
+    recipe: Recipe,
+    *,
+    transport: Transport | None = None,
+) -> SourceConnector:
+    """Construct the read-only source this recipe pulls the existing side from.
+
+    The mirror of ``build_connector``, refusing on the same rule: under a
+    policy pack that requires local targets, a pull that crosses the network is
+    refused before a byte moves. Reading a constituent file out of a hosted CRM
+    is an egress as surely as writing one, and the DV pack forbids both.
+    """
+
+    if recipe.existing_connector is None:
+        raise ValueError(
+            "this recipe reads the existing side from a file; there is no source connector "
+            'to build (set [input] existing = "connector:<name>" to pull one)'
+        )
+    transports: dict[str, object] = {}
+    if transport is not None:
+        transports["civicrm"] = transport
+    source = get_source_factory(recipe.existing_connector)(recipe.source, transports)
+
+    if recipe.require_local_targets and not source.is_local:
+        raise PolicyViolation(
+            f"policy pack {recipe.policy_pack!r} forbids pulling the existing side from the "
+            f"non-local source {source.name!r}: reading constituent records out of a hosted "
+            f"system is an egress the same as writing them. Export them to a local file and "
+            f"point [input] existing at that file."
+        )
+    return source
 
 
 @dataclass(frozen=True)
