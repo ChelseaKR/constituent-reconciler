@@ -299,14 +299,107 @@ OCR_CASES: tuple[OCRCase, ...] = (
 # several field combinations. Deterministic -- no model call needed, since
 # the question is what the *payload* contains before it would ever reach a
 # provider.
+#
+# Each case carries ``must_withhold``: for every policy pack the eval runs,
+# the exact set of fields the AI assistant must not be shown. That table is
+# **the oracle**. It is literal data written here, not something derived by
+# asking ``consent_filter.filter_record`` what it withheld -- which is what
+# the eval used to do, and why a filter that withheld nothing was reported as
+# leaking nothing. Changing the filter cannot change these values.
+#
+# ``CONSENT_LEAKAGE_PACKS`` is part of the fixture rather than the eval so a
+# pack can never be run without a declared expectation for it: the eval
+# counts the decisions it judged against the decisions the fixtures present
+# and fails when the two disagree.
 # ---------------------------------------------------------------------------
 
-CONSENT_LEAKAGE_CASES: tuple[dict[str, object], ...] = (
-    {"status": "revoked", "fields": ("first_name", "last_name", "dob", "email", "phone")},
-    {"status": "", "fields": ("first_name", "last_name", "dob")},  # absent
-    {"status": "granted", "scope": ("civicrm",), "fields": ("first_name", "email")},
-    {"status": "granted", "expired": True, "fields": ("first_name", "last_name")},
-    {"status": "granted", "future_dated": True, "fields": ("dob", "email")},
+#: The policy packs every consent-leakage case is evaluated under.
+CONSENT_LEAKAGE_PACKS: tuple[str, ...] = ("default", "dv", "hipaa")
+
+
+@dataclass(frozen=True)
+class ConsentLeakageCase:
+    """One synthetic record, plus what each policy pack must withhold from it.
+
+    ``fields`` are the canonical field names the record carries; every one of
+    them gets a sentinel value (``consent_leakage._SENTINEL_VALUES``) that is
+    searched for in the payloads the assistant would send. ``must_withhold``
+    maps each pack in :data:`CONSENT_LEAKAGE_PACKS` to the subset of
+    ``fields`` that pack must refuse to show; every field not named there is
+    asserted to be *visible*, so a filter that withholds everything fails too
+    rather than trivially satisfying a leak-only check.
+    """
+
+    #: Human-readable name for the consent state, used in findings.
+    name: str
+    status: str
+    fields: tuple[str, ...]
+    must_withhold: dict[str, tuple[str, ...]]
+    scope: tuple[str, ...] = ()
+    expired: bool = False
+    future_dated: bool = False
+
+
+#: ``default`` does not set ``require_consent``, so it withholds nothing for a
+#: consent reason and every field decision under it is a "must be visible"
+#: assertion. ``dv`` and ``hipaa`` both set it, so each case's whole field set
+#: must be withheld under them. Stating that per pack -- rather than excusing
+#: ``default`` as "the permissive one" -- is what lets the eval judge all
+#: three packs instead of only the two that happen to withhold something.
+CONSENT_LEAKAGE_CASES: tuple[ConsentLeakageCase, ...] = (
+    ConsentLeakageCase(
+        name="revoked",
+        status="revoked",
+        fields=("first_name", "last_name", "dob", "email", "phone"),
+        must_withhold={
+            "default": (),
+            "dv": ("first_name", "last_name", "dob", "email", "phone"),
+            "hipaa": ("first_name", "last_name", "dob", "email", "phone"),
+        },
+    ),
+    ConsentLeakageCase(
+        name="absent",
+        status="",
+        fields=("first_name", "last_name", "dob"),
+        must_withhold={
+            "default": (),
+            "dv": ("first_name", "last_name", "dob"),
+            "hipaa": ("first_name", "last_name", "dob"),
+        },
+    ),
+    ConsentLeakageCase(
+        name="out-of-scope",
+        status="granted",
+        scope=("civicrm",),
+        fields=("first_name", "email"),
+        must_withhold={
+            "default": (),
+            "dv": ("first_name", "email"),
+            "hipaa": ("first_name", "email"),
+        },
+    ),
+    ConsentLeakageCase(
+        name="expired",
+        status="granted",
+        expired=True,
+        fields=("first_name", "last_name"),
+        must_withhold={
+            "default": (),
+            "dv": ("first_name", "last_name"),
+            "hipaa": ("first_name", "last_name"),
+        },
+    ),
+    ConsentLeakageCase(
+        name="future-dated",
+        status="granted",
+        future_dated=True,
+        fields=("dob", "email"),
+        must_withhold={
+            "default": (),
+            "dv": ("dob", "email"),
+            "hipaa": ("dob", "email"),
+        },
+    ),
 )
 
 

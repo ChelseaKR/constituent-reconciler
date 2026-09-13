@@ -38,9 +38,15 @@ Grounding rate: **100.0%** (6 of 6 claims verified across 2 synthetic pairs). Ev
 
 ## 4. Consent/policy leakage
 
-`provider=none (deterministic, no model call) model=n/a prompt_version=assistant-prompts-2026-08-v1 commit=ca18a069bf03 date=2026-08-22 status=deterministic`
+`provider=none (deterministic, no model call) model=n/a prompt_version=assistant-prompts-2026-08-v1 commit=56adbff7ec48 date=2026-09-13 status=deterministic`
 
-Deterministic (no model call): 15 checks across 5 fixtures x 3 policy packs. **Leaks found: 0.** Gate: **PASS**.
+Deterministic (no model call): **42 of 42** consent decisions judged across 5 fixtures x 3 policy packs (15 record-and-pack combinations). Each decision is judged against the fixture's own declared must-withhold table, not against what the filter reported withholding. **Leaks found: 0.** Gate: **PASS**.
+
+| Policy pack | Must be withheld | Must stay visible |
+|---|---|---|
+| `default` | 0 | 14 |
+| `dv` | 14 | 0 |
+| `hipaa` | 14 | 0 |
 
 ## 5. Unanswerable / query-structuring (refused to guess)
 
