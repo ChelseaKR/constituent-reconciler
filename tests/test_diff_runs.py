@@ -2,7 +2,7 @@
 
 An operator re-runs the same recipe every month and defends the new numbers
 against the old ones. ``compare`` answers a different question (two sources
-inside one run), so until now that defence was two output directories and a
+inside one run), so until now that defense was two output directories and a
 pair of eyes.
 
 The failure mode this suite is written against is not a wrong count. It is a

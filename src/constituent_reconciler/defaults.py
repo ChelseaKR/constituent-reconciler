@@ -3,7 +3,7 @@
 This module is the contribution of the project as much as the orchestration is.
 A small nonprofit cannot label training pairs or tune match weights, so the
 matcher ships with hand-set m and u probabilities per comparison level. No
-training, no labeled data, no expectation-maximisation: the model is fully
+training, no labeled data, no expectation-maximization: the model is fully
 specified here and runs deterministically.
 
 m_probability is read as "given two records are the same person, how often does
@@ -104,7 +104,7 @@ def _transposed_condition(given: str, family: str) -> str:
 
     Jaro-Winkler rather than equality on each side, so that a transposition
     carrying an ordinary typo ("Wiechec Joshzua" against "Joshua Wiechec") is
-    still recognised as one. The threshold is the same ``_NAME_CLOSE`` the
+    still recognized as one. The threshold is the same ``_NAME_CLOSE`` the
     same-field close level uses: a name pair counts as crossed on exactly the
     similarity that counts as close when it is not crossed.
 
@@ -226,7 +226,7 @@ def _last_name_comparison(column: str = "last_name") -> dict[str, Any]:
     values that are crossed rather than wrong would otherwise be scored as a
     surname disagreement, which carries a weight near 1/48. That is the whole
     reason a transposed duplicate used to be unreachable. It was not merely
-    unsupported, it was penalised twice, once by each name field, for a single
+    unsupported, it was penalized twice, once by each name field, for a single
     mistake made once, and before ``_NAME_DIFFERENT_M`` was corrected each of
     those penalties was near 1/95.
     """

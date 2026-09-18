@@ -203,7 +203,7 @@ match the numeric date pattern, so PDF-carried people reach the matcher with
 fewer comparison fields than the same people as CSV rows. Candidate pairs,
 clusters, and written counts therefore differ from the CSV-only run at the
 same seed by construction. The report says so in its own text, and
-`tests/test_corpusgen_pdf.py` pins the behaviour so it stays a documented
+`tests/test_corpusgen_pdf.py` pins the behavior so it stays a documented
 property rather than a surprise.
 
 The PDF writer (`tools/corpusgen/pdfwrite.py`) is dev tooling built on the

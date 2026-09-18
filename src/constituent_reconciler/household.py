@@ -215,7 +215,7 @@ def plan_household_writes(
     CRM on incomplete evidence, and the withheld member's *absence* from a
     household the reviewer confirmed as theirs is itself an inference about that
     person. Recording the skip with a named reason keeps the fact visible
-    without publishing the inference. This is the one judgement in this feature
+    without publishing the inference. This is the one judgment in this feature
     that is arguable, and it is stated in the PR rather than buried.
 
     A single-member household is skipped too: there is no relationship to

@@ -1,6 +1,6 @@
 """The offline auditor's trace (``constituent-reconcile explain``).
 
-The tests are organised around the ways a trace could look like an answer while
+The tests are organized around the ways a trace could look like an answer while
 being one: a redacted rendering that still carries a field value, a ``--verify``
 that agrees with a tampered log, an absent artifact reported as an absent fact,
 and an unknown id traced as an empty cluster.

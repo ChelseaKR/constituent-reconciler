@@ -304,7 +304,7 @@ carries record ids, verdicts, reviewer names, and timestamps only). A correction
 is the explicit exception described above and is isolated in `corrections.json`. Under the
 `dv` policy pack it refuses any non-loopback bind, fail-closed, so the review
 surface cannot become an egress path for client information. The pages are built for WCAG 2.2 AA: a real
-comparison table, status shown by text and not colour alone, and decision buttons
+comparison table, status shown by text and not color alone, and decision buttons
 that work with the keyboard and with no JavaScript (`A` approve, `C` correct,
 `R` reject, `J`
 and `K` to move between pairs). Pass `--no-browser` to skip opening a window, or
@@ -470,7 +470,7 @@ Three refusals are worth knowing before you rely on it:
 
 * **Consent is never inferred.** Every pulled record carries an unmapped
   consent token, which the consent lifecycle treats as withheld. Mapping a
-  vendor's privacy flags onto a consent scope is a judgement with legal weight
+  vendor's privacy flags onto a consent scope is a judgment with legal weight
   that differs per organization, so no default ships; under a
   consent-requiring pack, merged records stay withheld until a mapping exists.
 * **A pack that requires local targets refuses the pull**, before a request is
@@ -533,7 +533,7 @@ merged into one.
 An image the tool cannot read is listed in the ingest report as unreadable,
 with its reason, and the run continues: bytes no decoder recognizes, data that
 ends early, more than 50 pages in one file, a page over 50,000,000 pixels
-(refused from its header before anything is decoded, the defence against a
+(refused from its header before anything is decoded, the defense against a
 decompression bomb), or pixels deeper than eight bits. HEIC, the iPhone
 default, is not read; export such photos as JPEG. The fixtures and tests are
 printed forms, so nothing here measures handwriting and no claim is made
@@ -778,7 +778,7 @@ locally (this table plus the linked doc) pending a filed issue. Last reviewed:
 | AI Evaluation | Applies to opt-in extraction seams and the AI assistant package | Model/data cards, fail-closed kappa, mocked contract/fallback tests, and PII-free token/cost telemetry landed for the extraction seam; the assistant package adds a live, committed adversarial-refusal/OCR-precision/citation-grounding/consent-leakage/unanswerable-query eval suite with full provenance ([eval/ai/report.md](eval/ai/report.md)); live model quality remains deployer-specific either way | [docs/ROADMAP.md](docs/ROADMAP.md) § AI Evaluation Standard applicability, [docs/adr/0014-runtime-ai-at-the-edges.md](docs/adr/0014-runtime-ai-at-the-edges.md) |
 | Documentation | Applies | Enforced — this table, canonical ADR log and template, CITATION.cff, CHANGELOG, model/data cards, and the pinned telemetry shim are present | [docs/adr/](docs/adr/) |
 | Responsible-Tech Framework | Applies (core to this repo's identity) | Partial — DV/VAWA/FVPSA invariants, threat model, ethics failure modes, and dated bias evidence are committed; the human accessibility/adoption gates remain | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) |
-| Incident Response | Applies | Adopted; no incident has been recorded for this repo to date, so `docs/incidents/` does not exist yet. The vulnerability-reporting channel and acknowledgement SLA are in SECURITY.md; an incident would follow the portfolio severity ladder and `incident` label convention with a committed postmortem | [SECURITY.md](SECURITY.md) |
+| Incident Response | Applies | Adopted; no incident has been recorded for this repo to date, so `docs/incidents/` does not exist yet. The vulnerability-reporting channel and acknowledgment SLA are in SECURITY.md; an incident would follow the portfolio severity ladder and `incident` label convention with a committed postmortem | [SECURITY.md](SECURITY.md) |
 | Performance | Applies — operator-local CLI plus a locally served review UI; no hosted service, so there is no availability or latency SLO to publish | Measured, not gated — dated per-stage baselines over a large synthetic corpus are committed under `eval/` (`make perf-baseline`, and `make perf-baseline-pdf` for the mixed CSV+PDF intake path). Both are local commands rather than CI jobs, so no performance budget is merge-blocking | `Makefile`, [eval/](eval/) |
 | AI Development Measurement | Applies | Outcome-side only — the metrics ledger and the solo-scale DORA review are the committed, dated artifact; activity counters (sessions, tokens, lines changed, percent AI-generated) are deliberately not tracked or gated here, and the DORA review first falls due with the first tagged release | [docs/ROADMAP.md](docs/ROADMAP.md) metrics ledger and § DORA, at solo scale |
 | Data Governance | Applies (constituent PII, including DV-survivor records: highest sensitivity) | Partial: the data-flow map, per-pack retention and destruction model, and `constituent-reconcile destroy` destruction certificates are committed; constituent data stays operator-local and is never stored in this repo (fixtures are synthetic); recipes are schema-validated fail-closed at load. Gap: no per-source data-card directory beyond the extraction seam's model and data cards, and backup remains the operator's responsibility (documented, not tested here) | [docs/DATA-FLOW-AND-RETENTION.md](docs/DATA-FLOW-AND-RETENTION.md), [docs/DATA-CARD.md](docs/DATA-CARD.md) |

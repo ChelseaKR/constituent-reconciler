@@ -26,7 +26,7 @@ Canonical rows only: CiviCRM's own field names (``birth_date``,
 ``email_primary.email``) are mapped here and never leave this module. Consent
 is not mapped at all -- every row carries ``UNMAPPED_CONSENT``, which the
 consent lifecycle withholds on, because deciding that a vendor privacy flag
-means consent for a scope is a per-organization judgement with legal weight.
+means consent for a scope is a per-organization judgment with legal weight.
 """
 
 from __future__ import annotations

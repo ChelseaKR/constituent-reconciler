@@ -62,7 +62,7 @@ honest scope of the claim and is stated as such.
 ### Accessibility is built in, to the WCAG 2.2 AA bar the project commits to
 
 The comparison is a real table with scoped headers; status is carried by a text
-label and a symbol, never colour alone; the decision controls are ordinary form
+label and a symbol, never color alone; the decision controls are ordinary form
 buttons that work with no JavaScript, so a keyboard reviewer completes a pass with
 Tab and Enter. The script only adds single-key shortcuts on top of controls that
 already work. A full axe audit and a screen-reader walkthrough remain a REVIEW

@@ -283,7 +283,7 @@ def render_eval_markdown(
     reproduce them. ``field_judge_ran`` says whether the LLM field judge was in
     the path at all; see :func:`_calibration_lines` for why a run without one
     reports "not applicable" rather than a kappa failure. Both default to the
-    ``constituent-reconcile eval`` behaviour, so committed fixture reports are unchanged.
+    ``constituent-reconcile eval`` behavior, so committed fixture reports are unchanged.
 
     ``controls`` carries the negative-control outcomes when the caller ran them
     (``constituent-reconcile eval --controls``). They render in their own
@@ -345,7 +345,7 @@ def render_eval_markdown(
         "A true pair goes unscored two ways, and this row counts both: blocking "
         "never generated it, or blocking generated it and the matcher scored it "
         "below the 0.001 floor that keeps near-zero pairs out of the result. The "
-        "row was labelled a blocking count until v0.8, which read as though only "
+        "row was labeled a blocking count until v0.8, which read as though only "
         "the blocking rules could reach these pairs. They are separate causes with "
         "separate fixes, and on the external benchmark the second was by far the "
         "larger of the two.",

@@ -78,7 +78,7 @@ def test_a_confirmed_household_with_every_member_written_is_planned() -> None:
 
 
 def test_a_withheld_member_stops_the_whole_household() -> None:
-    """The judgement this feature turns on.
+    """The judgment this feature turns on.
 
     Writing the other two would publish a household the reviewer never
     confirmed, and would say something about the withheld person by leaving

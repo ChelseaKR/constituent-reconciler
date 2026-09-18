@@ -40,7 +40,7 @@ Measured on 10,000 records with 5,000 published ground-truth pairs.
 | True pairs never scored | 61 |
 
 Read honestly: precision is still the strong half. Nothing was merged that should
-not have been, which is the behaviour the fail-closed design is built for.
+not have been, which is the behavior the fail-closed design is built for.
 Published FEBRL4 results from tuned academic systems still sit above this. These
 defaults are set for small nonprofit batches where a false merge is the expensive
 error, and that choice costs recall; the number is measured rather than asserted.
@@ -70,7 +70,7 @@ the result. Recomputing the blocked candidate set directly from the rules in
 | **Blocked, scored, dropped by the floor** | **287** |
 
 So 287 of the 344 were reachable by the comparison model all along, and the row
-labelled "candidate pairs after blocking" was counting kept pairs, not blocked
+labeled "candidate pairs after blocking" was counting kept pairs, not blocked
 ones, understating blocking by a factor of eighteen. Both labels are corrected in
 `report.py`, and the field carries a comment saying what it actually counts. A
 metric name that points a fix at the wrong module is worth more than a cosmetic
@@ -78,13 +78,13 @@ fix.
 
 ## What the missed pairs had in common
 
-Characterising the 1,144 missed pairs before changing anything, the largest
+Characterizing the 1,144 missed pairs before changing anything, the largest
 single class was one error mode: **the given name and the family name entered in
 opposite fields.** 298 missed pairs were crossed name pairs (220 exactly crossed,
 78 crossed with a typo on one side), including 230 of the 344 that were never
 scored at all.
 
-Crossed pairs were not merely unsupported by the model, they were penalised
+Crossed pairs were not merely unsupported by the model, they were penalized
 twice. Both name comparisons saw values that disagreed, each fired its
 "different" level at a weight near 1/95, and the product vetoed everything the
 other fields had to say. A pair agreeing exactly on date of birth and closely on
@@ -106,7 +106,7 @@ Three changes, in `normalize.py` and `defaults.py`:
 1. **A transposition comparison level** in both name comparisons. It reads all
    four name values, because to either comparison alone a crossed pair simply
    disagrees. Jaro-Winkler on each side at the same `_NAME_CLOSE` the same-field
-   close level uses, so a transposition carrying a typo is still recognised. The
+   close level uses, so a transposition carrying a typo is still recognized. The
    given-name comparison carries the evidence at a weight of 20; the surname
    comparison abstains at a weight of exactly 1, so one mistake is counted once
    rather than twice.
@@ -211,7 +211,7 @@ The obvious upgrade is a benchmark built from real person records, and the
 standard one is the North Carolina voter registry (the Leipzig NCVR sets, CC
 licensed and freely downloadable). This project declines it.
 
-A public voter file is a recognised locating vector for exactly the people the DV
+A public voter file is a recognized locating vector for exactly the people the DV
 policy pack exists to protect. Pulling one onto a contributor's disk, and wiring
 a public repository to fetch it on demand, to make a portfolio number look better
 is not a trade this project should make.
@@ -226,14 +226,14 @@ papering over.
 
 **Open question for the maintainer.** If NCVR is judged acceptable after all, it
 would raise the realism of the corpus at a real privacy cost, and it is a
-judgement call rather than an engineering one. Nothing here forecloses it.
+judgment call rather than an engineering one. Nothing here forecloses it.
 
 ## Provenance and licensing
 
 The FEBRL datasets originate with the Febrl project by Peter Christen
 (Australian National University). They are redistributed inside the
 [`recordlinkage`](https://github.com/J535D165/recordlinkage) Python package by
-Jonathan de Bruin under a 3-clause BSD licence.
+Jonathan de Bruin under a 3-clause BSD license.
 
 Nothing is vendored. `tools/benchmark/febrl4.py` fetches the two files at run
 time from a pinned upstream commit (`b93d9764`, recordlinkage v0.16) and verifies

@@ -5,7 +5,7 @@ script are inlined, and nothing is fetched from a network or a CDN. That keeps
 the UI working with no connection and is part of the no-egress guarantee.
 
 The markup is built for WCAG 2.2 AA. Status is carried by text and a symbol, not
-colour alone; the comparison is a real table with scoped headers; the decision
+color alone; the comparison is a real table with scoped headers; the decision
 controls are ordinary buttons that work without JavaScript, and a keyboard
 reviewer can complete a pass using Tab and the visible access keys. The script
 only adds single-key shortcuts on top of controls that already work.

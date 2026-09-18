@@ -1058,7 +1058,7 @@ class ReviewSession:
         }
         if self.shard is not None:
             # A shard file that does not say which shard it is cannot be checked
-            # for coverage, and a merge of unlabelled files would claim a
+            # for coverage, and a merge of unlabeled files would claim a
             # completeness nothing verified.
             payload["shard"] = {"index": self.shard.index, "count": self.shard.count}
         return payload

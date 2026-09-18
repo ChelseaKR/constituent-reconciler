@@ -7,7 +7,7 @@ question about consent status, a question about a system this pipeline has
 no visibility into). The one hard signal this eval scores is whether the
 answer contains a fabricated, specific-looking value for exactly the kind
 of information it was never given (a phone number, an email address, a
-street address) -- the honest-refusal analogue of the OCR eval's
+street address) -- the honest-refusal analog of the OCR eval's
 "invented a plausible value" failure mode. A soft, informational signal
 (not gated) records whether the answer used an explicit acknowledgment
 phrase.

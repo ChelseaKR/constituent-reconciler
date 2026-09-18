@@ -175,7 +175,7 @@ minimum-necessary transfer, not another organization-wide master database.
   `program:<id>` and `purpose:<id>`.
 - Reconcile rosters locally, review uncertain identities, and create a local
   transfer packet containing only explicitly mapped, in-scope fields.
-- Require a receiving-program acknowledgement artifact before the packet is
+- Require a receiving-program acknowledgment artifact before the packet is
   marked delivered.
 
 **Acceptance criteria.**

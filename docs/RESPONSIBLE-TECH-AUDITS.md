@@ -55,7 +55,7 @@ place. Family-name-first is the written convention in Chinese, Korean,
 Japanese, Hungarian and Vietnamese naming, so a form that labels one box "first
 name" collects transposed values from exactly those constituents; before this,
 both name comparisons scored the crossing as a disagreement and the pair was
-penalised twice for one mistake. The change was found and measured on an
+penalized twice for one mistake. The change was found and measured on an
 external benchmark ([`../BENCHMARK.md`](../BENCHMARK.md)) rather than on this
 fixture, and this class improving is corroboration rather than the target.
 
@@ -144,7 +144,7 @@ extraction seam are published as [`docs/MODEL-CARD.md`](MODEL-CARD.md) and
 
 The review queue is the human surface. As of v0.7 it is a local web UI
 (`constituent-reconcile review`) built to the WCAG 2.2 AA structural bar: a comparison table
-with scoped headers, status carried by text and a symbol rather than colour
+with scoped headers, status carried by text and a symbol rather than color
 alone, decision controls that work with the keyboard and with no JavaScript, and
 no external asset fetch. The axe AUTO-GATE now runs (`accessibility` job in
 `.github/workflows/ci.yml`, an axe-core scan over jsdom of the review queue's

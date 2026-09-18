@@ -2,7 +2,7 @@
 
 Every other eval in this repository scores the matcher against fixtures this
 repository also wrote. That is circular: the corpus, the error channels, and the
-ground truth all come from the same hand, so a favourable number partly measures
+ground truth all come from the same hand, so a favorable number partly measures
 the fixture author's imagination. FEBRL4 is the opposite arrangement. The corpus,
 the corruptions, and the ground truth are all third-party and published, and this
 repository only supplies the matcher.
@@ -24,7 +24,7 @@ What FEBRL4 is, stated plainly so no reader has to infer it:
 Why not a corpus of real people. The obvious upgrade is a benchmark built from
 real person records, and the standard one is the North Carolina voter registry
 (the Leipzig NCVR sets). This project declines it. A public voter file is a
-recognised locating vector for exactly the people the DV policy pack exists to
+recognized locating vector for exactly the people the DV policy pack exists to
 protect, and pulling one onto a contributor's disk to make a portfolio number
 look better is not a trade this repository should make. That constraint is not an
 accident of this benchmark; it is the reason open person-linkage corpora with
@@ -33,7 +33,7 @@ real ground truth are rare at all. docs/BENCHMARK.md records the decision.
 Licensing and provenance. The FEBRL datasets originate with the Febrl project by
 Peter Christen (Australian National University) and are redistributed inside the
 ``recordlinkage`` Python package by Jonathan de Bruin under a 3-clause BSD
-licence. Nothing is vendored here: the files are fetched at run time from a
+license. Nothing is vendored here: the files are fetched at run time from a
 pinned commit and verified against the SHA-256 digests below, and the download
 directory is gitignored so no benchmark data ever enters this repository.
 

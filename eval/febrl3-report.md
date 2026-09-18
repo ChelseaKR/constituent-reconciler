@@ -25,7 +25,7 @@ A false merge joins two different people and can corrupt a record irreversibly. 
 | F1, auto+review coverage | 85.4% | |
 | True pairs never scored | 203 | |
 
-A true pair goes unscored two ways, and this row counts both: blocking never generated it, or blocking generated it and the matcher scored it below the 0.001 floor that keeps near-zero pairs out of the result. The row was labelled a blocking count until v0.8, which read as though only the blocking rules could reach these pairs. They are separate causes with separate fixes, and on the external benchmark the second was by far the larger of the two.
+A true pair goes unscored two ways, and this row counts both: blocking never generated it, or blocking generated it and the matcher scored it below the 0.001 floor that keeps near-zero pairs out of the result. The row was labeled a blocking count until v0.8, which read as though only the blocking rules could reach these pairs. They are separate causes with separate fixes, and on the external benchmark the second was by far the larger of the two.
 
 ## Gate
 

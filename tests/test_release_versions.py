@@ -10,7 +10,7 @@ The failures it was written from, each of which reached a reader:
 
 * `CITATION.cff` carried `date-released: "2026-09-02"` on a day nothing was
   released. GitHub renders that field in its "Cite this repository" panel and
-  Zenodo reads it on import, so the claim travelled where the README that
+  Zenodo reads it on import, so the claim traveled where the README that
   contradicted it does not.
 * The README's Status line said `Beta (v0.7)` while the manifest, the changelog
   and the citation file had all moved to 0.8.0.
@@ -424,7 +424,7 @@ def test_the_claim_vocabulary_is_real_and_not_self_matching() -> None:
     assert CLAIMS_OF_NO_RELEASE, "an empty claim list scans every file and finds nothing"
     assert _claims_in(README_SAYS_NO_TAG), (
         "the vocabulary does not cover the one sentence this repository already pins "
-        "in both directions, so it is not a generalisation of anything"
+        "in both directions, so it is not a generalization of anything"
     )
     own = _own_docstrings()
     assert len(own) >= MIN_DOCSTRINGS_IN_THIS_MODULE, (
@@ -538,7 +538,7 @@ def test_no_documented_install_pins_a_tag_that_does_not_exist() -> None:
     README told a reader that "the 0.8.0 wheel predates `reconcile demo`; with
     that tag, clone the repository". Neither artifact was ever created, and the
     repository carried no tag at all when both sentences were written. Someone
-    following either instruction does not get the documented behaviour and then
+    following either instruction does not get the documented behavior and then
     a helpful error: they get ``Could not find a version that satisfies`` from a
     ref that does not resolve, several steps before the sentence they were
     reading applies.

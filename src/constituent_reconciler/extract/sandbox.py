@@ -74,7 +74,7 @@ _DEFAULT_MAX_INPUT_BYTES = 50 * 1024 * 1024  # 50 MiB
 _JOIN_GRACE_S = 10.0
 
 #: Prefix of each parse's scratch directory, so one left by a killed parent is
-#: recognisable under the system temporary directory.
+#: recognizable under the system temporary directory.
 SCRATCH_PREFIX = "constituent-reconciler-extract-"
 
 
@@ -192,7 +192,7 @@ def _extract_image_in_child(path: Path, conn: Connection, limits: ChildLimits) -
 def _kill(proc: BaseProcess) -> None:
     """Kill the child and everything it started, then reap it.
 
-    The child leads its own process group (``_enter_child``), so signalling the
+    The child leads its own process group (``_enter_child``), so signaling the
     group reaches a Tesseract grandchild as well. Before the child has made its
     group, and where process groups do not exist, the group signal fails and
     the child alone is killed.

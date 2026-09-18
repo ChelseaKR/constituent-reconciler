@@ -14,7 +14,7 @@ linkage.
 Three real options were considered.
 
 - **Splink** (Fellegi-Sunter, runs on DuckDB in-process). Unsupervised. Match
-  weights can be set directly, or estimated by expectation-maximisation without
+  weights can be set directly, or estimated by expectation-maximization without
   labels. Strong library, active maintenance, Apache-friendly ecosystem.
 - **dedupe** (the `dedupe` library / dedupe.io). Requires interactive active
   learning to label pairs, which the target user cannot do.
@@ -26,7 +26,7 @@ Three real options were considered.
 
 Wrap **Splink**. Configure it with **hand-set m and u probabilities per
 comparison level**, specified in `defaults.py`. No training, no
-expectation-maximisation, no labeled pairs. The model is fully specified in
+expectation-maximization, no labeled pairs. The model is fully specified in
 source, so a run is deterministic and reproducible, which the committed eval
 depends on.
 
@@ -38,7 +38,7 @@ The contribution of this project is therefore not the matcher. It is:
 
 ## Why hand-set m/u rather than EM
 
-Expectation-maximisation is unsupervised and would fit "no labeled pairs," but on
+Expectation-maximization is unsupervised and would fit "no labeled pairs," but on
 the small, varied data a single nonprofit holds it can converge to unstable
 weights, and its result is not reproducible without pinning seeds and training
 blocking rules. Hand-set weights trade a little adaptivity for determinism,

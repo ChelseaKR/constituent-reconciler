@@ -90,7 +90,7 @@ def make_form_image(
     font_px: int = 44,
     background: int = 255,
 ) -> Image:
-    """Render intake-form lines as an upright greyscale page image.
+    """Render intake-form lines as an upright grayscale page image.
 
     The image counterpart of ``make_pdf``: black text in Pillow's bundled
     scalable font on a plain page, one entry per line, at a size Tesseract reads
