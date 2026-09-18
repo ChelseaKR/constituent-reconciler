@@ -36,6 +36,10 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from constituent_reconciler.connectors.base import ConnectorError, WriteResult
+from constituent_reconciler.connectors.household_write import (
+    HOUSEHOLD_RELATIONSHIP_TYPE,
+    HouseholdWriteResult,
+)
 from constituent_reconciler.connectors.repair import (
     OP_FIELD_RESTORE,
     OP_SPLIT_CREATE,
@@ -44,6 +48,7 @@ from constituent_reconciler.connectors.repair import (
     RepairOperationResult,
     declare_repair,
 )
+from constituent_reconciler.household import HouseholdWrite
 from constituent_reconciler.models import GoldenRecord
 
 # Canonical field -> CiviCRM API v4 Contact writable field. Only fields that
@@ -325,6 +330,117 @@ class CivicrmConnector:
                     WriteResult(record.cluster_id, "created", str(created_id), payload=reported)
                 )
         return results
+
+    def write_households(
+        self,
+        households: Sequence[HouseholdWrite],
+        *,
+        dry_run: bool,
+    ) -> list[HouseholdWriteResult]:
+        """Create or reuse a Household contact and one relationship per member.
+
+        Household membership in CiviCRM is a Household *contact* plus a
+        ``Relationship`` row per member, so this makes at most one contact and
+        one relationship per member, and reuses both on a re-run. Idempotency is
+        a lookup, not a hope: the household is found by its
+        ``external_identifier``, and each relationship is looked up by
+        (household, member, type) before it would be created, so a second run
+        makes zero create calls.
+
+        A dry run makes **no** call at all -- not a read, not a lookup. The
+        preview is derived from the plan's own ids, matching ``write_all``'s
+        dry-run contract, so a preview cannot need a credential.
+
+        Nothing here decides who is in a household. ``household.plan_household_writes``
+        already refused any household with a withheld or unwritten member, so a
+        household reaching this method is one a reviewer confirmed and whose
+        every member landed.
+        """
+
+        results: list[HouseholdWriteResult] = []
+        for write in households:
+            if dry_run:
+                results.append(
+                    HouseholdWriteResult(
+                        household_id=write.household_id,
+                        external_id=write.external_id,
+                        action="would-write",
+                        members=tuple(member for member, _ in write.members),
+                    )
+                )
+                continue
+            results.append(self._write_household(write))
+        return results
+
+    def _write_household(self, write: HouseholdWrite) -> HouseholdWriteResult:
+        household_id = self._find_contact_id(write.external_id)
+        action = "updated"
+        if household_id is None:
+            created = self._call(
+                "Contact",
+                "create",
+                {
+                    "values": {
+                        "contact_type": "Household",
+                        "household_name": write.household_id,
+                        self.config.external_id_field: write.external_id,
+                    }
+                },
+            )
+            rows = created.get("values") or [{}]
+            household_id = rows[0].get("id")
+            if household_id is None:
+                raise ConnectorError(
+                    f"CiviCRM Contact.create returned no id for household "
+                    f"{write.external_id}; no relationship was created"
+                )
+            action = "created"
+        for _, member_external_id in write.members:
+            self._link_member(household_id, member_external_id, write.external_id)
+        return HouseholdWriteResult(
+            household_id=write.household_id,
+            external_id=str(household_id),
+            action=action,
+            members=tuple(member for member, _ in write.members),
+        )
+
+    def _link_member(self, household_id: Any, member_external_id: str, label: str) -> None:
+        """One ``Household Member of`` relationship, created only if absent."""
+
+        member_id = self._existing_contact_id(member_external_id) or self._find_contact_id(
+            member_external_id
+        )
+        if member_id is None:
+            raise ConnectorError(
+                f"CiviCRM has no contact for household member {member_external_id!r} "
+                f"(household {label}); refusing to leave a partial household"
+            )
+        existing = self._call(
+            "Relationship",
+            "get",
+            {
+                "where": [
+                    ["contact_id_a", "=", member_id],
+                    ["contact_id_b", "=", household_id],
+                    ["relationship_type_id:name", "=", HOUSEHOLD_RELATIONSHIP_TYPE],
+                ],
+                "select": ["id"],
+                "limit": 1,
+            },
+        )
+        if existing.get("values"):
+            return
+        self._call(
+            "Relationship",
+            "create",
+            {
+                "values": {
+                    "contact_id_a": member_id,
+                    "contact_id_b": household_id,
+                    "relationship_type_id:name": HOUSEHOLD_RELATIONSHIP_TYPE,
+                }
+            },
+        )
 
     def inspect_repair(self) -> dict[str, str]:
         """Read-only: the live destination version, for the repair capability gate.

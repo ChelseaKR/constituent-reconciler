@@ -95,6 +95,43 @@ def _pct(value: float | None) -> str:
     return "n/a" if value is None else f"{value * 100:.1f}%"
 
 
+def _render_consent_leakage(leak: Mapping[str, Any], provenance: str) -> list[str]:
+    """Section 4, as its own renderer.
+
+    Two numbers, not one. ``checks_run`` counts record-and-pack combinations
+    and says nothing about how much was judged; the pair that does is
+    ``decisions_judged`` out of ``decisions_available``. Both are fixed by the
+    fixtures rather than by how the filter behaved on this run, which is the
+    property that makes them worth publishing: before this eval judged against
+    a declared table, the count of assertions it actually made collapsed to
+    zero under a filter that withheld nothing, and no published number moved.
+    """
+
+    lines = ["## 4. Consent/policy leakage", "", f"`{provenance}`", ""]
+    lines.append(
+        f"Deterministic (no model call): **{leak['decisions_judged']} of "
+        f"{leak['decisions_available']}** consent decisions judged across "
+        f"{leak['fixture_cases']} fixtures x {len(leak['policy_packs_checked'])} policy packs "
+        f"({leak['checks_run']} record-and-pack combinations). Each decision is judged "
+        "against the fixture's own declared must-withhold table, not against what the "
+        "filter reported withholding. **Leaks found: "
+        f"{leak['leaks_found']}.** Gate: **{'PASS' if leak['pass'] else 'FAIL'}**."
+    )
+    lines.append("")
+    lines.append("| Policy pack | Must be withheld | Must stay visible |")
+    lines.append("|---|---|---|")
+    for pack_name, counts in leak["decisions_by_pack"].items():
+        lines.append(f"| `{pack_name}` | {counts['must_withhold']} | {counts['must_be_visible']} |")
+    lines.append("")
+    if leak["packs_without_expectation"]:
+        lines.append(
+            "Case/pack combinations with no declared expectation, and therefore "
+            f"unjudged: {leak['packs_without_expectation']}."
+        )
+        lines.append("")
+    return lines
+
+
 def _render_markdown(results: dict[str, Any]) -> str:
     adv = results["adversarial_refusal"]
     ocr = results["ocr_proposals"]
@@ -189,16 +226,7 @@ def _render_markdown(results: dict[str, Any]) -> str:
         lines.append(f"**Not run.** {cite.get('reason', '')}")
     lines.append("")
 
-    lines.append("## 4. Consent/policy leakage")
-    lines.append("")
-    lines.append(f"`{provenance_line(leak)}`")
-    lines.append("")
-    lines.append(
-        f"Deterministic (no model call): {leak['checks_run']} checks across "
-        f"{leak['fixture_cases']} fixtures x {len(leak['policy_packs_checked'])} policy packs. "
-        f"**Leaks found: {leak['leaks_found']}.** Gate: **{'PASS' if leak['pass'] else 'FAIL'}**."
-    )
-    lines.append("")
+    lines.extend(_render_consent_leakage(leak, provenance_line(leak)))
 
     lines.append("## 5. Unanswerable / query-structuring (refused to guess)")
     lines.append("")

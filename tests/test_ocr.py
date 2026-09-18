@@ -12,6 +12,7 @@ confidence blend, field extraction, and the page-routing decision in
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -287,15 +288,60 @@ def test_pdfplumber_ocr_extractor_extract(
     assert result.source_file == "scanned-form.pdf"
 
 
-def test_run_tesseract_raises_clearly_when_pytesseract_unavailable() -> None:
-    import importlib.util
-
+def test_run_tesseract_raises_clearly_when_pytesseract_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The absence is simulated rather than required: a None entry in
+    # sys.modules makes `import pytesseract` raise ImportError. This test used
+    # to skip wherever pytesseract was installed, which is every environment
+    # that can run the real-OCR tests, so the message it pins was checked only
+    # where OCR could not run at all.
     from constituent_reconciler.extract.ocr import _run_tesseract
 
-    if importlib.util.find_spec("pytesseract") is not None:
-        pytest.skip("pytesseract is installed; the unavailable-path test does not apply")
+    monkeypatch.setitem(sys.modules, "pytesseract", None)
     with pytest.raises(ImportError, match="pytesseract"):
         _run_tesseract(object())
+
+
+@pytest.mark.usefixtures("real_ocr")
+def test_a_scanned_pdf_page_is_read_by_the_real_tesseract(tmp_path: Path) -> None:
+    """The first test in this file that runs Tesseract instead of standing in for it.
+
+    Every test above substitutes ``_run_tesseract``'s output, so until this one
+    the scanned-PDF path had never executed against the binary it depends on.
+    Pillow writes the page as a PDF holding one image and no text layer, which
+    is exactly what a scanner without OCR produces.
+    """
+    from constituent_reconciler.extract.ocr import PdfplumberOcrExtractor
+    from constituent_reconciler.models import SourceSpan
+    from constituent_reconciler.testing import make_form_image
+
+    path = tmp_path / "scan.pdf"
+    make_form_image(
+        [
+            "Intake Form",
+            "First Name: Alice",
+            "Last Name: Walker",
+            "DOB: 1970-05-12",
+            "Email: alice@example.org",
+            "Phone: 555-123-4567",
+        ]
+    ).save(path, "PDF", resolution=200.0)
+
+    result = PdfplumberOcrExtractor().extract(path)
+    fields = {field.field_name: field for page in result.pages for field in page.fields}
+    assert {name: field.value for name, field in fields.items()} == {
+        "first_name": "Alice",
+        "last_name": "Walker",
+        "dob": "1970-05-12",
+        "email": "alice@example.org",
+        "phone": "555-123-4567",
+    }
+    # Spans are in PDF points on a letter page (612 x 792), not in pixels.
+    span = fields["first_name"].span
+    assert isinstance(span, SourceSpan)
+    assert 0 < span.x0 < span.x1 <= 612
+    assert 0 < span.top < span.bottom <= 792
 
 
 # ---------------------------------------------------------------------------

@@ -431,7 +431,7 @@ def _pdf_page_lines(row: dict[str, str]) -> list[str]:
     does: address and consent have no field pattern at all, and a date of
     birth the date-drift channel rendered in prose ("26 November 1942") does
     not match the numeric date pattern. tests/test_corpusgen_pdf.py pins that
-    behaviour, and the stage-baseline report states it, so the mixed corpus's
+    behavior, and the stage-baseline report states it, so the mixed corpus's
     run counts are not read as a matcher regression.
     """
 

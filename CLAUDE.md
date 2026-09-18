@@ -92,7 +92,7 @@ src/constituent_reconciler`; docs/CLAIMS-AUDIT.md records the last audit.
 constituent-reconciler/
 ├── CLAUDE.md                      # this file
 ├── README.md                      # practitioner-facing
-├── pyproject.toml                 # PEP 621, console_scripts entry: constituent-reconcile (reconcile: deprecated alias until 0.9.0)
+├── pyproject.toml                 # PEP 621, console_scripts entry: constituent-reconcile (reconcile: deprecated alias until 0.10.0)
 ├── src/constituent_reconciler/
 │   ├── __init__.py                # public API surface, intentionally small
 │   ├── address.py                 # deterministic CASS-style standardizer, not USPS-certified
@@ -108,7 +108,7 @@ constituent-reconciler/
 │   │   ├── refusal.py             # deterministic prohibited-language scanner (EN/ES)
 │   │   ├── source_text.py         # reads real source-document text an OCR quote is checked against
 │   │   └── triage.py              # deterministic review-queue ordering; calls no model
-│   ├── cli.py                     # init/run/eval/compare(+-review/-apply)/review/apply/plan-split/approve-repair/apply-repair/report/validate/destroy/verify/schema/demo/ai-explain/ai-ask/ai-propose-corrections/ai-triage
+│   ├── cli.py                     # init/run/eval/compare(+-review/-apply)/diff-runs/sweep-thresholds/explain/review/apply/merge-decisions/plan-split/plan-withdraw/approve-repair/apply-repair/report/validate/destroy/verify/schema/demo/ai-explain/ai-ask/ai-propose-corrections/ai-triage
 │   ├── compare.py                 # read-only migration cutover comparison (constituent-reconcile compare)
 │   ├── compare_apply.py           # reviewed, consent-gated local correction-file export (compare-apply)
 │   ├── config.py                  # recipe.toml loading: sources, connector, thresholds, policy pack
@@ -125,9 +125,16 @@ constituent-reconciler/
 │   ├── decisions.py               # banding, clustering, golden-record selection; the fail-closed gate
 │   ├── defaults.py                # pre-tuned matching defaults
 │   ├── demo.py                    # reconcile demo: writes the packaged examples/ tree so the README's --config paths exist from a wheel
+│   ├── diff_runs.py               # read-only diff of two runs of one recipe (constituent-reconcile diff-runs); counts shareable, ids local
 │   ├── destruction.py             # retention executor and destruction certificates
 │   ├── evaluate.py                # eval scoring: false-merge and missed-match rates, Wilson intervals
+│   ├── explain.py                 # offline auditor's trace for one cluster (constituent-reconcile explain);
+│   │                               # composes the run's own artifacts, calls no model, re-scores nothing.
+│   │                               # The redacted rendering never READS a field value; --verify recomputes
+│   │                               # the cited entry's hash and the manifest hash rather than restating them
 │   ├── examples/                  # package-data copy of the root examples/ tree; tests/test_demo.py pins them byte-identical
+│   ├── excel.py                   # .xlsx/.xlsm structured source: read-only, values only; a merged
+│   │                               # header and an uncomputed formula are refused, never read as blank
 │   ├── extract/
 │   │   ├── __init__.py            # public surface: the offline extractor and the seam gate
 │   │   ├── base.py                # extractor protocol and extraction result types
@@ -136,7 +143,7 @@ constituent-reconciler/
 │   │   ├── sandbox.py             # resource-limited extraction subprocess
 │   │   ├── seam.py                # optional hosted/local model seams, policy-gated
 │   │   └── text.py                # plain-text and .eml body extraction
-│   ├── household.py               # reviewed household suggestions, off by default
+│   ├── household.py               # reviewed household suggestions + the confirmed-household write plan (#151); a household with a withheld or unwritten member is never written
 │   ├── manifest.py                # reproducibility manifest and input hashes
 │   ├── matching/                  # backend protocol and Splink implementation
 │   │   └── evidence.py            # real field-level Splink comparison evidence (ADR 0014); Splink
@@ -149,14 +156,15 @@ constituent-reconciler/
 │   ├── progress.py                # content-free progress events; no-op default, CLI renderer
 │   ├── provenance.py              # BLAKE2b hash chain plus optional RFC 3161 authority
 │   ├── quality.py                 # per-source data-quality aggregation
-│   ├── repair.py                  # split repair planning (read-only) + the gated apply path (UC-03); plans and receipts are local PII artifacts
+│   ├── repair.py                  # split repair planning + consent-withdrawal planning (both read-only) + the gated apply path (UC-03); plans and receipts are local PII artifacts
 │   ├── report.py                  # run summary + committed eval report renderers
-│   ├── review/                    # local queue UI, session, server, reviewer calibration
+│   ├── review/                    # local queue UI, session, server, reviewer calibration, queue sharding
 │   ├── scaffold.py                # constituent-reconcile init: a starter recipe from CSV headers only,
 │   │                               # exact documented aliases, and no policy pack chosen for you
 │   ├── schema.py                  # declared schema/interface versions for the stability contract
 │   ├── stage_cache.py             # content-addressed cache for extraction and normalization only
 │   ├── suppression.py             # aggregate suppression-aware summaries for external sharing
+│   ├── sweep.py                   # threshold grid scored against an org's OWN reviewer verdicts (sweep-thresholds); never edits a recipe, never recommends weakening the gate
 │   └── telemetry.py               # content-free optional model-call telemetry
 ├── tests/
 │   ├── fixtures/                  # seeded synthetic data, zero real PII, planted ground truth

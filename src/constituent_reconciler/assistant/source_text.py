@@ -28,6 +28,7 @@ from pathlib import Path
 
 from constituent_reconciler.assistant.errors import SourceDocumentUnavailable
 from constituent_reconciler.config import Recipe
+from constituent_reconciler.extract.base import IMAGE_SUFFIXES
 from constituent_reconciler.models import Record, SourceSpan, TextSpan
 
 
@@ -112,6 +113,12 @@ def for_field(record: Record, field: str, *, roots: Sequence[Path]) -> str | Non
     not have raises: ``pdfplumber`` reports it as an ``IndexError``, which
     the old code did not catch at all and which reached the operator as an
     unhandled traceback rather than as a stated reason.
+
+    A ``SourceSpan`` into a photographed or scanned image (``extract/image.py``)
+    comes back as the empty string for the same reason an image-only PDF page
+    does: the page was read, it has no text layer to quote, and the quote check
+    abstains. It is not OCR'd again here, which would put a second reading,
+    possibly a different one, beside the reading the record was built from.
     """
     span = record.spans.get(field)
     if span is None:
@@ -125,6 +132,8 @@ def for_field(record: Record, field: str, *, roots: Sequence[Path]) -> str | Non
                 f"could not read source document {path}: {exc}"
             ) from exc
     if isinstance(span, SourceSpan):
+        if path.suffix.lower() in IMAGE_SUFFIXES:
+            return ""
         from constituent_reconciler.extract.seam import (
             _page_text,  # lazy: pdfplumber is an optional dependency
         )

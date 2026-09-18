@@ -23,8 +23,10 @@ or assistant surface changes.
 `constituent-reconcile run --config recipe.toml` (`src/constituent_reconciler/cli.py`)
 hands the recipe to the orchestrator in `src/constituent_reconciler/pipeline.py`.
 `_ingest_source()` routes each source path by extension: a `.csv` is read with
-the standard-library `csv` module in `read_records()`, and a `.pdf` is routed
-to `read_pdf_records()` only when the recipe sets `extract.backend` to
+the standard-library `csv` module in `read_records()`, an `.xlsx` or `.xlsm`
+is read by `read_workbook_records()` through
+`src/constituent_reconciler/excel.py`, and a `.pdf` is routed to
+`read_pdf_records()` only when the recipe sets `extract.backend` to
 something other than `"none"`. PDF extraction lives in
 `src/constituent_reconciler/extract/pdf.py`. It opens the file with
 pdfplumber, an optional dependency installed via the `extract` extra, which in
@@ -34,23 +36,45 @@ low-confidence case the heuristics below are built for.
 
 The boundaries that matter:
 
-1. **The file boundary.** Every byte of an operator-supplied CSV, PDF, or scan
-   is untrusted. Intake documents arrive from the public: a constituent, a
-   partner agency, an email inbox. The operator who runs the tool is trusted;
-   the files they feed it are not.
+1. **The file boundary.** Every byte of an operator-supplied CSV, workbook,
+   PDF, scan, or photo is untrusted. Intake documents arrive from the public: a
+   constituent, a partner agency, an email inbox. The operator who runs the
+   tool is trusted; the files they feed it are not.
+
+   A workbook widens this boundary: an `.xlsx` is a zip of XML, so reading one
+   means a zip parser and an XML parser over hostile bytes. Every one of those
+   parses is openpyxl's, an optional dependency installed via the `excel`
+   extra; `excel.py` opens no archive and parses no XML of its own, so reading
+   a workbook adds exactly one parser to this boundary rather than two. The
+   workbook is opened read-only for its data, and once without read-only to
+   read the merge ranges that streaming mode does not expose, which makes the
+   memory ceiling on this reader one whole workbook. There is no sandbox
+   around it: unlike PDF parsing, workbook parsing runs in-process, so a
+   malformed workbook that exhausts memory takes the run with it rather than
+   failing closed to review. That is a known gap, recorded here rather than
+   implied away.
+
+   A page image widens it as well: a `.jpg`, `.png` or `.tif` is decoded by
+   Pillow's bundled codecs, C code over hostile bytes. That decoding runs in
+   the same sandboxed child as a PDF parse (`extract/image.py`), and a frame's
+   declared size is checked against a 50,000,000-pixel budget before anything
+   is decoded.
+
 2. **The process boundary at the parser.** Since 2026-07-17 the pipeline
    parses each PDF in a spawned child process by default
    (`src/constituent_reconciler/extract/sandbox.py`, wired through
    `read_pdf_records()`): best-effort rlimits on CPU and address space inside
    the child, a wall-clock timeout and input-size cap in the parent, and a
-   fail-closed zero-confidence result that routes the document to review. The
+   fail-closed result that the pipeline records as an unreadable document,
+   with the reason, in the ingest report (the run summary and
+   `run_report.json`), rather than as a blank page. The
    boundary is containment, not privilege separation — the child runs the
    same interpreter with the same filesystem view, `RLIMIT_AS` is not
    enforced on macOS, and Windows has only the timeout. A recipe may also
    turn it off (`[extract] sandbox = false`), returning to in-process
    parsing.
-3. **The network boundary.** The pipeline is offline by default. It has two
-   deliberate egress points, both policy-gated. The cloud extraction seam
+3. **The network boundary.** The pipeline is offline by default. It has three
+   deliberate network paths, every one of them policy-gated. The cloud extraction seam
    (`src/constituent_reconciler/extract/seam.py`) may send a low-confidence
    page to a Claude model on Amazon Bedrock, and only when the active policy
    pack allows cloud calls, the page falls below the recipe's confidence
@@ -58,7 +82,14 @@ The boundaries that matter:
    `make_seam()` returns a `NoOpSeam` at construction time, so no code path
    can reach a network call. The CRM connectors are the second egress; under a
    pack that requires local targets, `build_connector()` refuses a non-local
-   connector before anything is written.
+   connector before anything is written. The third is a read rather than a
+   write: a recipe may pull the existing side from a live CRM
+   (`connectors/civicrm_source.py`), which authenticates to a hosted system
+   and brings constituent records onto this machine.
+   `build_source_connector()` refuses it under the same rule and before a
+   request is built, because reading a constituent file out of a hosted system
+   is an egress as surely as writing one. What it reads lands in
+   `out/existing_snapshot.csv`, which is on the destruction inventory.
 4. **The local web boundary.** `constituent-reconcile review`
    (`src/constituent_reconciler/review/server.py`) is a second untrusted-input
    surface: the reviewer's own browser can be turned against a local server.
@@ -102,10 +133,15 @@ The boundaries that matter:
   (`test_dv_pack_refuses_a_non_local_write_target`).
 - **Confidence heuristics on every page (T3).** `_page_confidence()` in
   `extract/pdf.py` scores near-empty pages and garbled-OCR pages (average word
-  length above 15 characters) below 0.5. Low-confidence values inherit that
-  score, and the pipeline never auto-merges on uncertainty: ambiguous pairs are
-  banded to the human review queue, where the reviewer sees the source span
-  beside the candidate. A page that yields neither a first nor a last name
+  length above 15 characters) below 0.5. That score has one effect: a page
+  below the recipe's threshold is offered to a model seam when one is enabled.
+  It does not travel with the values it produced (no record carries an
+  extraction confidence, and until 2026-09-11 this line said they "inherit"
+  it), so under a backend with no seam, such as `pdfplumber+ocr`, a
+  low-confidence page's fields reach the matcher like any other's. What stands
+  between them and a false merge is the matcher's banding: ambiguous pairs go
+  to the human review queue, where the reviewer sees the source span beside
+  the candidate. A page that yields neither a first nor a last name
   produces no record at all.
 - **Consent enforced before the connector (T3, T4).** Records without granted
   consent under a consent-required policy are withheld before any connector is
@@ -138,13 +174,38 @@ The boundaries that matter:
   address space where the platform enforces it), a parent-side wall-clock
   timeout, and an input-size cap refused before any parse. Every failure leg
   fails closed to a zero-confidence page whose note names the reason without
-  embedding page content, so the document lands in human review.
+  embedding page content, and the pipeline lists the document, with that
+  reason, as unreadable in the ingest report. (Until 2026-09-11 this said the
+  document "lands in human review"; nothing sent it there, and the pipeline
+  counted it as a blank page.)
   `tests/test_sandbox.py` exercises the happy path and each fail-closed leg;
   `tests/test_extract.py` proves the pipeline default contains a corrupt PDF
   that crashes an in-process parse. Two honest limits: the child keeps the
   pipeline's privileges (containment, not a syscall sandbox), and when a
   cloud or local seam is enabled for a low-confidence page, the page render
   for the seam still happens in the parent process.
+
+### Present (added 2026-09-11)
+
+- **Page images inside the sandbox, with a pixel budget (T1, T2).**
+  Photographed and scanned page images (`extract/image.py`) are decoded in
+  the same child as a PDF parse. A frame over 50,000,000 pixels is refused
+  from its header before any pixel is decoded; Pillow's own decompression-bomb
+  refusal, which starts far higher, is reported the same way; a file of more
+  than 50 frames is refused unread; and pixels deeper than eight bits are
+  refused rather than clipped to a blank page. Each refusal lands in the
+  ingest report as an unreadable document with its reason.
+  `tests/test_image_extract.py` covers each one and asserts OCR was never
+  reached.
+- **No page image left behind by a killed parse (T2, T4).** OCR hands the
+  Tesseract binary a temporary copy of each page image (pytesseract's `save`)
+  and deletes it in a `finally` that a SIGKILL skips. The child now writes its
+  temporary files into a scratch directory the parent creates for that one
+  parse and removes after the child exits or is killed, and the child leads
+  its own process group, so the parent's kill also reaches the Tesseract
+  subprocess. `tests/test_sandbox.py` covers both. The limit: a parent that is
+  itself killed leaves its scratch directory, named
+  `constituent-reconciler-extract-*` under the system temporary directory.
 
 ### Added 2026-08-03: the repair-plan surface (UC-03, ADR 0012)
 

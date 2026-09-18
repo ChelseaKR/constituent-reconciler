@@ -13,14 +13,15 @@ import csv
 import hashlib
 import json
 import time
-from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 
 from constituent_reconciler import (
     consent,
     decisions,
+    excel,
     household,
     matching,
     quality,
@@ -28,15 +29,26 @@ from constituent_reconciler import (
     suppression,
 )
 from constituent_reconciler.config import Recipe
-from constituent_reconciler.connectors import get_factory
+from constituent_reconciler.connectors import get_factory, get_source_factory
 from constituent_reconciler.connectors.airtable import Transport as AirtableTransport
-from constituent_reconciler.connectors.base import Connector, WriteResult
+from constituent_reconciler.connectors.base import (
+    SNAPSHOT_CONSENT_COLUMN,
+    SNAPSHOT_ID_COLUMN,
+    Connector,
+    SourceConnector,
+    WriteResult,
+)
 from constituent_reconciler.connectors.civicrm import Transport
 from constituent_reconciler.connectors.crm_csv import CrmCsvConnector
 from constituent_reconciler.connectors.salesforce import Transport as SalesforceTransport
 from constituent_reconciler.connectors.webhook import Transport as WebhookTransport
-from constituent_reconciler.extract.base import ExtractedField
-from constituent_reconciler.manifest import build_manifest, manifest_hash, write_manifest
+from constituent_reconciler.extract.base import IMAGE_SUFFIXES, ExtractedField, ExtractionResult
+from constituent_reconciler.manifest import (
+    build_manifest,
+    file_digest,
+    manifest_hash,
+    write_manifest,
+)
 from constituent_reconciler.models import (
     Consent,
     Correction,
@@ -48,6 +60,7 @@ from constituent_reconciler.models import (
     SkippedFile,
     SourceSpan,
     TextSpan,
+    UnreadableDocument,
 )
 from constituent_reconciler.policy import PolicyViolation
 from constituent_reconciler.progress import NULL_SINK, ProgressEvent, ProgressSink
@@ -108,32 +121,102 @@ def read_records(
     """
 
     seen = _seen if _seen is not None else {}
-    records: list[Record] = []
     with path.open(newline="", encoding="utf-8-sig") as handle:
-        reader = csv.DictReader(handle)
-        for row in reader:
-            raw = {
-                canonical: (row.get(column) or "").strip() for canonical, column in mapping.items()
-            }
-            if id_column and (row.get(id_column) or "").strip():
-                unique_id = f"{source}:{row[id_column].strip()}"
-            else:
-                unique_id = _content_id(source, raw, id_prefix, seen)
-            records.append(
-                Record(
-                    unique_id=unique_id,
-                    source=source,
-                    raw=raw,
-                    consent=_read_consent(
-                        row,
-                        status_column=consent_column,
-                        granted_on_column=consent_date_column,
-                        expires_on_column=consent_expires_column,
-                        scope_column=consent_scope_column,
-                    ),
-                )
+        rows = list(csv.DictReader(handle))
+    return _records_from_rows(
+        rows,
+        source,
+        mapping=mapping,
+        id_column=id_column,
+        consent_column=consent_column,
+        consent_date_column=consent_date_column,
+        consent_expires_column=consent_expires_column,
+        consent_scope_column=consent_scope_column,
+        id_prefix=id_prefix,
+        seen=seen,
+    )
+
+
+def _records_from_rows(
+    rows: Iterable[dict[str, str]],
+    source: str,
+    *,
+    mapping: dict[str, str],
+    id_column: str | None,
+    consent_column: str | None,
+    consent_date_column: str | None,
+    consent_expires_column: str | None,
+    consent_scope_column: str | None,
+    id_prefix: str,
+    seen: dict[str, int],
+) -> list[Record]:
+    """Turn already-parsed structured rows into Records.
+
+    Shared by the CSV and workbook readers so the two cannot drift: mapping,
+    stripping, id minting and consent reading happen in exactly one place, and
+    a workbook of the same data resolves to the same record ids as its CSV.
+    """
+
+    records: list[Record] = []
+    for row in rows:
+        raw = {canonical: (row.get(column) or "").strip() for canonical, column in mapping.items()}
+        if id_column and (row.get(id_column) or "").strip():
+            unique_id = f"{source}:{row[id_column].strip()}"
+        else:
+            unique_id = _content_id(source, raw, id_prefix, seen)
+        records.append(
+            Record(
+                unique_id=unique_id,
+                source=source,
+                raw=raw,
+                consent=_read_consent(
+                    row,
+                    status_column=consent_column,
+                    granted_on_column=consent_date_column,
+                    expires_on_column=consent_expires_column,
+                    scope_column=consent_scope_column,
+                ),
             )
+        )
     return records
+
+
+def read_workbook_records(
+    path: Path,
+    source: str,
+    *,
+    mapping: dict[str, str],
+    id_column: str | None,
+    consent_column: str | None,
+    id_prefix: str,
+    consent_date_column: str | None = None,
+    consent_expires_column: str | None = None,
+    consent_scope_column: str | None = None,
+    sheet: str | None = None,
+    header_row: int = 1,
+    _seen: dict[str, int] | None = None,
+) -> list[Record]:
+    """Read one worksheet into Records, through the same path a CSV takes.
+
+    ``excel.read_rows`` returns the row dicts ``csv.DictReader`` would have
+    produced for the same data, so everything after it -- mapping, ids,
+    consent -- is the shared code above and needs no workbook-specific case.
+    """
+
+    seen = _seen if _seen is not None else {}
+    rows = excel.read_rows(path, sheet=sheet, header_row=header_row)
+    return _records_from_rows(
+        rows,
+        source,
+        mapping=mapping,
+        id_column=id_column,
+        consent_column=consent_column,
+        consent_date_column=consent_date_column,
+        consent_expires_column=consent_expires_column,
+        consent_scope_column=consent_scope_column,
+        id_prefix=id_prefix,
+        seen=seen,
+    )
 
 
 def _collect_mapped_fields(
@@ -165,12 +248,23 @@ class IngestAccumulator:
     pages_extracted: int = 0
     pages_dropped: int = 0
     normalization_failures: dict[str, dict[str, int]] = field(default_factory=dict)
+    documents_unreadable: list[UnreadableDocument] = field(default_factory=list)
 
     def note_read(self, path: Path) -> None:
         self.files_read.append(str(path))
 
     def note_skipped(self, path: Path, reason: str) -> None:
         self.files_skipped.append(SkippedFile(path=str(path), reason=reason))
+
+    def note_unreadable(self, path: Path, reason: str) -> None:
+        self.documents_unreadable.append(UnreadableDocument(path=str(path), reason=reason))
+
+    def note_extracted(self, path: Path, extracted: stage_cache.ExtractedRows) -> None:
+        """Add one document's page accounting, or record that it could not be read."""
+        self.pages_extracted += extracted.pages_extracted
+        self.pages_dropped += extracted.pages_dropped
+        if extracted.unreadable is not None:
+            self.note_unreadable(path, extracted.unreadable)
 
     def freeze(self) -> IngestReport:
         return IngestReport(
@@ -181,6 +275,7 @@ class IngestAccumulator:
             normalization_failures={
                 name: dict(counts) for name, counts in self.normalization_failures.items()
             },
+            documents_unreadable=tuple(self.documents_unreadable),
         )
 
 
@@ -229,12 +324,12 @@ def _extract_pdf_rows(path: Path, recipe: Recipe) -> stage_cache.ExtractedRows:
 
     Unless the recipe sets ``[extract] sandbox = false``, the parse runs in a
     resource-limited child process (``extract/sandbox.py``): a hostile or
-    malformed PDF fails closed to a zero-confidence page that is dropped and
-    accounted for here, instead of crashing the run. A parse the sandbox
-    ended early (``extraction.note`` is set) is marked not cacheable, because
-    a resource-limit kill reflects the machine's load rather than the file
-    bytes; the stage cache must not freeze it as this document's permanent
-    result.
+    malformed PDF fails closed instead of crashing the run, and is accounted
+    for here as an unreadable document carrying the sandbox's reason (see
+    ``_unreadable``), never as a dropped page. It is also marked not
+    cacheable, because a resource-limit kill reflects the machine's load
+    rather than the file bytes; the stage cache must not freeze it as this
+    document's permanent result.
     """
     from constituent_reconciler.extract.base import Extractor
     from constituent_reconciler.extract.pdf import PdfplumberExtractor
@@ -259,30 +354,64 @@ def _extract_pdf_rows(path: Path, recipe: Recipe) -> stage_cache.ExtractedRows:
     )
     extraction = extractor.extract(path)
 
+    def refine(page_num: int) -> list[ExtractedField]:
+        return seam.refine(path, page_num)
+
+    return _kept_rows(extraction, recipe, refine=refine if seam.is_enabled() else None)
+
+
+def _unreadable(reason: str) -> stage_cache.ExtractedRows:
+    """The accounting for a document whose extraction failed closed.
+
+    An extractor that did not run to completion still returns a result, with
+    ``note`` saying why and a zero-confidence placeholder page so the caller
+    has something to hold. That placeholder is not a page anyone read. Counting
+    it as dropped would put a parse the sandbox killed, or bytes nothing could
+    decode, in the same column as a blank sheet of paper, and the operator
+    reading the ingest report could not tell which documents to re-send. So it
+    contributes no page at all, and the note becomes the document's reason in
+    ``IngestReport.documents_unreadable``.
+    """
+    return stage_cache.ExtractedRows(
+        rows=[], pages_extracted=0, pages_dropped=0, cacheable=False, unreadable=reason
+    )
+
+
+def _kept_rows(
+    extraction: ExtractionResult,
+    recipe: Recipe,
+    *,
+    refine: Callable[[int], list[ExtractedField]] | None = None,
+) -> stage_cache.ExtractedRows:
+    """Turn one document's extraction into kept rows and page accounting.
+
+    The one loop every document reader shares, so a PDF, a text body and a
+    photographed page are counted by the same rule: a page that yields neither
+    a first nor a last name is dropped and counted. ``refine``, when given, is
+    offered each page below the recipe's confidence threshold and replaces its
+    fields if it returns any; it is the model seam's hook, and only the PDF
+    reader passes one. A document whose extraction failed closed has no pages
+    to account (``_unreadable``).
+    """
+    if extraction.note is not None:
+        return _unreadable(extraction.note)
     rows: list[stage_cache.Row] = []
     pages_extracted = 0
     pages_dropped = 0
     for page in extraction.pages:
         page_fields = list(page.fields)
-
-        if page.confidence < recipe.extract.confidence_threshold and seam.is_enabled():
-            refined = seam.refine(path, page.page_num)
+        if refine is not None and page.confidence < recipe.extract.confidence_threshold:
+            refined = refine(page.page_num)
             if refined:
                 page_fields = refined
-
         raw, spans = _collect_mapped_fields(page_fields, recipe.mapping)
-
         if not raw.get("first_name") and not raw.get("last_name"):
             pages_dropped += 1
             continue
         pages_extracted += 1
         rows.append((raw, spans))
-
     return stage_cache.ExtractedRows(
-        rows=rows,
-        pages_extracted=pages_extracted,
-        pages_dropped=pages_dropped,
-        cacheable=extraction.note is None,
+        rows=rows, pages_extracted=pages_extracted, pages_dropped=pages_dropped
     )
 
 
@@ -299,25 +428,29 @@ def _extract_text_rows(path: Path, recipe: Recipe) -> stage_cache.ExtractedRows:
         extraction = extract_eml(path)
     else:
         extraction = extract_text_file(path)
+    return _kept_rows(extraction, recipe)
 
-    rows: list[stage_cache.Row] = []
-    pages_extracted = 0
-    pages_dropped = 0
-    for page in extraction.pages:
-        raw, spans = _collect_mapped_fields(page.fields, recipe.mapping)
 
-        if not raw.get("first_name") and not raw.get("last_name"):
-            pages_dropped += 1
-            continue
-        pages_extracted += 1
-        rows.append((raw, spans))
+def _extract_image_rows(path: Path, recipe: Recipe) -> stage_cache.ExtractedRows:
+    """Read one photographed or scanned image into kept rows plus page accounting.
 
-    return stage_cache.ExtractedRows(
-        rows=rows,
-        pages_extracted=pages_extracted,
-        pages_dropped=pages_dropped,
-        cacheable=extraction.note is None,
-    )
+    The image goes through Tesseract (``extract/image.py``), inside the same
+    resource-limited child a PDF is parsed in unless the recipe sets
+    ``[extract] sandbox = false``. No model seam is consulted. An image is read
+    only under ``backend = "pdfplumber+ocr"``, for which ``make_seam`` builds
+    none, so a page below the confidence threshold keeps the fields OCR read,
+    exactly as an image-only PDF page does under the same backend.
+    """
+    from constituent_reconciler.extract.base import Extractor
+    from constituent_reconciler.extract.image import ImageOcrExtractor
+    from constituent_reconciler.extract.sandbox import SandboxedExtractor
+
+    extractor: Extractor
+    if recipe.extract.sandbox:
+        extractor = SandboxedExtractor(image=True)
+    else:
+        extractor = ImageOcrExtractor()
+    return _kept_rows(extractor.extract(path), recipe)
 
 
 def _mint_document_records(
@@ -375,8 +508,7 @@ def read_pdf_records(
         extract_fresh=lambda: _extract_pdf_rows(path, recipe),
     )
     if accounting is not None:
-        accounting.pages_extracted += extracted.pages_extracted
-        accounting.pages_dropped += extracted.pages_dropped
+        accounting.note_extracted(path, extracted)
     seen = _seen if _seen is not None else {}
     return _mint_document_records(extracted.rows, source, id_prefix=id_prefix, seen=seen)
 
@@ -407,28 +539,78 @@ def read_text_records(
         extract_fresh=lambda: _extract_text_rows(path, recipe),
     )
     if accounting is not None:
-        accounting.pages_extracted += extracted.pages_extracted
-        accounting.pages_dropped += extracted.pages_dropped
+        accounting.note_extracted(path, extracted)
+    seen = _seen if _seen is not None else {}
+    return _mint_document_records(extracted.rows, source, id_prefix=id_prefix, seen=seen)
+
+
+def read_image_records(
+    path: Path,
+    source: str,
+    *,
+    recipe: Recipe,
+    id_prefix: str,
+    _seen: dict[str, int] | None = None,
+    accounting: IngestAccumulator | None = None,
+    active_cache: stage_cache.ActiveCache | None = None,
+) -> list[Record]:
+    """Extract records from a photographed or scanned intake image.
+
+    Each page (each frame, for a multi-page TIFF) that yields at least a
+    first_name or last_name becomes one Record, with ``SourceSpan`` spans in
+    the image's own pixels. The read is described on ``_extract_image_rows``.
+    OCR output is never cached (``stage_cache.extraction_cacheable``), so an
+    active cache is consulted and bypassed.
+    """
+
+    extracted = stage_cache.extraction_via_cache(
+        active_cache,
+        path,
+        recipe,
+        reader="image",
+        extract_fresh=lambda: _extract_image_rows(path, recipe),
+    )
+    if accounting is not None:
+        accounting.note_extracted(path, extracted)
     seen = _seen if _seen is not None else {}
     return _mint_document_records(extracted.rows, source, id_prefix=id_prefix, seen=seen)
 
 
 _PlanItem = tuple[str, Path]
-"""One unit of planned ingest work: a reader kind (csv, pdf, text) and a file."""
+"""One unit of planned ingest work: a reader kind and a file.
+
+The kinds are "csv" and "excel" (structured sources, read directly) and "pdf",
+"text" and "image" (documents, which go through extraction).
+"""
+
+_DOCUMENT_KINDS = frozenset({"pdf", "text", "image"})
+"""Reader kinds whose files are documents, and so count toward extract progress.
+
+Named rather than tested as ``kind != "csv"``: the structured readers are now
+two, and the old inequality would have counted every workbook as a document and
+given the extract stage a denominator that included files it never opens.
+"""
 
 
 def _route(path: Path, recipe: Recipe) -> tuple[str, str]:
     """Classify one file: (reader kind, skip reason); the kind is "" when skipped.
 
-    The routing rules are unchanged from the original single-pass reader:
-    .csv goes to the structured reader, .pdf to the PDF extractor, and .txt
-    or .eml to the text extractor, with the document readers available only
-    while ``extract.backend`` is not "none".
+    .csv goes to the structured reader and .xlsx or .xlsm to the workbook
+    reader, which is the same structured path with a spreadsheet parser in
+    front of it; .pdf goes to the PDF extractor and .txt or .eml to the text
+    extractor, with the document readers available only while
+    ``extract.backend`` is not "none". Workbooks carry no such switch: reading
+    one is parsing a structured file, not extracting fields from a document.
+    An image (``extract.base.IMAGE_SUFFIXES``) is read only under
+    ``backend = "pdfplumber+ocr"``, because OCR is the only way to read one;
+    under any other backend it is skipped with a reason naming that backend.
     """
 
     suffix = path.suffix.lower()
     if suffix == ".csv":
         return "csv", ""
+    if suffix in excel.WORKBOOK_SUFFIXES:
+        return "excel", ""
     if suffix == ".pdf":
         if recipe.extract.backend != "none":
             return "pdf", ""
@@ -437,6 +619,15 @@ def _route(path: Path, recipe: Recipe) -> tuple[str, str]:
         if recipe.extract.backend != "none":
             return "text", ""
         return "", 'text extraction disabled (extract.backend = "none")'
+    if suffix in IMAGE_SUFFIXES:
+        if recipe.extract.backend == "pdfplumber+ocr":
+            return "image", ""
+        if recipe.extract.backend == "none":
+            return "", 'image extraction disabled (extract.backend = "none")'
+        return "", (
+            'an image is read only through OCR (extract.backend = "pdfplumber+ocr"); '
+            f'this recipe sets "{recipe.extract.backend}"'
+        )
     return "", f"unsupported extension: {suffix or '(none)'}"
 
 
@@ -573,8 +764,33 @@ def _read_plan(
                 id_prefix=id_prefix,
                 _seen=seen,
             )
+        elif kind == "excel":
+            records += read_workbook_records(
+                child,
+                source,
+                mapping=recipe.mapping,
+                id_column=recipe.id_column,
+                consent_column=recipe.consent_column,
+                consent_date_column=recipe.consent_date_column,
+                consent_expires_column=recipe.consent_expires_column,
+                consent_scope_column=recipe.consent_scope_column,
+                id_prefix=id_prefix,
+                sheet=recipe.sheet,
+                header_row=recipe.header_row,
+                _seen=seen,
+            )
         elif kind == "pdf":
             records += read_pdf_records(
+                child,
+                source,
+                recipe=recipe,
+                id_prefix=id_prefix,
+                _seen=seen,
+                accounting=accounting,
+                active_cache=active_cache,
+            )
+        elif kind == "image":
+            records += read_image_records(
                 child,
                 source,
                 recipe=recipe,
@@ -596,7 +812,7 @@ def _read_plan(
         if accounting is not None:
             accounting.note_read(child)
         if tracker is not None:
-            tracker.note_file(document=kind != "csv")
+            tracker.note_file(document=kind in _DOCUMENT_KINDS)
     return records
 
 
@@ -784,7 +1000,9 @@ def ingest_normalized_records(
     tracker = _IngestTracker(
         sink=progress,
         files_total=sum(len(plan) for plan, _, _ in plans),
-        documents_total=sum(1 for plan, _, _ in plans for kind, _ in plan if kind != "csv"),
+        documents_total=sum(
+            1 for plan, _, _ in plans for kind, _ in plan if kind in _DOCUMENT_KINDS
+        ),
     )
     tracker.start()
     raw_records: list[Record] = []
@@ -992,6 +1210,63 @@ def _write_comparable_report(report: ComparableReport, out_dir: Path) -> Path:
     return report_path
 
 
+def _write_auto_merges(result: RunResult, recipe: Recipe, out_dir: Path) -> Path:
+    """Record why every automatic merge happened.
+
+    ``decisions.json`` records who decided each pair a *person* saw, and it
+    survives ``destroy`` because it is audit evidence carrying no field values.
+    The pairs the matcher merged on its own had no such record: ``resolved.csv``
+    names a cluster's members and ``provenance.jsonl`` names the field-level
+    lineage, but nothing anywhere said at what probability, in which band, or
+    against which thresholds the members were joined. ``review_queue.csv``
+    carries a probability only for the pairs that fell *below* the auto
+    threshold -- so the merges a human checked were explainable afterwards and
+    the merges nobody checked were not.
+
+    That is the gap this closes. An auditor asking "why is this one record"
+    about an auto-merged cluster could previously be told only that the system
+    decided so.
+
+    Content class is exactly ``decisions.json``'s: record ids, a probability, a
+    band, and the thresholds in force. No field value is written here, which is
+    why ``destruction.NOT_DESTROYED`` carries it -- deleting it would remove
+    audit evidence without removing anybody's personal data.
+
+    Ordering matches ``review_queue.csv`` (descending probability, then ids) so
+    two runs over the same input produce byte-identical files.
+    """
+
+    import json
+
+    from constituent_reconciler.schema import AUTO_MERGE_SCHEMA_VERSION
+
+    path = out_dir / "auto_merges.json"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pairs: list[dict[str, object]] = []
+    for pair in sorted(result.auto_pairs, key=lambda p: (-p.probability, p.left, p.right)):
+        entry: dict[str, object] = {
+            "left": pair.left,
+            "right": pair.right,
+            "probability": round(pair.probability, 4),
+            "band": pair.band.value,
+        }
+        if pair.note:
+            entry["note"] = pair.note
+        pairs.append(entry)
+    payload = {
+        "schema_version": AUTO_MERGE_SCHEMA_VERSION,
+        "auto_threshold": recipe.auto_threshold,
+        "review_threshold": recipe.review_threshold,
+        # Written even when it is zero. A run that auto-merged nothing and a run
+        # whose evidence was never recorded must not read the same way, and an
+        # absent file cannot tell them apart.
+        "pair_count": len(pairs),
+        "pairs": pairs,
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
 def _write_run_summary(
     result: RunResult,
     recipe: Recipe,
@@ -1118,6 +1393,140 @@ def build_connector(
     return connector
 
 
+def build_source_connector(
+    recipe: Recipe,
+    *,
+    transport: Transport | None = None,
+) -> SourceConnector:
+    """Construct the read-only source this recipe pulls the existing side from.
+
+    The mirror of ``build_connector``, refusing on the same rule: under a
+    policy pack that requires local targets, a pull that crosses the network is
+    refused before a byte moves. Reading a constituent file out of a hosted CRM
+    is an egress as surely as writing one, and the DV pack forbids both.
+    """
+
+    if recipe.existing_connector is None:
+        raise ValueError(
+            "this recipe reads the existing side from a file; there is no source connector "
+            'to build (set [input] existing = "connector:<name>" to pull one)'
+        )
+    transports: dict[str, object] = {}
+    if transport is not None:
+        transports["civicrm"] = transport
+    source = get_source_factory(recipe.existing_connector)(recipe.source, transports)
+
+    if recipe.require_local_targets and not source.is_local:
+        raise PolicyViolation(
+            f"policy pack {recipe.policy_pack!r} forbids pulling the existing side from the "
+            f"non-local source {source.name!r}: reading constituent records out of a hosted "
+            f"system is an egress the same as writing them. Export them to a local file and "
+            f"point [input] existing at that file."
+        )
+    return source
+
+
+#: Where a pull writes the records it read. Named here rather than in the CLI
+#: because ``destruction.PII_ARTIFACTS`` classifies it: it is a copy of real
+#: constituent records, and it is destroyed with the rest of them.
+SNAPSHOT_FILENAME = "existing_snapshot.csv"
+
+
+@dataclass(frozen=True)
+class SourceSnapshot:
+    """What one pull wrote, so a later run can say what it replayed.
+
+    Counts and digests only. No field value reaches this object, which is what
+    lets ``as_manifest_entry`` go into the run manifest unchanged.
+    """
+
+    path: Path
+    connector: str
+    api_version: str
+    rows: int
+    digest: str
+
+    def as_manifest_entry(self) -> dict[str, object]:
+        return {
+            "connector": self.connector,
+            "api_version": self.api_version,
+            "rows": self.rows,
+            "digest": self.digest,
+            "file": self.path.name,
+        }
+
+
+def _snapshot_columns(recipe: Recipe) -> tuple[list[str], list[tuple[str, str]]]:
+    """The snapshot's header, and the canonical-to-column pairs filling it.
+
+    The header is written in the recipe's own column names, not canonical
+    ones, so pointing ``[input] existing`` at the snapshot replays the same
+    run: a canonical header would need a different mapping to read back, and a
+    replay that needs an edited recipe is not a replay.
+    """
+
+    pairs = [(name, recipe.mapping[name]) for name in recipe.fields if name in recipe.mapping]
+    header = [recipe.id_column or SNAPSHOT_ID_COLUMN, *(column for _, column in pairs)]
+    if recipe.consent_column:
+        header.append(recipe.consent_column)
+    return header, pairs
+
+
+def pull_existing(
+    recipe: Recipe,
+    out_dir: Path,
+    *,
+    transport: Transport | None = None,
+) -> tuple[Recipe, SourceSnapshot]:
+    """Pull the existing side into a snapshot, and return a recipe that reads it.
+
+    The snapshot is written to a hidden partial file and renamed into place
+    only once the last row is written, so a pull that fails part way through
+    leaves no snapshot at all. A short one would be worse than none: it reads
+    as a complete CRM with people missing, and every missing person becomes a
+    duplicate on the next write.
+
+    The returned recipe reads that file, with ``existing_connector`` cleared,
+    so nothing downstream can pull a second time or see both a path and a
+    connector. Consent is whatever the source supplied, which today is the
+    unmapped token for every row (see ``connectors.base.UNMAPPED_CONSENT``).
+    """
+
+    source = build_source_connector(recipe, transport=transport)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    final = out_dir / SNAPSHOT_FILENAME
+    partial = out_dir / f".{SNAPSHOT_FILENAME}.partial"
+    header, pairs = _snapshot_columns(recipe)
+
+    rows = 0
+    completed = False
+    try:
+        with partial.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(header)
+            for row in source.read_all():
+                values = [row.get(SNAPSHOT_ID_COLUMN, "")]
+                values += [row.get(canonical, "") for canonical, _ in pairs]
+                if recipe.consent_column:
+                    values.append(row.get(SNAPSHOT_CONSENT_COLUMN, ""))
+                writer.writerow(values)
+                rows += 1
+        completed = True
+    finally:
+        if not completed:
+            partial.unlink(missing_ok=True)
+    partial.replace(final)
+
+    snapshot = SourceSnapshot(
+        path=final,
+        connector=source.name,
+        api_version=source.api_version,
+        rows=rows,
+        digest=file_digest(final),
+    )
+    return replace(recipe, existing=final, existing_connector=None), snapshot
+
+
 @dataclass(frozen=True)
 class ExportSummary:
     write_results: tuple[WriteResult, ...]
@@ -1133,6 +1542,10 @@ class ExportSummary:
     comparable_path: Path | None = None
     household_suggestions: tuple[household.HouseholdSuggestion, ...] = ()
     household_path: Path | None = None
+    # Where the automatic merges' evidence went. ``None`` on a dry run, which
+    # writes nothing; never ``None`` on a real run, including one that merged
+    # nothing, so "no automatic merges" and "no record of them" stay apart.
+    auto_merges_path: Path | None = None
     # Per-source completeness, normalization failures, consent coverage, and
     # duplicate density (quality.py). Unlike aggregate/comparable, this is
     # computed on every run, not gated by recipe.aggregate_export: it answers
@@ -1211,6 +1624,7 @@ def export(
     webhook_transport: WebhookTransport | None = None,
     airtable_transport: AirtableTransport | None = None,
     confirmed_households: Iterable[str] = (),
+    source_snapshot: dict[str, object] | None = None,
     progress: ProgressSink = NULL_SINK,
 ) -> ExportSummary:
     """Write resolved records through the configured connector.
@@ -1290,7 +1704,13 @@ def export(
     logged = 0
     if not dry_run:
         input_paths = [p for p in (recipe.existing, recipe.incoming) if p is not None]
-        manifest = build_manifest(recipe.recipe_path, input_paths, recipe, cache=result.cache)
+        manifest = build_manifest(
+            recipe.recipe_path,
+            input_paths,
+            recipe,
+            cache=result.cache,
+            source_snapshot=source_snapshot,
+        )
         manifest_path = write_manifest(manifest, out_dir)
         log = ProvenanceLog(provenance_path, log_authority)
         log.append_run_start(manifest_hash(manifest))
@@ -1344,8 +1764,10 @@ def export(
             aggregate_path = _write_aggregate_summary(
                 aggregate, out_dir, fill_policy=recipe.fill_policy
             )
+    auto_merges_path: Path | None = None
     if not dry_run:
         _write_run_summary(result, recipe, withheld, out_dir)
+        auto_merges_path = _write_auto_merges(result, recipe, out_dir)
 
     comparable, comparable_path = _maybe_export_comparable(
         recipe, exportable, out_dir=out_dir, dry_run=dry_run
@@ -1376,6 +1798,7 @@ def export(
         comparable_path=comparable_path,
         household_suggestions=household_suggestions,
         household_path=household_path,
+        auto_merges_path=auto_merges_path,
         data_quality=data_quality,
     )
 

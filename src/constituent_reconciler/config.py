@@ -33,12 +33,17 @@ from constituent_reconciler.suppression import ensure_non_identifying
 # listed here because its keys are the canonical field names themselves,
 # checked separately against CANONICAL_FIELDS.
 _SECTION_KEYS: dict[str, frozenset[str]] = {
-    "input": frozenset({"incoming", "existing", "id_column"}),
+    "input": frozenset({"incoming", "existing", "id_column", "sheet", "header_row"}),
     "mapping": frozenset(CANONICAL_FIELDS),
     "consent": frozenset({"column", "date", "expires", "scope", "require"}),
     "thresholds": frozenset({"prior", "auto", "review"}),
     "policy": frozenset({"pack", "fill", "fill_policy"}),
     "normalize": frozenset({"address_backend"}),
+    # Where the existing side is pulled from, when a recipe pulls it rather
+    # than reading a file. Deliberately not [output]'s keys: see SourceConfig.
+    "source": frozenset(
+        {"endpoint", "auth_env", "auth_header", "auth_scheme", "external_id_field", "page_size"}
+    ),
     "extract": frozenset(
         {"backend", "confidence_threshold", "local_model_override", "local_model_id", "sandbox"}
     ),
@@ -126,7 +131,10 @@ class ExtractConfig:
       - ``"pdfplumber+ocr"``: offline extraction that also OCRs (via
         Tesseract, the optional ``ocr`` extra) any page with no embedded text
         layer, so an image-only scanned page yields fields instead of an
-        empty record.
+        empty record. It is also the one backend that reads photographed or
+        scanned images (``.jpg``, ``.jpeg``, ``.png``, ``.tif``, ``.tiff``,
+        see ``extract/image.py``); under any other an image file is skipped
+        with that reason.
       - ``"bedrock"``: route low-confidence pages to Claude on Bedrock (cloud
         call; forbidden under DV and HIPAA packs regardless of this setting).
       - ``"local"``: route low-confidence pages to a model server on this
@@ -146,11 +154,12 @@ class ExtractConfig:
 
     ``sandbox`` (default true) parses each PDF in a resource-limited child
     process (see ``extract/sandbox.py``): a crafted intake file that hangs,
-    balloons memory, or crashes the parser is contained and routed to human
-    review instead of taking the run down. Setting it false parses in-process;
+    balloons memory, or crashes the parser is contained and listed, with the
+    reason, as an unreadable document in the ingest report instead of taking
+    the run down. Setting it false parses in-process;
     the recipe author accepts the threat-model risk that the threat model's
     "missing process boundary" section describes. It has no effect unless
-    ``backend`` selects a PDF extractor.
+    ``backend`` selects a document extractor.
     """
 
     backend: str = "none"
@@ -224,6 +233,38 @@ class OutputConfig:
     signing_secret_env: str = ""
 
 
+#: How many records a pull asks for per request, unless [source] says otherwise.
+DEFAULT_SOURCE_PAGE_SIZE = 100
+
+#: What `[input] existing` starts with when the existing side is pulled from a
+#: live system instead of read from a file.
+CONNECTOR_PREFIX = "connector:"
+
+
+@dataclass(frozen=True)
+class SourceConfig:
+    """Where the existing side is pulled from, when a recipe pulls it.
+
+    Separate from ``OutputConfig`` on purpose, and neither implies the other:
+    the system a run reads its existing records from is often not the system it
+    writes resolved records to, and inheriting a write target's endpoint would
+    silently point a read at the wrong server. A recipe that reads and writes
+    the same CiviCRM states the endpoint in both sections, which is two lines
+    and no ambiguity.
+
+    Secrets are never stored here: ``auth_env`` names the environment variable
+    holding the credential, read at pull time, exactly as ``OutputConfig``
+    does for a write.
+    """
+
+    endpoint: str = ""
+    auth_env: str = "CIVICRM_API_KEY"
+    auth_header: str = "Authorization"
+    auth_scheme: str = "Bearer"
+    external_id_field: str = "external_identifier"
+    page_size: int = DEFAULT_SOURCE_PAGE_SIZE
+
+
 @dataclass(frozen=True)
 class Recipe:
     """A loaded run configuration. See ``load_recipe`` for how each field is set.
@@ -247,6 +288,13 @@ class Recipe:
     mapping: dict[str, str]
     existing: Path | None = None
     id_column: str | None = None
+    # Workbook selection, applied to whichever of the two inputs is an .xlsx or
+    # .xlsm file. ``sheet = None`` means the workbook's first sheet, which is a
+    # property of the file rather than of the recipe, so ``validate`` reports the
+    # name it resolved to. ``header_row`` is 1-based, matching what Excel shows
+    # in its own row gutter.
+    sheet: str | None = None
+    header_row: int = 1
     consent_column: str | None = None
     consent_date_column: str | None = None
     consent_expires_column: str | None = None
@@ -273,6 +321,10 @@ class Recipe:
     normalize: NormalizeConfig = field(default_factory=NormalizeConfig)
     extract: ExtractConfig = field(default_factory=ExtractConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
+    # Set when [input] existing names a connector rather than a path; the two
+    # are mutually exclusive, and ``existing`` stays None for a pull.
+    existing_connector: str | None = None
+    source: SourceConfig = field(default_factory=SourceConfig)
     household: HouseholdConfig = field(default_factory=HouseholdConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
     tsa_url: str = ""
@@ -282,6 +334,111 @@ class Recipe:
 def _resolve(base: Path, value: str) -> Path:
     candidate = Path(value)
     return candidate if candidate.is_absolute() else (base / candidate)
+
+
+def _load_existing(input_section: dict[str, Any], base: Path) -> tuple[Path | None, str | None]:
+    """The existing side: a resolved path, or the name of a connector to pull from.
+
+    Exactly one of the two comes back set, or neither when the recipe has no
+    existing side at all. They are mutually exclusive by construction rather
+    than by a later check, so no caller can be handed both and pick.
+    """
+    value = input_section.get("existing")
+    if not value:
+        return None, None
+    text = str(value).strip()
+    if not text.startswith(CONNECTOR_PREFIX):
+        return _resolve(base, text), None
+    connector = text[len(CONNECTOR_PREFIX) :].strip()
+    if not connector:
+        raise RecipeError(
+            'recipe [input] existing = "connector:" names no connector '
+            '(expected "connector:<name>")'
+        )
+    return None, connector
+
+
+def _known_source_connectors() -> frozenset[str]:
+    """The registered source connectors.
+
+    Imported inside the function on purpose: the connectors package imports
+    this module for its config types, so a module-level import here would be a
+    cycle. By the time a recipe is loaded the package is importable.
+    """
+    from constituent_reconciler.connectors import SOURCE_REGISTRY
+
+    return frozenset(SOURCE_REGISTRY)
+
+
+def _load_source(section: dict[str, Any], connector: str | None) -> SourceConfig:
+    """Validate and load the `[source]` section that configures a pull.
+
+    Fails closed in both directions. A `[source]` section with no connector
+    named in `[input] existing` is a recipe that looks like it pulls and does
+    not, which would quietly go on reading a stale export; and a connector with
+    no endpoint is a pull with nowhere to read from.
+    """
+    if connector is None:
+        if section:
+            raise RecipeError(
+                "recipe has a [source] section, which configures a pull, but [input] existing "
+                'does not name a connector (expected existing = "connector:<name>")'
+            )
+        return SourceConfig()
+
+    known = _known_source_connectors()
+    if connector not in known:
+        listed = ", ".join(sorted(known)) or "none"
+        raise RecipeError(
+            f"recipe [input] existing names unknown source connector {connector!r} "
+            f"(known source connectors: {listed})"
+        )
+    endpoint = str(section.get("endpoint", "")).strip()
+    if not endpoint:
+        raise RecipeError(
+            f'recipe [input] existing = "connector:{connector}" needs a [source] endpoint '
+            "to read from; none is set"
+        )
+    page_size = int(section.get("page_size", DEFAULT_SOURCE_PAGE_SIZE))
+    if page_size < 1:
+        raise RecipeError(f"recipe [source] page_size must be at least 1, got {page_size}")
+    return SourceConfig(
+        endpoint=endpoint,
+        auth_env=str(section.get("auth_env", "CIVICRM_API_KEY")),
+        auth_header=str(section.get("auth_header", "Authorization")),
+        auth_scheme=str(section.get("auth_scheme", "Bearer")),
+        external_id_field=str(section.get("external_id_field", "external_identifier")),
+        page_size=page_size,
+    )
+
+
+def _load_workbook_selection(input_section: dict[str, Any]) -> tuple[str | None, int]:
+    """Validate and build the [input] workbook keys, fail-closed on every bad shape.
+
+    Both keys are inert for a CSV input and load-bearing for a workbook, so
+    they are checked here regardless of what the input turns out to be: a
+    typo'd ``header_row`` should fail at load time rather than on the day
+    someone switches the recipe to a spreadsheet. ``True`` is rejected as a
+    row number explicitly, because ``bool`` is an ``int`` in Python and
+    ``header_row = true`` would otherwise read as row 1.
+    """
+
+    sheet_value = input_section.get("sheet")
+    if sheet_value is not None and (not isinstance(sheet_value, str) or not sheet_value.strip()):
+        raise RecipeError(
+            f"recipe [input] sheet must be a non-empty worksheet name, got {sheet_value!r}"
+        )
+
+    header_row = input_section.get("header_row", 1)
+    if isinstance(header_row, bool) or not isinstance(header_row, int):
+        raise RecipeError(
+            f"recipe [input] header_row must be a whole row number, got {header_row!r}"
+        )
+    if header_row < 1:
+        raise RecipeError(
+            f"recipe [input] header_row is 1-based and must be at least 1, got {header_row}"
+        )
+    return (None if sheet_value is None else str(sheet_value)), header_row
 
 
 def _load_cache_config(cache_section: dict[str, Any], base: Path) -> CacheConfig:
@@ -358,6 +515,7 @@ def load_recipe(
     normalize_section = data.get("normalize", {})
     extract_section = data.get("extract", {})
     output_section = data.get("output", {})
+    source_section = data.get("source", {})
     household_section = data.get("household", {})
     cache_section = data.get("cache", {})
     comparable_section = data.get("comparable", {})
@@ -406,8 +564,10 @@ def load_recipe(
             f"recipe [review] calibration must be zero or positive, got {calibration_value}"
         )
 
-    existing_value = input_section.get("existing")
-    existing = _resolve(base, str(existing_value)) if existing_value else None
+    existing, existing_connector = _load_existing(input_section, base)
+    source = _load_source(source_section, existing_connector)
+
+    sheet, header_row = _load_workbook_selection(input_section)
 
     normalize = NormalizeConfig(
         address_backend=str(normalize_section.get("address_backend", "deterministic")),
@@ -457,7 +617,10 @@ def load_recipe(
         incoming=_resolve(base, str(input_section["incoming"])),
         mapping=mapping,
         existing=existing,
+        existing_connector=existing_connector,
         id_column=(str(input_section["id_column"]) if "id_column" in input_section else None),
+        sheet=sheet,
+        header_row=header_row,
         consent_column=(str(consent_section["column"]) if "column" in consent_section else None),
         consent_date_column=(str(consent_section["date"]) if "date" in consent_section else None),
         consent_expires_column=(
@@ -484,6 +647,7 @@ def load_recipe(
         normalize=normalize,
         extract=extract,
         output=output,
+        source=source,
         household=household,
         cache=cache,
         tsa_url=tsa_url if tsa_url is not None else str(provenance_section.get("tsa_url", "")),

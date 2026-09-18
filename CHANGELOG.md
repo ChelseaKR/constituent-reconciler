@@ -6,6 +6,526 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
 ## [Unreleased]
 
+### Added
+- **Photographed and scanned intake forms are read as documents (#143).**
+  Under `[extract] backend = "pdfplumber+ocr"`, a folder source now reads
+  `.jpg`, `.jpeg`, `.png`, `.tif` and `.tiff` files through the local
+  Tesseract path an image-only PDF page already used (`extract/image.py`).
+  Each image is one page and each frame of a multi-page TIFF one more; each
+  field's span names the image, the page, and a box in the image's pixels as a
+  viewer shows it, and reaches the review queue CSV and the review page
+  unchanged. A page photographed sideways or upside down is turned upright, by
+  its EXIF orientation tag and then by Tesseract's orientation detection,
+  whose turn is kept only when the page reads better for it. Refused with a
+  named reason and listed as unreadable, never counted as a page: undecodable
+  or truncated data, more than 50 frames, a frame over 50,000,000 pixels
+  (judged from its header before decoding), and pixels deeper than eight bits,
+  which Pillow would clip to white. `eval/extraction-report.md` scores the
+  image fixtures as a row of their own, 24 of 24 predicted fields correct and
+  24 of 25 labeled fields found, the miss being the planted worded date. Not
+  in this change: HEIC, merging a form photographed page by page into one
+  record, and any claim about handwriting.
+- **CI runs the real Tesseract binary.** The `verify` job installs
+  `tesseract-ocr` with its `eng` and `osd` data and sets
+  `CONSTITUENT_RECONCILER_REQUIRE_TESSERACT=1`, which turns the real-OCR
+  tests' skip into a failure there. Before this no test ran the binary
+  anywhere: every OCR test substituted its output, so the scanned-PDF path
+  had never executed against Tesseract. `make install` now installs the `ocr`
+  extra.
+- **The existing side can be pulled from a live CRM instead of exported by
+  hand (#144, CiviCRM first).** A recipe says `[input] existing =
+  "connector:civicrm"` and a `[source]` section carries that system's endpoint
+  and the name of the environment variable holding its credential; `[output]`
+  is deliberately not reused, because the system a run reads from is often not
+  the one it writes to. The pull writes `out/existing_snapshot.csv` in the
+  recipe's own column names, and the run reads that file, so pointing
+  `existing` at the snapshot replays the same run against the same bytes. The
+  run manifest records the connector, the API version, the row count and the
+  snapshot's digest, and is absent entirely when no pull happened, so "a pull
+  that returned nothing" and "no pull" stay apart.
+
+  Fail-closed throughout: a pack that requires local targets refuses the pull
+  before a request is built (reading constituent records out of a hosted CRM
+  is an egress as surely as writing them); a pull that fails part way through
+  leaves no snapshot at all, because a short one reads as a complete CRM with
+  people missing; `--dry-run` makes no network call and refuses a recipe that
+  pulls rather than matching every incoming record against nothing; the query
+  excludes trashed contacts and fixes a deterministic order, without which two
+  pulls of an unchanged database could differ and the recorded digest would
+  mean nothing; and paging is bounded, so a server that always answers with a
+  full page is refused rather than read forever.
+
+  **Consent is never inferred from the CRM.** Every pulled record carries an
+  unmapped token that the consent lifecycle withholds on. Deciding that a
+  particular vendor privacy flag means consent for a particular scope is a
+  judgment with legal weight that differs per organization, so no default
+  ships; under a consent-requiring pack, merged records stay withheld until a
+  mapping exists. `existing_snapshot.csv` is on the destruction inventory.
+
+### Fixed
+- **A killed OCR parse left a copy of the intake page in the system
+  temporary directory.** pytesseract writes each page image to `tempfile`'s
+  directory for the Tesseract binary to read and deletes it in a `finally`,
+  which the sandbox's SIGKILL at a limit skips; the Tesseract subprocess also
+  kept running after the kill. Each parse now gets a scratch directory the
+  parent removes once the child exits or is killed, and the child leads a
+  process group the parent kills whole. `docs/DATA-FLOW-AND-RETENTION.md` said
+  inputs are "never copied", which was untrue of every OCR'd page; it now says
+  what is copied, where, and for how long.
+- **Two documents said a low-confidence OCR page goes to review; nothing
+  sends it there.** `extract/ocr.py` said such a page "routes to review", and
+  `docs/THREAT-MODEL.md` that low-confidence values "inherit" the page score.
+  The threshold has one effect, offering the page to a model seam when one is
+  enabled, and `pdfplumber+ocr` enables none; no record carries an extraction
+  confidence. Both now say so. Whether a page below the threshold should be
+  held for a person is an open decision, not something this change settles.
+- **The test of the OCR-unavailable message ran only where OCR could not.**
+  `test_run_tesseract_raises_clearly_when_pytesseract_unavailable` skipped
+  wherever pytesseract was installed. It now simulates the absence.
+- **A document the tool could not read was reported as a blank page.** When
+  the sandboxed parse of an intake document failed closed (the child was
+  killed at the wall-clock or CPU limit, the input was over the size cap, or
+  the parser crashed on the bytes), the extractor returned a zero-confidence
+  placeholder page carrying a note that said why. The pipeline used the note
+  only to keep the result out of the stage cache, then counted the placeholder
+  in `pages_dropped`, the column for a page that was read and held no name. So
+  a hostile file and a blank sheet of paper produced the same line in the run
+  summary and the same number in `run_report.json`, and the reason was
+  discarded. A new `IngestReport.documents_unreadable` names each such
+  document with its reason; it is in neither page count, it appears in the run
+  summary as `unreadable docs:`, in `run_report.json` as `documents_unreadable`
+  and in the migration summary as a count. The field is additive; the meaning
+  of `pages_dropped` is unchanged, and it is now what that field always said it
+  was. `test_sandbox_kill_marks_the_extraction_not_cacheable` asserted
+  `pages_dropped == 1` for a killed parse, which pinned the defect, and now
+  asserts the corrected accounting.
+
+  The same fix corrects six sentences that said such a document is "routed to
+  human review", in `README.md`, `docs/THREAT-MODEL.md`, `config.py` and
+  `extract/sandbox.py`, which held three of them; a seventh, in the threat
+  model's sandbox entry, said it "lands in human review" and is corrected in
+  the same series. Nothing routed it anywhere: the review queue holds record
+  pairs, and a document nobody could read produces no record to pair. It is now
+  listed where the operator reads the run's accounting, with the reason.
+
+- **The scan that was meant to catch stale release prose read six files
+  carrying it and reported clean.** The check added a day earlier holds one
+  rule over every tracked file: once a release tag exists, no tracked prose
+  file may still say none does. Run against this tree it named nothing, while
+  six tracked files went on asserting, in the present tense, that nothing had
+  ever been released. Three reasons, each measured, each repaired here.
+
+  **It matched raw substrings, so a wrapped sentence was invisible.** Every one
+  of the six is wrapped across lines, and one of them is wrapped inside a
+  reStructuredText docstring behind double backticks where the vocabulary spelled
+  the same phrase with Markdown single ones. `_normalized` now strips line
+  markers and backticks and collapses whitespace, and two assertions in
+  `test_the_claim_vocabulary_is_real_and_not_self_matching` fail if either
+  stops working.
+
+  **It read this module's `__doc__` and nothing else.** The module docstring is
+  one of many in that file, and the stale sentence was in a function docstring:
+  the record that "the 0.8.0 wheel predates `reconcile demo`" and that
+  `git tag -l` prints nothing. Every docstring is now walked with `ast`, under
+  a floor on the count, because an empty list is what a parse that stopped
+  finding the file returns.
+
+  **Nothing held the vocabulary to the tree.** A denylist fails by being
+  narrower than the prose it reads, and no check was measuring that gap.
+  `test_every_claim_in_the_vocabulary_is_a_sentence_this_repository_wrote`
+  now requires every entry to be observed somewhere tracked, so an entry stops
+  earning its place the moment nothing says it. Three entries were added from
+  wordings already in the tree and matched by nothing: that no release has been
+  tagged, that operational supply-chain evidence remains blocked on the first
+  `v*` tag, and that the release workflow has never been exercised.
+
+  The seventh sentence was found by reading rather than by the check, which is
+  what a denylist is worth: a test docstring in this same module said the
+  project is pre-release on purpose and that the release workflow has never
+  been exercised. The widened reader is what put that paragraph in front of
+  anyone at all.
+
+  The six sentences the check names are corrected: four comments in `schema.py` justifying a
+  schema version by the absence of any release, the package docstring in
+  `demo.py` saying no `v*` tag has ever been cut and nothing has been published,
+  the DORA row in `docs/ROADMAP.md`, the resolved-finding paragraph in
+  `docs/BACKLOG-TRIAGE.md`, the R3 row in `docs/RESEARCH-ROADMAP.md`, and the
+  function docstring above. `docs/ROADMAP-MULTIYEAR.md` listed cutting the
+  first signed tag among the maintainer actions still open and is corrected too,
+  though deliberately without a vocabulary entry: that wording is an
+  instruction, and a denylist cannot tell an instruction from an assertion, so
+  an entry for it would fire on a runbook that is correct.
+
+  `docs/audits/scorecard-2026-07.md` is now exempt from the staleness scan for
+  the reason `CHANGELOG.md` already is. It says of itself that it is a dated
+  snapshot and asks for the next posture to be committed under a new date, so
+  rewriting its "no git tag or GitHub release exists yet" row would destroy the
+  record the scan exists to protect. Both files stay in the observation
+  universe, which is where a retired wording goes on being covered.
+
+  Measured on the release itself while checking which sentences had actually
+  gone stale: `v0.9.0` is an SSH-signed annotated tag, its release carries the
+  wheel, the sdist and `sbom.cdx.json`, and `gh attestation verify` exits 0
+  against all three published assets, with a tampered copy of the wheel
+  refused.
+- **The `reconcile` alias's removal version was the version it shipped in.**
+  0.9.0's changelog scheduled the deprecated console-script alias for removal
+  "in 0.9.0", and 0.9.0 shipped with the alias still installed and its stderr
+  notice still reading *"will be removed in 0.9.0"*. An operator running the
+  release was told the command they had just used disappears in the release
+  they were already running. The 0.9.0 entry is left as written — it is the
+  record of what that release said — and the schedule now names `0.10.0`, in
+  `cli.DEPRECATED_PROG_REMOVED_IN`, `pyproject.toml`, `README.md` and
+  `CLAUDE.md`.
+
+  Nothing caught it because every existing check asserted the removal version
+  was *present* in the notice and none asserted what it had to be.
+  `test_the_alias_promises_a_removal_that_has_not_already_happened` holds it
+  strictly ahead of the version `pyproject.toml` declares — two values,
+  neither derived from the other, so moving either alone fails it — and opens
+  by asserting the alias is still installed, because an inequality between two
+  constants passes just as happily when there is nothing left for either of
+  them to describe. **Whether to drop the alias at 0.10.0 or carry it further
+  is the maintainer's call; nothing here removes it.**
+
+## [0.9.0] - 2026-09-07
+
+### Added
+- **`constituent-reconcile explain`: the offline auditor's trace for one resolved
+  record** (`explain.py`; #146). A funder's auditor, or a data subject's advocate,
+  asks "why is this one record, and who decided that?" The answer existed, spread
+  across five artifacts: `resolved.csv` named the members, `auto_merges.json` said at
+  what probability and in which band the matcher joined them, `decisions.json` said
+  which human approved the ones a human saw, `corrections.json` said what a reviewer
+  fixed, and `provenance.jsonl` said what was written under which consent, chained to
+  the manifest. Answering the question meant reading all five and holding them in your
+  head at once. `ai-explain` narrates one pair through a hosted model; this is its
+  deterministic counterpart. It calls no model, re-scores nothing, and adds no decision
+  path -- every number in it is a byte the run already wrote.
+
+  **Two renderings.** The full one carries the mapped field values and is a local PII
+  artifact that `destroy` sweeps. The redacted one is shareable with someone entitled
+  to know how a decision was made but not to hold the data -- and it is not the full
+  rendering with values stripped on the way out. `_values` returns an empty mapping at
+  **read** time, so no field value ever enters the structure the redacted renderer
+  walks. Stripping on output is one forgotten branch away from a leak; not reading is
+  not. `tests/test_destruction_leaves_nothing.py` now drives `explain --write` over the
+  real pipeline with planted sentinels and asserts the redacted file never held one.
+
+  **`--verify` re-derives rather than restating.** It recomputes the cited entry's own
+  hash from its body, walks the whole chain, and recomputes the manifest's hash from
+  `run_manifest.json` to check it against the `run-start` entry opening the segment. A
+  log edited to be internally consistent still fails against the manifest it claims to
+  describe. A check that could not run is reported as that and does not exit 0: the
+  flag answers "is this trace backed by evidence that still holds", and a missing
+  provenance log cannot answer yes.
+
+  **Nothing absent is rendered as a fact.** "No human reviewed this cluster" and "this
+  run has no decisions.json" are different findings and reach the output as different
+  sentences, as do "the reviewer recorded no correction" and "corrections.json is
+  missing". Two cluster members joined transitively are named as such rather than given
+  a probability for a comparison that never happened, and an unreadable probability is
+  reported as unreadable, never as 0.0 -- zero is the strongest possible statement that
+  two records are different people. An unknown cluster or record id exits non-zero
+  rather than being traced as an empty cluster.
+
+  `--write` puts the rendering in the run's own output directory and nowhere else, by
+  there being no parameter that could say otherwise, which is what the `dv` pack
+  requires of the full rendering.
+
+- **Excel workbooks are a first-class structured source** (`excel.py`,
+  `pipeline.read_workbook_records`; #142). `pipeline._route` handled `.csv`,
+  `.pdf`, `.txt` and `.eml`, so the spreadsheet side of intake -- which is how
+  most small nonprofits actually keep it -- had to be exported to CSV by hand
+  before every run. That export is a step where a column gets dropped or
+  renamed. A recipe can now say `existing = "clients.xlsx"` with an optional
+  `sheet` and `header_row`, and a folder walk picks up `.xlsx` and `.xlsm`
+  beside `.csv`. openpyxl ships behind a new `excel` extra, so an installation
+  that only reads CSVs does not carry a spreadsheet parser.
+
+  The workbook is opened read-only and never written, and values are read
+  rather than formula text. Reading is shared with the CSV path from the row
+  dict onward (`pipeline._records_from_rows`), so mapping, id minting and
+  consent reading cannot drift between the two readers: the bundled demo saved
+  as a workbook produces the same record ids and a byte-identical review queue.
+
+  **Four ways a workbook reads as data when it is not, each refused by name.**
+  openpyxl's read-only worksheets do not expose merge ranges at all, so a
+  merged header cell arrives as `None`, indistinguishable from an empty one; a
+  merge at the end of the header row would be trimmed as a trailing blank and
+  its column silently dropped. The merge check therefore costs one non-streaming
+  load of the workbook, which is this reader's memory ceiling; every other pass
+  streams. A formula whose result Excel never cached also arrives as
+  `None` under `data_only=True`, so a second, formula-visible pass tells "never
+  computed" apart from "empty". A workbook's used range routinely runs past its
+  last real row, and minting records from those rows would invent people, so
+  trailing wholly-blank rows are dropped while blank rows *between* data rows
+  are kept exactly as a CSV keeps them. A password-protected workbook is an
+  OLE2 container rather than a zip, and is named as needing a password instead
+  of reported as corrupt. A missing sheet, a blank header, duplicate headers,
+  an empty sheet and a header row past the end of the data are refused the same
+  way, before any record is read.
+
+  `validate` prints the sheet a run will read. That is worth printing because a
+  recipe naming no sheet gets the workbook's *first* one, and sheet order is a
+  property of the file: an operator who reorders tabs would otherwise have no
+  way to see what a run reads short of running it.
+
+  Typed cells render as the text an equivalent CSV would have held: a postcode
+  stored as a number does not become `90210.0`, a date-formatted cell renders
+  ISO-8601 so a consent date parses, and a boolean renders lowercase so `TRUE`
+  in a consent column lands on the recognized token rather than reading as an
+  unrecognized status, which fails closed to withheld.
+
+  The run manifest already digests the workbook file, and the recipe hash
+  covers `sheet` and `header_row`, so two runs reading different sheets of one
+  workbook are distinguishable in provenance. The structured reader does not
+  pass through the stage cache -- it never did, for CSV either -- so there is no
+  cache entry that could go stale on a sheet change.
+- **Confirmed households now reach CiviCRM and NPSP, not just the CSV
+  connectors** (`household.plan_household_writes`,
+  `connectors/household_write.py`; #151). EXP-07 shipped household suggestions
+  and a shared household-id column in the CSV connectors, and the live
+  connectors ignored the confirmed map entirely: `connectors/civicrm.py` and
+  `connectors/salesforce.py` contained zero occurrences of "household",
+  case-insensitive. So an organization on the API path got contacts and lost the
+  household it had just reviewed.
+
+  CiviCRM creates or reuses a Household contact keyed on
+  `external_identifier = hh-<id>` and one `Household Member of` relationship per
+  member. Salesforce upserts a Household Account by external id and sets each
+  Contact's `AccountId`. Both are idempotent by lookup rather than by hope: a
+  second run makes zero create calls. A dry run makes **no** call at all, not
+  even a read, so a preview never needs a credential.
+
+  **A household with any withheld or unwritten member is not written at all.**
+  The issue can be read as writing the household minus that member, and its
+  "Done when" line about a withheld member yielding no relationship row is
+  satisfied either way. This takes the more protective reading: a partial
+  household asserts a family relationship in the CRM on incomplete evidence, and
+  the withheld member's *absence* from a household the reviewer confirmed as
+  theirs is itself an inference about that person. The skip is recorded with a
+  named reason, so the fact stays visible without the inference being published.
+  `member-withheld` and `member-not-written` are separate reasons and are never
+  collapsed: one needs a consent conversation, the other needs the run
+  investigated.
+
+  A member CiviCRM does not hold is a refusal naming them, not a skipped
+  relationship, because continuing would leave a household record naming fewer
+  people than the reviewer confirmed. A Salesforce attach that fails says which
+  member is not on the Account and that a re-run finishes it.
+
+  Verified against injected transports, which prove request construction and
+  idempotency and not that either vendor accepts the calls. #67 is the live
+  exercise that would upgrade that claim, and nothing here says otherwise.
+
+- **`review --shard 2/3` and `constituent-reconcile merge-decisions`: one queue across
+  several reviewers.** A volunteer-run queue has three reviewers and four
+  hundred pairs, and this project's offline posture already assumes files
+  travel by USB or shared drive rather than a multi-user server. There was one
+  decisions file and one reviewer at a time, so two-person review was sequential
+  on that file and reviewer throughput was the practical ceiling on adoption.
+
+  A sharded session presents only the pairs whose stable pair id hashes into its
+  slice, prints which slice it holds in the queue header, and writes
+  `decisions-<i>of<n>.json`. Assignment is BLAKE2b of the canonical (sorted)
+  pair id modulo n: a pure function of the pair, so slices are disjoint and
+  stable across resumes and machines with no coordination and no state.
+  `merge-decisions --into decisions.json a.json b.json c.json` combines them,
+  keeping every reviewer attribution.
+
+  **Shards being disjoint is the point and also the hazard.** Under a pack
+  requiring two distinct approvers, a merger that simply unioned three files
+  could satisfy the two-approver rule with *one* human, reading one "approved"
+  out of shard 1 and another out of shard 2. Three fail-closed guards:
+
+  1. **A pair recorded in the wrong shard file is refused.** Every merged pair's
+     shard is recomputed from its own id, so a pair that does not belong to the
+     file it was found in means the sharding was bypassed and its verdicts
+     cannot be treated as one reviewer's independent work.
+  2. **Conflicting verdicts are refused and named** for a supervisor. Two people
+     deciding one pair differently is a finding, not something to resolve by
+     picking a side.
+  3. **The merged file records which shards it covers**, with each source file's
+     digest, and `apply` refuses a merged file whose sources do not cover every
+     shard. Without that, a file assembled from two of three shards reports a
+     queue as fully reviewed while a third of it was never opened. A partial
+     merge still writes and exits 0 with a warning, because it is a real
+     intermediate artifact; `apply` is where it is refused, and that check runs
+     before the other two because it is the only one that can be true while
+     every pair the file *does* contain is perfectly reviewed.
+
+  Also refused: shard files from different splits of the queue (pairs assigned
+  under one split are not the pairs assigned under another), two files claiming
+  the same shard, a file that declares no shard at all, and a `--shard 4/3`
+  spec, which is rejected rather than clamped. A decisions file with no
+  `sources` section is a whole-queue file and is complete by construction; only
+  a file that *says* it was assembled from shards is held to covering all of
+  them.
+
+- **`constituent-reconcile sweep-thresholds`: what your own reviewers imply about your
+  thresholds.** The defaults are 0.97 auto and 0.80 review, pre-tuned so an adopter
+  needs no labeled pairs. An organization that has *done* the reviewing has
+  labels anyway, and nothing let it see what they imply. This treats reviewer
+  verdicts as labels, replays the probabilities the run already committed
+  against a grid of (auto, review) settings, and reports what each would have
+  done: labeled auto-merges, false merges, missed matches, review load and
+  Wilson intervals per row.
+
+  Not called `calibrate`. `review/calibration.py` already owns that word for a
+  different mechanism (planted known-answer pairs and the fail-closed kappa gate
+  on reviewer agreement), and one name for two gates is how a doc becomes wrong.
+
+  **Four things it will not do**, because a threshold sweep is structurally a
+  tool for finding the setting that makes your numbers look best:
+
+  1. It will not recommend weakening the gate. Eligibility uses
+     `evaluate.gate_holds`, not a comparison, so a row that auto-merged nothing
+     has an *undefined* false-merge rate and can never be recommended.
+     Undefined is not zero, and zero is the best possible value for this metric.
+     `--suggest` prints the most conservative eligible row and applies nothing;
+     the report never edits a recipe.
+  2. It will not compute a rate over an unlabeled denominator. Only pairs a
+     human decided carry a label, so both numerator and denominator are counted
+     over the labeled set alone. A labeled numerator over every auto-merged pair
+     would be a wrong number wearing a real one's clothes.
+  3. It will not report a review load it cannot observe. The run recorded
+     probabilities only at or above its own review threshold, so a row proposing
+     a *lower* one renders its review load as "no evidence" rather than as a
+     small number, on the column an operator reads as cost.
+  4. It will not run on a handful of decisions. Below 30 decided pairs it exits
+     non-zero with the minimum stated, and there is no flag to lower it: a
+     Wilson interval over three verdicts covers most of the range, and a point
+     estimate printed beside one computed from four hundred is how a gate gets
+     retuned on noise.
+
+  Nothing is re-scored, deliberately. Re-scoring would recompute probabilities
+  from the current sources, which may no longer be the ones the reviewer saw,
+  silently relabeling their verdicts against evidence they never read. A decided
+  pair the run's artifacts cannot account for is a refusal naming it, because
+  dropping it would shrink the labeled set and quietly improve every row.
+  New `SWEEP_SCHEMA_VERSION`.
+
+- **`constituent-reconcile diff-runs`: what changed between two runs of one recipe.**
+  An operator re-runs the same recipe every month and defends the new numbers
+  against the old ones. `compare` answers a different question (two *sources*
+  inside one run), so that defense was two output directories and a pair of
+  eyes. `diff-runs --before out-2026-08 --after out-2026-09` reads both runs'
+  committed artifacts and reports which input files changed, which clusters
+  formed, dissolved or changed membership, which pairs entered or left the
+  review queue, which reviewed verdicts no longer apply, and the
+  consent-withheld delta. Nothing is re-scored and no matcher runs: every
+  number comes from bytes both runs already wrote, so the diff is deterministic
+  and two runs of it are byte-identical.
+
+  The section that needed re-derivation rather than a set difference is
+  invalidated decisions, and it distinguishes two reasons rather than
+  collapsing them: `pair-absent` (the later run never considered the pair at
+  all, so the verdict is about a comparison that no longer happens) and
+  `evidence-changed` (the pair is still there and its probability moved, so the
+  verdict was given against a different number than the one in force). The
+  auto-merge record is read alongside the review queue, so a decided pair that
+  moved into the auto band reads as changed rather than as vanished.
+
+  **A diff that could not be computed never renders like a diff that found
+  nothing.** Two identical runs give an empty diff and exit 0, which is a real
+  answer. A run directory missing `run_summary.json`, a dry-run directory with
+  no `resolved.csv`, a summary whose `withheld_no_consent` is absent or
+  non-numeric, a review queue with an unparseable probability: each of those
+  would otherwise print zeros, and zero is the reassuring reading in every one
+  of those cases. All refuse by name, before any diff bytes exist. "The earlier
+  run has no decisions file" is likewise reported as itself rather than as zero
+  invalidations.
+
+  **A diff across a configuration change is refused** unless
+  `--allow-recipe-change`, because it silently attributes threshold effects to
+  data drift; when allowed, the configuration change is rendered as the diff's
+  first section so nobody reads the cluster counts without it. Differing
+  declared schema versions are refused unconditionally: that is a category
+  error, not a caveat.
+
+  `run_diff.json` is counts only and passes through the same small-cell
+  suppression as `aggregate_summary.json` under a pack that requires it, at
+  that pack's own configured threshold rather than the module default.
+  `run_diff_detail.csv` carries the ids and is in
+  `destruction.PII_ARTIFACTS`, driven by the planted-sentinel sweep.
+  New `RUN_DIFF_SCHEMA_VERSION`.
+
+- **`constituent-reconcile plan-withdraw`: consent that lapses after the write is now
+  an artifact, not a gap.** ADR 0013 makes a merged identity take its most
+  restrictive member's consent *at write time*, and nothing re-evaluated it
+  afterwards. So an `expires` date crossing, or a revocation arriving in a
+  later intake file, left a record sitting in CiviCRM or Salesforce that the
+  current consent evaluation would refuse to write, and no artifact in this
+  repository said which records those were. The gap was not a missing feature:
+  the project's own consent rule stopped being enforced the moment a run ended.
+
+  `plan-withdraw --config recipe.toml --manifest out/run_manifest.json --as-of
+  2026-10-01` replays consent evaluation over every record the run wrote, at
+  the given date, and writes `withdraw_plan.json`: per lapsed record the
+  destination external id, the withhold reason, each member's own reason, and
+  the operations the destination's `RepairDeclaration` covers. Read-only,
+  offline, no connector constructed. The plan's digest enters the provenance
+  chain; the ids do not, because `destroy` refuses to delete that log and a
+  permanent list of lapsed constituents is exactly what a destruction pass
+  exists to remove. `withdraw_plan.json` is in `destruction.PII_ARTIFACTS` and
+  the sentinel sweep drives its writer.
+
+  Three things it deliberately does not do. It declares no
+  `consent-withdraw` operation for any connector: enumerating one would assert
+  that CiviCRM's privacy flags or NPSP's flag field had been read from current
+  documentation and exercised against a live instance, which ADR 0012 requires
+  and which has not happened. So every plan is manual, `apply-repair` refuses a
+  withdrawal plan by kind, and the empty operations list is reported with the
+  operation named and the reason it is undeclared rather than shipped as a bare
+  `[]` that reads as "nothing to do". It takes no corrections file, because
+  `pipeline._group_corrections` refuses a correction outside `recipe.fields`
+  and the consent columns are not recipe fields, so no correction can change a
+  consent value. And under a recipe that does not require consent it reports
+  `applicability: "not-applicable-consent-not-required"` rather than zero
+  lapsed records: the write path applied no consent gate, so "nobody lapsed"
+  would be an answer to a question nobody asked.
+
+  Unlike `plan-split`, this verb does **not** refuse when the source files have
+  drifted from the manifest's input hashes. A revocation cannot arrive without
+  changing a source file, so refusing on drift would leave half the motivating
+  case undetectable by the only tool built to detect it. The recipe hash and
+  policy pack are still checked strictly, because they decide which columns
+  build each record's consent; the input drift is recorded as evidence instead,
+  named in the plan's `inputs_changed` and printed by the CLI.
+
+- **`auto_merges.json`: why every automatic merge happened.** `decisions.json`
+  records who decided each pair a *person* saw, and it survives `destroy`
+  because it is audit evidence carrying no field values. The pairs the matcher
+  merged on its own had no such record. `resolved.csv` named a cluster's
+  members and `provenance.jsonl` named the field-level lineage, but nothing
+  anywhere said at what probability, in which band, or against which thresholds
+  the members were joined -- `review_queue.csv` carries a probability only for
+  the pairs that fell *below* the auto threshold. So the merges a human checked
+  were explainable afterwards and the merges nobody checked were not. Measured
+  on the intake demo: six clusters formed automatically, and the only surviving
+  record of any of them was a `members` list.
+
+  Every real run now writes `auto_merges.json` beside the run summary: one row
+  per auto-band pair with its probability and band, plus the thresholds in
+  force, under the new `AUTO_MERGE_SCHEMA_VERSION`. It is written even when
+  nothing auto-merged, because an absent file cannot distinguish "no automatic
+  merges" from "no record of them". Rows are ordered exactly as
+  `review_queue.csv` is, so two runs over the same input are byte-identical.
+  Classified in `destruction.NOT_DESTROYED` alongside `decisions.json`, and a
+  planted-sentinel test searches the rendered bytes for every raw field value
+  in the run to keep that classification honest. This is the artifact an
+  offline auditor's trace has to read.
+
+### Changed
+- `REPAIR_PLAN_SCHEMA_VERSION` 2 -> 3 and `REPORT_SCHEMA_VERSION` 5 -> 6, both
+  additive. The repair-plan family gained a second artifact
+  (`withdraw_plan.json`) and every plan in it now carries a `plan_kind`
+  discriminator, `"split"` or `"withdraw"`, so a reader never infers which
+  artifact it holds from the presence of a key. The provenance log gained a
+  `withdraw-plan` entry action. No prior key changed meaning, and older logs
+  still verify unchanged.
+
 ### Fixed
 - **The false-merge gate passed on zero evidence: a `0/0` rate published as a
   passing `0.0%`.** The gated metric was `false_merges / len(auto)` with a
@@ -30,7 +550,7 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   used for an empty label set, and `constituent-reconcile eval` exits 1. Two
   gate comparisons read `args.gate` and `args.precision_target` off an argparse
   namespace, so they are typed `Any` and `mypy --strict` could not have flagged
-  them; both are now explicit. Two tests asserted the old behaviour as intended
+  them; both are now explicit. Two tests asserted the old behavior as intended
   (`recall == 1.0` over zero labeled fields, and `false_merge_rate == 0.0` as
   "the premise of this test: the headline gate is green") and now assert the
   absence. Every committed eval report regenerates byte-identical, because none
@@ -78,7 +598,7 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
     contents and asserts the two recipes are byte-identical.
   - **It maps only on an exact alias from a published, closed table**, compared
     case-insensitively with runs of whitespace collapsed and in no other way.
-    `Client Given` is not `first name`. Everything unrecognised becomes a named
+    `Client Given` is not `first name`. Everything unrecognized becomes a named
     `CHOOSE` with the operator's real column names beside it, and every column the
     recipe does not use is listed at the foot of the file so nothing is dropped
     silently. Two columns claiming one field maps neither and names both: a tie is
@@ -156,12 +676,12 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [0.8.0] - 2026-09-02
 
 ### Added
-- **The matcher recognises a transposed name.** A duplicate filed with the
+- **The matcher recognizes a transposed name.** A duplicate filed with the
   given name and the family name in the opposite boxes was not merely
-  unsupported by the model, it was penalised twice: both name comparisons saw
+  unsupported by the model, it was penalized twice: both name comparisons saw
   values that disagreed and each fired its "different" level, so one mistake
   made once cost a factor of about 9,000 and vetoed every other field. Two
-  name comparison levels now read all four name values and recognise a crossed
+  name comparison levels now read all four name values and recognize a crossed
   pair, tolerant of a typo on either side; the given-name comparison carries
   the evidence and the surname comparison abstains, so the fact is counted
   once. A `name_pair_key` blocking rule (the two normalized names sorted and
@@ -522,7 +1042,7 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   never generated it or the matcher scored it below the floor. Read as a
   blocking count it produced a wrong diagnosis: of 344 such pairs, 287 had
   been blocked and scored all along and only 57 were genuinely unblocked. Both
-  rows are relabelled, the report says what the number combines, and
+  rows are relabeled, the report says what the number combines, and
   `EvalReport.blocking_misses` carries a comment so the field name stops
   implying a cause.
 - **`normalize_dob` silently discarded every date in ISO 8601 basic format.**
@@ -1198,7 +1718,7 @@ the items the README named as remaining before the 1.0 tag.
     request logging is suppressed. A test asserts no reviewed field value reaches
     the file.
   - **Accessibility (WCAG 2.2 AA)**: a real comparison table with scoped headers,
-    status carried by text and a symbol rather than colour alone, decision
+    status carried by text and a symbol rather than color alone, decision
     controls that work with no JavaScript, keyboard shortcuts as enhancement.
 - **Import-ready CRM export connectors** (`connectors/crm_csv.py`):
   `salesforce_csv` and `civicrm_csv` write a CSV mapped to the target CRM's import

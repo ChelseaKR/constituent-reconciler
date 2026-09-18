@@ -81,12 +81,19 @@ def build_manifest(
     recipe: Recipe,
     *,
     cache: CacheStats | None = None,
+    source_snapshot: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Assemble the reproducibility manifest for one run.
 
     ``recipe_path`` may be None when the Recipe was built in code rather than
     loaded from a file; the manifest then records a null recipe hash instead
     of inventing one.
+
+    ``source_snapshot`` records a pull: which connector the existing side came
+    from, the vendor interface it came through, how many records it held and
+    the digest of the file they were written to. A replay states what it
+    replayed rather than implying the vendor's API has stood still. It carries
+    no field value, like everything else here.
 
     ``cache`` carries the run's stage-cache accounting. The manifest records
     the cache policy (whether caching was on, and whether the recipe named a
@@ -96,7 +103,7 @@ def build_manifest(
     """
 
     stats = cache if cache is not None else CacheStats()
-    return {
+    manifest: dict[str, object] = {
         "created_at": datetime.now(UTC).isoformat(),
         "recipe_hash": file_digest(recipe_path) if recipe_path is not None else None,
         "input_hashes": input_digests(input_paths),
@@ -116,6 +123,12 @@ def build_manifest(
         },
         "schema_versions": versions(),
     }
+    # Absent unless this run pulled its existing side: a key that is there and
+    # empty would read as "a pull that returned nothing", which is a different
+    # fact from "no pull".
+    if source_snapshot is not None:
+        manifest["existing_snapshot"] = source_snapshot
+    return manifest
 
 
 def manifest_hash(manifest: dict[str, object]) -> str:

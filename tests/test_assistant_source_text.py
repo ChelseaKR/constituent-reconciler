@@ -123,6 +123,26 @@ def test_source_span_reads_the_pdf_page_text(tmp_path: Path) -> None:
     assert "Maria" in text
 
 
+def test_an_image_span_reads_as_a_page_with_no_text_layer(tmp_path: Path) -> None:
+    """A photographed page is quoted like an image-only PDF page: nothing to quote.
+
+    The bytes are never decoded here, which is why they need not be an image.
+    """
+    (tmp_path / "photo.jpg").write_bytes(b"never decoded by this path")
+    record = _record_with(
+        SourceSpan(source_file="photo.jpg", page=1, x0=10, top=10, x1=90, bottom=30)
+    )
+    assert for_field(record, "first_name", roots=(tmp_path,)) == ""
+
+
+def test_a_missing_image_is_raised_like_any_missing_document(tmp_path: Path) -> None:
+    record = _record_with(
+        SourceSpan(source_file="photo.jpg", page=1, x0=10, top=10, x1=90, bottom=30)
+    )
+    with pytest.raises(SourceDocumentUnavailable, match="photo.jpg"):
+        for_field(record, "first_name", roots=(tmp_path,))
+
+
 def test_an_unreadable_pdf_page_is_raised_not_reported_as_no_source_text(tmp_path: Path) -> None:
     """A span pointing past the document's last page is a broken run, not a skip."""
 

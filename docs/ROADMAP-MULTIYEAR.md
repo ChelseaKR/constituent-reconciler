@@ -79,11 +79,11 @@ blockers, all external:
   breaking change (docs/adr/0006-schema-stability.md).
 
 During this half the maintainer can initiate all of them: recruit the
-qualified reviewers, cut the first signed tag, apply the ruleset in
-repository settings, and seek the authorized CiviCRM instance for the
-recording. None of these completions is scheduled, because each depends on
-people or account actions outside the codebase. They stay on this list until
-the evidence exists.
+qualified reviewers, apply the ruleset in repository settings, and seek the
+authorized CiviCRM instance for the recording. The first signed tag, `v0.9.0`,
+was cut on 2026-09-07, so that item is off this list. None of the remaining
+completions is scheduled, because each depends on people or account actions
+outside the codebase. They stay on this list until the evidence exists.
 
 ### Adoption and pilots
 

@@ -19,14 +19,14 @@ permissions:
 #
 # Cancellation is limited to pull-request runs, which is where the superseding
 # actually happens and so where the minutes are. A push to main must not be
-# cancelled: `github.ref` is `refs/heads/main` for every one of them, so two
+# canceled: `github.ref` is `refs/heads/main` for every one of them, so two
 # merges close together land in the same concurrency group and the second
 # cancels the first — leaving that commit on main with no verdict at all,
 # which reads the same as "not failed". That is not hypothetical here; it
 # happened to 12088bb ("ci: add job timeouts...", #133), whose every check,
 # `verify` included, is `cancelled`.
 #
-# Not cancelling is necessary but not sufficient, which is why the group key
+# Not canceling is necessary but not sufficient, which is why the group key
 # below is no longer `github.ref` alone. A concurrency group holds one running
 # run and one *pending* run. When a third run joins, GitHub evicts the pending
 # one — it ends `cancelled` having dispatched zero jobs, and
@@ -49,6 +49,11 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The real-OCR tests skip where Tesseract is absent. Here that absence is a
+    # failure instead (tests/conftest.py, real_ocr), so a runner that lost the
+    # binary cannot report green by skipping every one of them.
+    env:
+      CONSTITUENT_RECONCILER_REQUIRE_TESSERACT: "1"
     steps:
       # Actions are pinned to a full commit SHA per the portfolio supply-chain
       # standard; the trailing comment records the human-readable version.
@@ -69,6 +74,17 @@ jobs:
       # `make verify` does locally.
         with:
           enable-cache: true
+      # The Tesseract binary and its eng and osd data. Two things in this job
+      # read with it: the real-OCR tests, and `make eval-extraction`, whose
+      # image rows it measures. Before this step existed, the scanned-PDF OCR
+      # path had never run against the binary anywhere.
+      - name: Install Tesseract (eng, osd)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            tesseract-ocr tesseract-ocr-eng tesseract-ocr-osd
+          tesseract --version
+          tesseract --list-langs
       - name: Install
         run: make install
       - name: Verify (ruff format --check, ruff check, mypy --strict, pytest)

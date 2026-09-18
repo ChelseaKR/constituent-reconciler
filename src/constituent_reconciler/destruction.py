@@ -79,6 +79,10 @@ from constituent_reconciler.stage_cache import CACHE_DIR_NAME, EXTRACT_STAGE, NO
 # no test has ever watched being earned.
 PII_ARTIFACTS: tuple[str, ...] = (
     "resolved.csv",
+    # What a pull of the existing side wrote (``pipeline.pull_existing``): a
+    # copy of real constituent records, taken out of the CRM and written to
+    # the out directory, so it destroys with the records it copies.
+    "existing_snapshot.csv",
     "review_queue.csv",
     "withheld.csv",
     "corrections.json",
@@ -90,8 +94,28 @@ PII_ARTIFACTS: tuple[str, ...] = (
     "cutover_withheld.csv",
     "repair_plan.json",
     "repair_receipts.json",
+    # The withdrawal plan holds the ids and external ids of constituents whose
+    # consent has lapsed, which is a list of named people and a statement about
+    # each one. It carries no field values, but membership in it is itself the
+    # sensitive fact, so it is destroyed rather than kept as audit evidence;
+    # the provenance log keeps the plan's digest and a count, never the ids.
+    "withdraw_plan.json",
     "household_suggestions.csv",
     "ai_ocr_proposals.json",
+    # The diff detail file names the clusters that formed or dissolved and the
+    # records in them. Ids only, no field values, but the same reasoning as
+    # withheld.csv applies: ids resolve to people through the organization's own
+    # systems, and the count-only run_diff.json beside it keeps every number the
+    # detail file supports, so destroying it removes no evidence.
+    "run_diff_detail.csv",
+    # The full auditor's trace (``constituent-reconcile explain``) reproduces the golden
+    # record's field values, the reviewed values of any pair a person saw, and
+    # the corrected value a reviewer typed. It is the same content class as
+    # resolved.csv, assembled for one cluster, and is destroyed for the same
+    # reason. Its redacted sibling is on NOT_DESTROYED below: that one never
+    # reads a field value, so there is nothing in it to remove.
+    "explain_trace.md",
+    "explain_trace.json",
 )
 
 # The other half of the same judgment: every filename this package joins onto
@@ -115,7 +139,38 @@ NOT_DESTROYED: dict[str, str] = {
         "even if a future edit were to list it"
     ),
     "decisions.json": "pair ids, verdicts, reviewer names, and timestamps; no field values",
+    "auto_merges.json": (
+        "the counterpart to decisions.json for the merges no person reviewed: "
+        "pair ids, the probability and band that decided each one, and the "
+        "thresholds in force. No field values, and destroying it would remove "
+        "the only evidence of why an automatic merge happened"
+    ),
     "compare_decisions.json": "the same shape as decisions.json, for the cutover comparison",
+    "calibration_report.md": (
+        "counts and rates over reviewer verdicts: how many pairs each threshold "
+        "setting would auto-merge, how many of those a person had rejected, and "
+        "the Wilson intervals. No pair id and no field value"
+    ),
+    "calibration_report.json": (
+        "the machine-readable half of calibration_report.md; the same counts and "
+        "rates, and the same absence of ids"
+    ),
+    "explain_trace_redacted.md": (
+        "the shareable auditor's trace: record ids, bands, probabilities, "
+        "reviewer names, document spans, chain hashes and refusal reasons. No "
+        "mapped field value is read into it, so destroying it would remove the "
+        "evidence of how a decision was made without removing anybody's data"
+    ),
+    "explain_trace_redacted.json": (
+        "the machine-readable half of explain_trace_redacted.md; the same "
+        "content and the same absence of field values"
+    ),
+    "run_diff.json": (
+        "counts and section names only: how many clusters formed or dissolved "
+        "between two runs, how many pairs entered or left review, how many "
+        "reviewed decisions no longer apply. No ids and no field values; the ids "
+        "live in run_diff_detail.csv, which IS destroyed"
+    ),
     "repair_approvals.json": (
         "reviewer names, verdicts, and timestamps keyed by the plan digest they "
         "approved; the same content class as decisions.json's audit section"

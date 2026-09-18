@@ -35,16 +35,25 @@ import dataclasses
 import json
 import sys
 from collections.abc import Sequence
+from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, TextIO
 
-from constituent_reconciler import __version__, compare, compare_apply, pipeline, stage_cache
+from constituent_reconciler import (
+    __version__,
+    compare,
+    compare_apply,
+    excel,
+    pipeline,
+    stage_cache,
+)
 
 if TYPE_CHECKING:
     # Only for type hints: the deterministic pipeline commands never import
     # the assistant package or its provider/rate-limit types at runtime.
     from constituent_reconciler.assistant.provider import Provider
     from constituent_reconciler.assistant.rate_limit import RateLimiter
+    from constituent_reconciler.extract.base import ExtractedField
 from constituent_reconciler.config import Recipe, RecipeError, load_recipe
 from constituent_reconciler.connectors.base import ConnectorError
 from constituent_reconciler.consent import partition_by_consent
@@ -70,12 +79,14 @@ from constituent_reconciler.progress import ConsoleProgressRenderer
 from constituent_reconciler.provenance import ProvenanceLog, verify_log
 from constituent_reconciler.quality import SourceQuality
 from constituent_reconciler.report import (
+    extraction_targets_met,
     render_eval_markdown,
     render_extraction_markdown,
     render_run_summary,
     render_source_quality,
 )
 from constituent_reconciler.review import session as review_session
+from constituent_reconciler.review import sharding
 from constituent_reconciler.scaffold import ScaffoldError, unfilled_stubs
 from constituent_reconciler.scaffold import build as build_scaffold
 from constituent_reconciler.scaffold import write as write_scaffold
@@ -208,6 +219,12 @@ def _write_run_report(
             "pages_extracted": ingest.pages_extracted,
             "pages_dropped": ingest.pages_dropped,
             "normalization_failures": ingest.normalization_failures,
+            # A document whose extraction failed closed: no page of it was read,
+            # so it is in neither page count above and is named here instead.
+            "documents_unreadable": [
+                {"path": document.path, "reason": document.reason}
+                for document in ingest.documents_unreadable
+            ],
         },
         # Per-source completeness, normalization failures, consent coverage,
         # and duplicate density (quality.py), suppressed under the active
@@ -229,6 +246,32 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print(f"policy error: {error}", file=sys.stderr)
         return 2
     out_dir = Path(args.out)
+    snapshot = None
+    if recipe.existing_connector is not None:
+        if args.dry_run:
+            # --dry-run is network-free, and a pull is a network read. Running
+            # without the existing side instead would silently match every
+            # incoming record against nothing and call them all new.
+            print(
+                f"dry run: this recipe pulls the existing side from "
+                f"{recipe.existing_connector!r}, and a dry run makes no network call. "
+                f"Run without --dry-run to pull, or point [input] existing at a snapshot "
+                f"file to replay one.",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            recipe, snapshot = pipeline.pull_existing(recipe, out_dir)
+        except PolicyViolation as error:
+            print(f"policy error: {error}", file=sys.stderr)
+            return 2
+        except ConnectorError as error:
+            print(f"connector error: {error}", file=sys.stderr)
+            return 2
+        print(
+            f"pulled {snapshot.rows} existing record(s) from {snapshot.connector} "
+            f"({snapshot.api_version}) into {snapshot.path}"
+        )
     # A dry run must not touch disk, so it also runs without the stage cache:
     # neither reading a stale entry nor writing a fresh one.
     cache = None if args.dry_run else stage_cache.for_recipe(recipe, out_dir)
@@ -246,7 +289,12 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print(render_run_summary(result, withheld=len(withheld)))
         try:
             summary = pipeline.export(
-                result, recipe, out_dir=out_dir, dry_run=args.dry_run, progress=progress
+                result,
+                recipe,
+                out_dir=out_dir,
+                dry_run=args.dry_run,
+                source_snapshot=snapshot.as_manifest_entry() if snapshot else None,
+                progress=progress,
             )
         except PolicyViolation as error:
             print(f"\npolicy error: {error}", file=sys.stderr)
@@ -355,10 +403,73 @@ def _cmd_eval(args: argparse.Namespace) -> int:
     return 0 if gates_pass else 1
 
 
-def _cmd_eval_extraction(args: argparse.Namespace) -> int:
-    from constituent_reconciler.extract.base import ExtractedField
+#: Document types in the extraction report, in the order its rows are printed.
+_PDF_DOCUMENTS = "PDF text layer"
+_IMAGE_DOCUMENTS = "Image OCR"
+
+
+def _extraction_fixture_documents(fixtures: Path) -> dict[str, list[Path]]:
+    """The fixture documents by type: PDFs, and page images, each sorted."""
+    from constituent_reconciler.extract.base import IMAGE_SUFFIXES
+
+    documents: dict[str, list[Path]] = {_PDF_DOCUMENTS: [], _IMAGE_DOCUMENTS: []}
+    for path in sorted(fixtures.iterdir()):
+        suffix = path.suffix.lower()
+        if suffix == ".pdf":
+            documents[_PDF_DOCUMENTS].append(path)
+        elif suffix in IMAGE_SUFFIXES:
+            documents[_IMAGE_DOCUMENTS].append(path)
+    return {kind: paths for kind, paths in documents.items() if paths}
+
+
+def _ocr_refusal(images: list[Path]) -> str | None:
+    """Why the image fixtures cannot be scored here, or ``None`` when they can.
+
+    Writing the report without the image rows would publish a smaller fixture
+    set under the same headline, which reads as a measurement of the whole set.
+    """
+    if not images:
+        return None
+    from constituent_reconciler.extract.image import ocr_unavailable_reason
+
+    unavailable = ocr_unavailable_reason()
+    if unavailable is None:
+        return None
+    return (
+        f"eval-extraction: {len(images)} image fixture(s) are read by real OCR, "
+        f"which cannot run here: {unavailable}. No report was written."
+    )
+
+
+def _read_extraction_fixtures(
+    by_type: dict[str, list[Path]],
+) -> tuple[dict[str, list[ExtractedField]], list[str]]:
+    """Each fixture document's predicted fields, and the documents its reader refused.
+
+    A fixture its reader refused is a broken fixture or a broken installation,
+    not a document with nothing on it; scored, it would turn into false
+    negatives with no reason attached, so the caller writes no report.
+    """
+    from constituent_reconciler.extract.base import Extractor
+    from constituent_reconciler.extract.image import ImageOcrExtractor
     from constituent_reconciler.extract.pdf import PdfplumberExtractor
 
+    extractors: dict[str, Extractor] = {
+        _PDF_DOCUMENTS: PdfplumberExtractor(),
+        _IMAGE_DOCUMENTS: ImageOcrExtractor(),
+    }
+    predicted: dict[str, list[ExtractedField]] = {}
+    unread: list[str] = []
+    for kind, paths in by_type.items():
+        for path in paths:
+            result = extractors[kind].extract(path)
+            if result.note is not None:
+                unread.append(f"{path.name}: {result.note}")
+            predicted[path.name] = [field for page in result.pages for field in page.fields]
+    return predicted, unread
+
+
+def _cmd_eval_extraction(args: argparse.Namespace) -> int:
     fixtures = Path(args.fixtures)
     labels_path = fixtures / "labels.json"
     if not labels_path.is_file():
@@ -366,22 +477,32 @@ def _cmd_eval_extraction(args: argparse.Namespace) -> int:
         return 2
     labels = json.loads(labels_path.read_text(encoding="utf-8"))
 
-    pdf_paths = sorted(fixtures.glob("*.pdf"))
-    if not pdf_paths:
-        print(f"no fixture PDFs found in: {fixtures}", file=sys.stderr)
+    by_type = _extraction_fixture_documents(fixtures)
+    if not by_type:
+        print(f"no fixture documents (PDFs or page images) found in: {fixtures}", file=sys.stderr)
         return 2
-
-    extractor = PdfplumberExtractor()
-    predicted: dict[str, list[ExtractedField]] = {}
+    refusal = _ocr_refusal(by_type.get(_IMAGE_DOCUMENTS, []))
+    if refusal is not None:
+        print(refusal, file=sys.stderr)
+        return 2
     try:
-        for pdf_path in pdf_paths:
-            result = extractor.extract(pdf_path)
-            predicted[pdf_path.name] = [field for page in result.pages for field in page.fields]
+        predicted, unread = _read_extraction_fixtures(by_type)
     except ImportError as error:
         print(f"extraction error: {error}", file=sys.stderr)
         return 2
+    for line in unread:
+        print(f"eval-extraction: fixture could not be read: {line}", file=sys.stderr)
+    if unread:
+        return 2
 
     report = extraction_metrics(predicted, labels)
+    type_reports = {
+        kind: extraction_metrics(
+            {path.name: predicted[path.name] for path in paths},
+            {path.name: labels[path.name] for path in paths if path.name in labels},
+        )
+        for kind, paths in by_type.items()
+    }
     controls_report = None
     if args.controls:
         controls_report = run_extraction_controls(predicted, labels, seed=args.seed)
@@ -391,18 +512,17 @@ def _cmd_eval_extraction(args: argparse.Namespace) -> int:
         precision_target=args.precision_target,
         recall_target=args.recall_target,
         controls=controls_report,
+        by_type=type_reports,
     )
     if args.out:
         Path(args.out).write_text(markdown, encoding="utf-8")
         print(f"wrote extraction eval report: {args.out}")
     else:
         print(markdown)
-    # None means an empty denominator, so the target was never demonstrated.
-    met = (
-        report.precision is not None
-        and report.recall is not None
-        and report.precision >= args.precision_target
-        and report.recall >= args.recall_target
+    met = extraction_targets_met(
+        (report, *type_reports.values()),
+        precision_target=args.precision_target,
+        recall_target=args.recall_target,
     )
     # A failed control means the numbers above cannot be trusted, so it is
     # merge-blocking in its own right rather than a note beside a passing run.
@@ -463,6 +583,22 @@ def _refuse_incomplete_review(
     --policy-pack dv`` would merge pairs one person approved.
     """
 
+    # A merged file that covers only some shards reports a queue as fully
+    # reviewed while a whole shard was never opened. Checked FIRST, because it
+    # is the only one of the three that can be true while every pair the file
+    # does contain is perfectly reviewed -- the failure is what is absent.
+    partial = sharding.incomplete_merge(data)
+    if partial is not None:
+        print(
+            f"error: {decisions_path} is an incomplete merge of a sharded review: {partial}",
+            file=sys.stderr,
+        )
+        print(
+            "Finish the missing shard(s) (constituent-reconcile review --shard <i>/<n>) and "
+            "re-run `merge-decisions` over all of them.",
+            file=sys.stderr,
+        )
+        return True
     awaiting = _pairs_awaiting_second_review(data)
     if awaiting:
         print(
@@ -849,6 +985,250 @@ def _cmd_plan_split(args: argparse.Namespace) -> int:
     return 0
 
 
+def _parse_as_of(raw: str | None, verb: str) -> date | int:
+    """The ``--as-of`` date, or the exit code for an unparseable one.
+
+    A date this tool cannot read is refused rather than replaced with today.
+    Silently falling back would evaluate consent against a date the operator
+    did not ask for and print the result as if it were the one they did.
+    """
+
+    if raw is None:
+        return date.today()
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        print(
+            f"{verb} error: --as-of must be an ISO-8601 date (YYYY-MM-DD); got {raw!r}",
+            file=sys.stderr,
+        )
+        return 2
+
+
+def _cmd_merge_decisions(args: argparse.Namespace) -> int:
+    """Combine per-reviewer shard decisions files into one whole-queue file.
+
+    Refuses on conflicting verdicts, on a pair recorded in a shard file it
+    does not hash into, and on files from different splits of the queue.
+    Coverage is recorded rather than required, because a partial merge is a
+    real intermediate artifact; it is ``apply`` that refuses to act on one.
+    """
+
+    paths = [Path(path) for path in args.shards]
+    try:
+        merged = sharding.merge_decisions(paths)
+    except sharding.ShardError as error:
+        print(f"merge-decisions error: {error}", file=sys.stderr)
+        return 2
+
+    into = Path(args.into)
+    into.parent.mkdir(parents=True, exist_ok=True)
+    into.write_text(json.dumps(merged.payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    covered = ", ".join(str(index) for index in merged.covered)
+    print(f"merged decisions: {into}")
+    print(f"  shards:  {len(merged.covered)} of {merged.shard_count} (covered: {covered})")
+    print(f"  pairs:   {merged.pairs} decided")
+    for name, digest in merged.sources:
+        print(f"  source:  {name} {digest}")
+    missing = sorted(set(range(1, merged.shard_count + 1)) - set(merged.covered))
+    if missing:
+        # Not an error here, and loudly not a success either: the file is
+        # honest about what it holds, and `apply` will refuse it.
+        print(
+            "warning: shard(s) "
+            + ", ".join(str(index) for index in missing)
+            + " are missing, so this merge does not cover the queue. "
+            "`constituent-reconcile apply` will refuse it until they are included.",
+            file=sys.stderr,
+        )
+    return 0
+
+
+def _cmd_sweep_thresholds(args: argparse.Namespace) -> int:
+    """Score a threshold grid against this organization's own reviewer verdicts.
+
+    Read-only in every direction: it edits no recipe, applies nothing, and
+    prints counts and rates. Named ``sweep-thresholds`` rather than
+    ``calibrate`` because ``review/calibration.py`` already owns that word for
+    the planted-pair reviewer-agreement gate, which is a different mechanism.
+    """
+
+    from constituent_reconciler import sweep as sweep_module
+
+    try:
+        recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+    except (RecipeError, PolicyViolation) as error:
+        print(f"sweep-thresholds error: {error}", file=sys.stderr)
+        return 2
+    decisions_path = Path(args.decisions)
+    run_dir = Path(args.run_dir) if args.run_dir else decisions_path.parent
+    out_dir = Path(args.out) if args.out else run_dir
+    try:
+        report = sweep_module.sweep_thresholds(
+            recipe,
+            decisions_path=decisions_path,
+            run_dir=run_dir,
+            gate=float(args.gate),
+        )
+    except sweep_module.SweepError as error:
+        print(f"sweep-thresholds error: {error}", file=sys.stderr)
+        return 2
+
+    policy = policy_for(recipe.policy_pack)
+    markdown_path, json_path = sweep_module.write_sweep(report, out_dir, policy=policy)
+    print(sweep_module.render_sweep(report))
+    if args.suggest:
+        suggestion = report.suggestion
+        if suggestion is None:
+            print(
+                "no eligible row: these verdicts support no setting inside the gate. "
+                "Nothing is suggested, and nothing has been changed."
+            )
+        else:
+            print(
+                f"most conservative eligible row: auto {suggestion.auto}, review "
+                f"{suggestion.review}. Not applied; edit the recipe yourself if you mean it."
+            )
+    print(f"report: {markdown_path}")
+    print(f"json:   {json_path}")
+    return 0
+
+
+def _cmd_diff_runs(args: argparse.Namespace) -> int:
+    """Report what changed between two runs of one recipe (read-only).
+
+    Everything printed is counts and section names. The cluster and record ids
+    live only in the local ``run_diff_detail.csv``, which
+    ``constituent-reconcile destroy`` covers.
+    """
+
+    from constituent_reconciler import diff_runs as diff_module
+
+    before_dir, after_dir = Path(args.before), Path(args.after)
+    out_dir = Path(args.out) if args.out else after_dir
+    policy: Policy | None = None
+    if args.config:
+        try:
+            recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+        except (RecipeError, PolicyViolation) as error:
+            print(f"diff-runs error: {error}", file=sys.stderr)
+            return 2
+        policy = policy_for(recipe.policy_pack)
+    try:
+        diff = diff_module.diff_runs(
+            before_dir, after_dir, allow_recipe_change=args.allow_recipe_change
+        )
+    except diff_module.RunDiffError as error:
+        print(f"diff-runs error: {error}", file=sys.stderr)
+        return 2
+
+    diff_path, detail_path = diff_module.write_diff(diff, out_dir, policy=policy)
+    if args.format == "json":
+        print(json.dumps(diff_module.diff_payload(diff, policy=policy), indent=2, sort_keys=True))
+    else:
+        print(diff_module.render_diff(diff, policy=policy))
+    print(f"diff:   {diff_path}")
+    print(f"detail: {detail_path} ({len(diff.detail_rows)} row(s); local, destroyed by `destroy`)")
+    return 0
+
+
+def _cmd_explain(args: argparse.Namespace) -> int:
+    """Build one cluster's auditor trace from a run's own artifacts.
+
+    Offline and read-only: no model is called, nothing is re-scored, and no
+    decision is changed. The full rendering carries mapped field values and is
+    local; the redacted one never reads them.
+    """
+
+    from constituent_reconciler import explain as explain_module
+
+    mode = explain_module.REDACTED if args.redact else explain_module.FULL
+    try:
+        trace = explain_module.explain(
+            Path(args.out),
+            cluster=args.cluster,
+            record=args.record,
+            mode=mode,
+            verify=args.verify,
+        )
+    except explain_module.ExplainError as error:
+        print(f"explain error: {error}", file=sys.stderr)
+        return 2
+
+    if args.format == "json":
+        print(json.dumps(explain_module.trace_payload(trace), indent=2, sort_keys=True))
+    else:
+        print(explain_module.render_trace(trace))
+
+    if args.write:
+        path = explain_module.write_trace(trace, args.format)
+        kind = "shareable" if trace.redacted else "LOCAL, carries field values"
+        print(f"written: {path} ({kind})", file=sys.stderr)
+
+    if trace.verification is not None and not trace.verification.ok:
+        # Non-zero covers both "a check failed" and "a check could not run".
+        # Reporting an unverifiable trace as verified is the failure mode this
+        # flag exists to prevent, so it is never exit 0.
+        print("verification did not pass; see the Verification section", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _cmd_plan_withdraw(args: argparse.Namespace) -> int:
+    """Report the written records whose consent has lapsed since the write.
+
+    Read-only toward the destination and offline. Everything printed here is
+    counts, a date, a path and a digest; the external ids and record ids live
+    only in the local plan file, which ``constituent-reconcile destroy`` covers.
+    """
+
+    from constituent_reconciler import repair
+
+    try:
+        recipe = load_recipe(args.config, policy_pack=args.policy_pack)
+    except (RecipeError, PolicyViolation) as error:
+        print(f"plan-withdraw error: {error}", file=sys.stderr)
+        return 2
+    as_of = _parse_as_of(args.as_of, "plan-withdraw")
+    if isinstance(as_of, int):
+        return as_of
+    try:
+        planned = repair.plan_withdraw(recipe, manifest_path=Path(args.manifest), as_of=as_of)
+    except repair.WithdrawPlanError as error:
+        print(f"plan-withdraw error: {error}", file=sys.stderr)
+        return 2
+
+    print(f"withdrawal plan: {planned.plan_path}")
+    print(f"  as of:        {planned.as_of.isoformat()}")
+    print(f"  destination:  {planned.destination}")
+    print(f"  written:      {planned.written} record(s) examined")
+    if planned.applicability == repair.APPLICABILITY_NOT_REQUIRED:
+        # Not "0 lapsed". The recipe applies no consent gate on the write path,
+        # so no written record can be out of consent against a rule it never
+        # stated, and an empty list here answers a question nobody asked.
+        print(
+            "  lapsed:       not checked -- this recipe does not require consent, so "
+            "no written record can lapse against it. Set [consent] require = true to "
+            "make this check mean something."
+        )
+    else:
+        print(f"  lapsed:       {len(planned.lapsed)} record(s) now out of consent")
+    if planned.inputs_changed:
+        print(
+            "  sources:      changed since the write ("
+            + ", ".join(planned.inputs_changed)
+            + "); consent was read from the current files"
+        )
+    if planned.mode == "manual":
+        print(
+            "  operations:   none declared for this destination; the plan is manual "
+            "and apply-repair will refuse it"
+        )
+    print(f"  plan digest:  {planned.digest} (recorded in the provenance log)")
+    print("planning is read-only: nothing was sent to or changed in the destination.")
+    return 0
+
+
 def _cmd_approve_repair(args: argparse.Namespace) -> int:
     """Record one reviewer's approval of the exact bytes of a repair plan.
 
@@ -1003,6 +1383,23 @@ def _calibration_summary(session: object) -> str:
     return line
 
 
+def _parse_review_shard(spec: str | None) -> sharding.Shard | None | int:
+    """The requested shard, ``None`` for a whole-queue review, or an exit code.
+
+    A malformed or out-of-range spec is refused rather than clamped: a reviewer
+    who typed ``4/3`` would otherwise be handed some other shard's pairs and
+    believe they had covered a quarter of the queue that does not exist.
+    """
+
+    if not spec:
+        return None
+    try:
+        return sharding.parse_shard(spec)
+    except sharding.ShardError as error:
+        print(f"review error: {error}", file=sys.stderr)
+        return 2
+
+
 def _cmd_review(args: argparse.Namespace) -> int:
     from constituent_reconciler.review.calibration import generate_calibration_pairs
     from constituent_reconciler.review.server import serve
@@ -1016,10 +1413,17 @@ def _cmd_review(args: argparse.Namespace) -> int:
     except PolicyViolation as error:
         print(f"policy error: {error}", file=sys.stderr)
         return 2
+    shard = _parse_review_shard(args.shard)
+    if isinstance(shard, int):
+        return shard
     result = pipeline.run(recipe)
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
-    decisions_path = Path(args.decisions) if args.decisions else out_dir / "decisions.json"
+    # A sharded session writes its own file by default. Sharing one path across
+    # reviewers would have each session's save overwrite the last, which is
+    # exactly the sequential bottleneck sharding exists to remove.
+    default_decisions = out_dir / (shard.filename if shard else "decisions.json")
+    decisions_path = Path(args.decisions) if args.decisions else default_decisions
     # The flag may turn two-person review on for any pack; it cannot turn off
     # a pack that requires it (the dv pack defaults it on), fail-closed.
     require_second = bool(args.require_second_reviewer) or recipe.require_second_reviewer
@@ -1033,11 +1437,20 @@ def _cmd_review(args: argparse.Namespace) -> int:
             privacy_mode=recipe.require_local_targets,
             require_second_reviewer=require_second,
             calibration=calibration,
+            shard=shard,
         )
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
     print(render_run_summary(result))
+    if shard is not None:
+        # Printed in the header, per the issue: a reviewer must be able to see
+        # which slice they hold and how much of the queue it is.
+        print(
+            f"shard {shard}: {session.total} of {len(result.review_pairs)} queue pair(s) "
+            f"assigned to this reviewer, writing {decisions_path.name}. Merge every "
+            "shard with `constituent-reconcile merge-decisions` before applying."
+        )
     if calibration:
         print(
             f"calibration: {len(calibration)} planted known-answer pair(s) are mixed "
@@ -1111,6 +1524,27 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _sheet_note(recipe: Recipe, path: Path, problems: list[str]) -> str:
+    """The " (sheet 'X', header row N)" suffix validate prints for a workbook input.
+
+    Reported because a recipe that names no sheet reads the workbook's *first*
+    sheet, and sheet order is a property of the file: an operator who reorders
+    tabs would otherwise have no way to see what a run will read short of
+    running it. A workbook that cannot be opened, or that has no such sheet,
+    becomes a problem line instead of an exception, so validate keeps reporting
+    the rest of the recipe.
+    """
+
+    if path.suffix.lower() not in excel.WORKBOOK_SUFFIXES or not path.exists():
+        return ""
+    try:
+        sheet = excel.resolve_sheet_name(path, recipe.sheet)
+    except RecipeError as error:
+        problems.append(str(error))
+        return ""
+    return f" (sheet {sheet!r}, header row {recipe.header_row})"
+
+
 def _cmd_validate(args: argparse.Namespace) -> int:
     """Load and shape-check a recipe, and report its active switches.
 
@@ -1142,9 +1576,9 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         problems.append(f"input.existing does not exist: {recipe.existing}")
 
     print(f"recipe: {config_path}")
-    print(f"  incoming: {recipe.incoming}")
+    print(f"  incoming: {recipe.incoming}{_sheet_note(recipe, recipe.incoming, problems)}")
     if recipe.existing is not None:
-        print(f"  existing: {recipe.existing}")
+        print(f"  existing: {recipe.existing}{_sheet_note(recipe, recipe.existing, problems)}")
     print(f"  mapped fields: {', '.join(recipe.fields)}")
     print(f"  policy pack: {recipe.policy_pack}")
     print(
@@ -1596,7 +2030,14 @@ def _cmd_ai_triage(args: argparse.Namespace) -> int:
 #: name. Both names point at :func:`main`; the old one prints a notice.
 PROG = "constituent-reconcile"
 DEPRECATED_PROG = "reconcile"
-DEPRECATED_PROG_REMOVED_IN = "0.9.0"
+
+#: The release the alias comes out in. It said ``0.9.0`` *inside* 0.9.0: the
+#: alias, the notice naming 0.9.0, and the changelog line scheduling the
+#: removal for 0.9.0 all shipped together, so every operator running the
+#: release was told the command would go in the release they were running.
+#: `tests/test_cli_entrypoint.py` now holds this strictly ahead of the version
+#: `pyproject.toml` declares, which is what the notice's "will be" means.
+DEPRECATED_PROG_REMOVED_IN = "0.10.0"
 
 
 def deprecated_alias_notice(argv0: str) -> str | None:
@@ -1693,12 +2134,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     exeval_parser = sub.add_parser(
         "eval-extraction",
-        help="score the PDF extractor against a labeled fixture set",
+        help="score the PDF extractor and the image OCR reader against a labeled fixture set",
     )
     exeval_parser.add_argument(
         "--fixtures",
         required=True,
-        help="directory containing the fixture PDFs and labels.json",
+        help="directory containing the fixture PDFs, page images and labels.json",
     )
     exeval_parser.add_argument("--out", help="write the report here instead of stdout")
     exeval_parser.add_argument(
@@ -1914,6 +2355,111 @@ def build_parser() -> argparse.ArgumentParser:
     )
     plan_parser.set_defaults(func=_cmd_plan_split)
 
+    withdraw_parser = sub.add_parser(
+        "plan-withdraw",
+        help=(
+            "write a read-only plan of the written records whose consent has lapsed "
+            "since the run wrote them (ADR 0013)"
+        ),
+    )
+    withdraw_parser.add_argument(
+        "--config", required=True, help="path to the recipe.toml the written run used"
+    )
+    withdraw_parser.add_argument(
+        "--manifest", required=True, help="the written run's run_manifest.json"
+    )
+    withdraw_parser.add_argument(
+        "--as-of",
+        default=None,
+        help="ISO-8601 date to evaluate consent against (default: today); refused, "
+        "never defaulted, when it cannot be parsed",
+    )
+    withdraw_parser.add_argument(
+        "--policy-pack",
+        default=None,
+        help="override the recipe's policy pack to match the written run; fail-closed on unknown",
+    )
+    withdraw_parser.set_defaults(func=_cmd_plan_withdraw)
+
+    diff_parser = sub.add_parser(
+        "diff-runs",
+        help="report what changed between two runs of one recipe: clusters, review "
+        "queue, invalidated decisions, consent",
+    )
+    diff_parser.add_argument("--before", required=True, help="the earlier run's output directory")
+    diff_parser.add_argument("--after", required=True, help="the later run's output directory")
+    diff_parser.add_argument(
+        "--out",
+        default=None,
+        help="where to write run_diff.json and run_diff_detail.csv (default: --after)",
+    )
+    diff_parser.add_argument(
+        "--config",
+        default=None,
+        help="recipe.toml whose policy pack decides whether the count summary is "
+        "small-cell suppressed; omit and no suppression is applied",
+    )
+    diff_parser.add_argument(
+        "--policy-pack",
+        default=None,
+        help="override the recipe's policy pack; fail-closed on unknown",
+    )
+    diff_parser.add_argument(
+        "--allow-recipe-change",
+        action="store_true",
+        help="compare runs whose recipe, thresholds or policy pack differ; the change "
+        "is recorded as the diff's first section",
+    )
+    diff_parser.add_argument(
+        "--format", choices=("markdown", "json"), default="markdown", help="output rendering"
+    )
+    diff_parser.set_defaults(func=_cmd_diff_runs)
+
+    sweep_parser = sub.add_parser(
+        "sweep-thresholds",
+        help="report what your reviewers' own verdicts imply about a grid of "
+        "(auto, review) thresholds; never edits the recipe",
+    )
+    sweep_parser.add_argument("--config", required=True, help="path to recipe.toml")
+    sweep_parser.add_argument(
+        "--decisions", required=True, help="the reviewed decisions JSON to treat as labels"
+    )
+    sweep_parser.add_argument(
+        "--run-dir",
+        default=None,
+        help="the run directory holding review_queue.csv and auto_merges.json "
+        "(default: the --decisions file's own directory)",
+    )
+    sweep_parser.add_argument(
+        "--out", default=None, help="where to write the report (default: --run-dir)"
+    )
+    sweep_parser.add_argument(
+        "--gate",
+        type=float,
+        default=0.0,
+        help="max allowed false-merge rate for a row to be eligible (default 0.0, matching `eval`)",
+    )
+    sweep_parser.add_argument(
+        "--suggest",
+        action="store_true",
+        help="also print the most conservative eligible row; it is never applied",
+    )
+    sweep_parser.add_argument(
+        "--policy-pack", default=None, help="override the recipe's policy pack"
+    )
+    sweep_parser.set_defaults(func=_cmd_sweep_thresholds)
+
+    merge_parser = sub.add_parser(
+        "merge-decisions",
+        help="combine per-reviewer shard decisions files into one; refuses on "
+        "conflicting verdicts and on a pair recorded in the wrong shard",
+    )
+    merge_parser.add_argument(
+        "--into", required=True, help="path to write the merged decisions file to"
+    )
+    merge_parser.add_argument("shards", nargs="+", help="the shard decisions files to merge")
+    merge_parser.set_defaults(func=_cmd_merge_decisions)
+
     approve_repair_parser = sub.add_parser(
         "approve-repair",
         help="record one reviewer's approval of a repair plan's exact bytes (ADR 0012)",
@@ -2010,7 +2556,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     review_parser.add_argument("--out", default="out", help="output directory")
     review_parser.add_argument(
-        "--decisions", default=None, help="decisions file to write (default <out>/decisions.json)"
+        "--shard",
+        default=None,
+        help="review only this slice of the queue, as i/n (e.g. 2/3). Assignment is a "
+        "hash of each pair's own id, so slices are disjoint and stable across resumes; "
+        "the session writes decisions-<i>of<n>.json",
+    )
+    review_parser.add_argument(
+        "--decisions",
+        default=None,
+        help="decisions file to write (default <out>/decisions.json, or "
+        "<out>/decisions-<i>of<n>.json under --shard)",
     )
     review_parser.add_argument(
         "--host", default="127.0.0.1", help="bind host (loopback only under the dv pack)"
@@ -2094,6 +2650,40 @@ def build_parser() -> argparse.ArgumentParser:
         help="list eligible artifacts without deleting or logging",
     )
     destroy_parser.set_defaults(func=_cmd_destroy)
+
+    explain_parser = sub.add_parser(
+        "explain",
+        help="build an offline auditor's trace for one resolved cluster or record: "
+        "members, edges, who decided them, corrections, consent, provenance",
+    )
+    explain_parser.add_argument("--out", required=True, help="the run's output directory")
+    explain_target = explain_parser.add_mutually_exclusive_group(required=True)
+    explain_target.add_argument("--cluster", default=None, help="the cluster id to trace")
+    explain_target.add_argument(
+        "--record", default=None, help="a member record id; its cluster is traced"
+    )
+    explain_parser.add_argument(
+        "--redact",
+        action="store_true",
+        help="shareable rendering: ids, bands, probabilities, hashes, reviewers and "
+        "reasons, with no mapped field value read at all",
+    )
+    explain_parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="re-derive the provenance chain, the cited entry's own hash, and the "
+        "manifest hash; exit non-zero if any check fails or cannot be run",
+    )
+    explain_parser.add_argument(
+        "--write",
+        action="store_true",
+        help="also write the rendering into --out (never anywhere else); the full "
+        "rendering is a local PII artifact that `destroy` covers",
+    )
+    explain_parser.add_argument(
+        "--format", choices=("markdown", "json"), default="markdown", help="output rendering"
+    )
+    explain_parser.set_defaults(func=_cmd_explain)
 
     verify_parser = sub.add_parser("verify", help="check a provenance log's hash chain")
     verify_parser.add_argument("--provenance", required=True, help="path to provenance.jsonl")

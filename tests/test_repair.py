@@ -141,8 +141,10 @@ def test_plan_split_writes_a_grounded_local_plan(run_dir: tuple[Path, Path]) -> 
     plan = _plan(out_dir)
     # Pinned as a literal, not read from the constant, so a bump has to be
     # deliberate. Raised 1 -> 2 when every split_records entry gained its
-    # consent object.
-    assert plan["repair_plan_schema"] == 2
+    # consent object; 2 -> 3 when withdraw_plan.json joined this family and
+    # every plan gained the ``plan_kind`` discriminator.
+    assert plan["repair_plan_schema"] == 3
+    assert plan["plan_kind"] == "split"
     assert plan["cluster_id"] == MERGED_CLUSTER
     assert plan["old_external_id"] == "existing:E003"
     assert plan["survivor"] == "existing:E003"

@@ -30,8 +30,12 @@ CONNECTOR_INTERFACE_VERSION = 1
 # the "repair-apply" provenance entry (ADR 0012, ``connectors/repair.py``'s
 # ``apply_repair``): the operation name and the distinct approver identities
 # that gated it, alongside a receipt digest in the existing content_hash
-# field. No prior key changed meaning. Version-1 logs still verify unchanged.
-REPORT_SCHEMA_VERSION = 5
+# field. No prior key changed meaning. Version 6 added the "withdraw-plan"
+# provenance entry (ADR 0012, ``repair.plan_withdraw``): the digest of a
+# consent-withdrawal plan, with an empty record id because the plan concerns
+# every written record under the manifest rather than one cluster. No prior key
+# changed meaning. Version-1 logs still verify unchanged.
+REPORT_SCHEMA_VERSION = 6
 
 # The decisions.json shape: approved/rejected lists of [left, right] record-id
 # pairs, written by the review session and consumed by ``constituent-reconcile apply``.
@@ -67,9 +71,62 @@ CUTOVER_CORRECTIONS_SCHEMA_VERSION = 2
 # manual instructions of a consent-requiring recipe now name the members a
 # person must not create. Additive: every version 1 key keeps its meaning, and
 # a reader that ignores the new object behaves as before, which is why this is
-# a minor bump rather than a break. No release has been tagged, so no published
-# artifact carries version 1.
-REPAIR_PLAN_SCHEMA_VERSION = 2
+# a minor bump rather than a break. No release has ever shipped version 1:
+# v0.9.0, the first one cut, carries version 3.
+#
+# Version 3 adds a second artifact to this family and a key that tells the two
+# apart. ``withdraw_plan.json`` (``constituent-reconcile plan-withdraw``) lists the
+# written records whose consent has lapsed since the write, in the same
+# repair-protocol shape; every plan in the family now carries ``plan_kind``,
+# ``"split"`` or ``"withdraw"``, so a reader never has to infer which artifact it
+# holds from the presence of a key. Additive for the split plan: every version 2
+# key keeps its meaning and its value, and the only difference in a version 3
+# split plan is the new ``plan_kind`` discriminator.
+REPAIR_PLAN_SCHEMA_VERSION = 3
+
+# The two artifacts in the repair-plan family, and the value of every plan's
+# ``plan_kind``. ``apply-repair`` executes only ``PLAN_KIND_SPLIT``; a withdraw
+# plan is refused there by name rather than by a downstream key lookup failing.
+PLAN_KIND_SPLIT = "split"
+PLAN_KIND_WITHDRAW = "withdraw"
+
+# The count-only run_diff.json written by ``constituent-reconcile diff-runs``: how many
+# clusters formed, dissolved or changed membership between two runs of one
+# recipe, how many pairs entered or left review, how many reviewed decisions no
+# longer apply, and the consent-withheld delta. Versioned on its own, like the
+# migration summary and the repair plan, because it is read by a data manager
+# defending one month's numbers against the last, not by the run report's
+# consumers. Version 1 from its first byte, and no published artifact carries
+# an earlier one.
+RUN_DIFF_SCHEMA_VERSION = 1
+
+# The calibration_report.json written by ``constituent-reconcile sweep-thresholds``: one row
+# per (auto, review) setting with what an organization's own reviewer verdicts
+# imply about it -- labeled auto-merges, false merges, missed matches, review
+# load, Wilson intervals, and whether the row is eligible under the false-merge
+# gate. Counts and rates only, never a pair id. Versioned on its own because it
+# is read by someone deciding whether to change a threshold, which is a
+# different audience and a different lifetime from the run report. Version 1
+# from its first byte.
+SWEEP_SCHEMA_VERSION = 1
+
+# The auto_merges.json shape ``constituent-reconcile run`` writes: every pair the
+# matcher merged without a human, with the probability and band that decided it
+# and the thresholds in force. Versioned on its own, like the migration summary
+# and the repair plan, because it is read by an auditor rather than by the run
+# report's consumers, and because it is the counterpart to decisions.json --
+# which records who decided the pairs a person saw. Version 1 from its first
+# byte, and no published artifact carries an earlier one.
+AUTO_MERGE_SCHEMA_VERSION = 1
+
+# The explain_trace.json shape ``constituent-reconcile explain`` writes: one cluster's
+# members, the pairwise edges that joined them with their bands and
+# probabilities, who decided each one, the corrections applied, the consent at
+# write time, and the provenance entry chained to the manifest. Versioned on its
+# own, like the run diff and the calibration report, because its reader is an
+# auditor holding one record rather than a consumer of the run report. Version 1
+# from its first byte, and no published artifact carries an earlier one.
+EXPLAIN_TRACE_SCHEMA_VERSION = 1
 
 # The connector repair-capability declaration shape (connectors/repair.py):
 # destination, enumerated verified versions, operation vocabulary, and the
@@ -102,6 +159,7 @@ def versions() -> dict[str, int]:
         "decisions_schema": DECISIONS_SCHEMA_VERSION,
         "migration_summary": MIGRATION_SUMMARY_SCHEMA_VERSION,
         "cutover_corrections": CUTOVER_CORRECTIONS_SCHEMA_VERSION,
+        "auto_merge": AUTO_MERGE_SCHEMA_VERSION,
         "repair_plan": REPAIR_PLAN_SCHEMA_VERSION,
         "repair_capability": REPAIR_CAPABILITY_SCHEMA_VERSION,
         "repair_approval": REPAIR_APPROVAL_SCHEMA_VERSION,

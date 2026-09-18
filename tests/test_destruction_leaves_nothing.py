@@ -20,11 +20,12 @@ scenario silently overwriting another's manifest:
 
 * ``run``: ``constituent-reconcile run`` over an existing CSV and a text intake, through
   the csv, civicrm_csv and salesforce_csv connectors with household grouping
-  and the stage cache on, then ``constituent-reconcile ai-propose-corrections``.
+  and the stage cache on, then ``constituent-reconcile ai-propose-corrections`` and
+  ``diff-runs`` against a doctored copy of the same run.
 * ``cutover``: ``constituent-reconcile compare``, the review session ``constituent-reconcile
   compare-review`` serves, then ``constituent-reconcile compare-apply``.
 * ``repair``: ``constituent-reconcile run`` against a CiviCRM double, then ``plan-split``,
-  two ``approve-repair`` calls, and ``apply-repair --execute``.
+  two ``approve-repair`` calls, ``apply-repair --execute``, and ``plan-withdraw``.
 
 Coverage is no longer a comment. ``SWEPT_BY_CONTENT`` and
 ``SWEPT_BY_EXISTENCE`` classify every name on ``destruction.PII_ARTIFACTS``,
@@ -44,6 +45,7 @@ is the real code.
 
 from __future__ import annotations
 
+import csv
 import json
 import shutil
 import textwrap
@@ -60,6 +62,7 @@ import constituent_reconciler.destruction as destruction
 from constituent_reconciler import compare, compare_apply, pipeline
 from constituent_reconciler.assistant.provider import ProviderResult
 from constituent_reconciler.cli import main
+from constituent_reconciler.connectors import civicrm_source
 from constituent_reconciler.destruction import PROVENANCE_FILENAME, destroy
 from constituent_reconciler.provenance import ProvenanceLog, verify_log
 from constituent_reconciler.review.session import APPROVED, ReviewSession
@@ -90,6 +93,7 @@ VERIFIED_CIVICRM_VERSION = "6.17.2"
 #: destruction pass and none of them may be readable anywhere afterwards.
 SWEPT_BY_CONTENT: dict[str, str] = {
     "resolved.csv": "constituent-reconcile run, csv connector",
+    "existing_snapshot.csv": "constituent-reconcile run, existing side pulled from a connector",
     "review_queue.csv": "constituent-reconcile run, on the uncertain pair the fixture plants",
     "civicrm_import.csv": "constituent-reconcile run, civicrm_csv connector",
     "salesforce_import.csv": "constituent-reconcile run, salesforce_csv connector",
@@ -101,6 +105,8 @@ SWEPT_BY_CONTENT: dict[str, str] = {
     "target_corrections.csv": "constituent-reconcile compare-apply",
     "repair_plan.json": "constituent-reconcile plan-split",
     "repair_receipts.json": "constituent-reconcile apply-repair --execute",
+    "explain_trace.md": "constituent-reconcile explain --write, on the sentinel's own cluster",
+    "explain_trace.json": "constituent-reconcile explain --write --format json, same cluster",
 }
 
 #: The rest of ``PII_ARTIFACTS``: files this fixture's real writers do produce,
@@ -116,6 +122,14 @@ SWEPT_BY_CONTENT: dict[str, str] = {
 SWEPT_BY_EXISTENCE: dict[str, str] = {
     "withheld.csv": "constituent-reconcile run, on the revoked-consent record the fixture plants",
     "cutover_withheld.csv": "constituent-reconcile compare-apply, on that same revoked record",
+    "run_diff_detail.csv": (
+        "constituent-reconcile diff-runs, over a doctored copy of the run scenario; the "
+        "rows are cluster ids, member record ids and a change kind, never a field value"
+    ),
+    "withdraw_plan.json": (
+        "constituent-reconcile plan-withdraw, after the repair scenario's write; the plan "
+        "carries cluster ids, external ids and a withhold reason, never a field value"
+    ),
 }
 
 
@@ -299,6 +313,80 @@ def _text_sourced_record_id(out_dir: Path) -> str:
     raise AssertionError("the text intake produced no record id")
 
 
+class _PullingCivicrm:
+    """A CiviCRM double whose contacts carry planted values.
+
+    One page shorter than the default page size, so the pull makes one call
+    and stops. The point of the scenario is the file the pull writes: a copy
+    of real constituent records, taken out of a CRM into the out directory.
+    """
+
+    def post(self, url: str, *, headers: dict[str, str], body: bytes) -> tuple[int, bytes]:
+        contacts = [
+            {
+                "id": 501,
+                "external_identifier": "E501",
+                "first_name": "Maria",
+                "last_name": SENTINEL_SURNAME,
+                "birth_date": "1985-03-14",
+                "email_primary.email": SENTINEL_EMAIL,
+                "phone_primary.phone": "530-555-0101",
+            }
+        ]
+        return 200, json.dumps({"values": contacts}).encode("utf-8")
+
+
+def _build_pull_scenario(root: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """``constituent-reconcile run`` with the existing side pulled from a CiviCRM double.
+
+    Absolute paths throughout: another scenario has already chdir'd, and a
+    recipe resolves its inputs against its own directory either way.
+    """
+
+    work = root / "pull"
+    work.mkdir()
+    out_dir = work / "out"
+    (work / "intake.csv").write_text(
+        "First Name,Last Name,DOB,Email,Phone,Consent\n"
+        f"Maria,{SENTINEL_SURNAME},1985-03-14,{SENTINEL_EMAIL},530-555-0101,granted\n",
+        encoding="utf-8",
+    )
+    recipe = work / "recipe.toml"
+    recipe.write_text(
+        textwrap.dedent("""\
+            [input]
+            incoming = "intake.csv"
+            existing = "connector:civicrm"
+            id_column = "id"
+
+            [mapping]
+            first_name = "First Name"
+            last_name  = "Last Name"
+            dob        = "DOB"
+            email      = "Email"
+            phone      = "Phone"
+
+            [consent]
+            column = "Consent"
+
+            [source]
+            endpoint = "https://crm.invalid/civicrm/ajax/api4"
+
+            [output]
+            connector = "csv"
+            """),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CIVICRM_API_KEY", "sweep-key")
+    monkeypatch.setattr(civicrm_source, "UrllibTransport", lambda *a, **k: _PullingCivicrm())
+    assert main(["run", "--config", str(recipe), "--out", str(out_dir)]) == 0
+    snapshot = out_dir / "existing_snapshot.csv"
+    assert SENTINEL_SURNAME.lower() in snapshot.read_text(encoding="utf-8").lower(), (
+        "the pulled snapshot must carry a planted value, or its destruction proves nothing"
+    )
+    return out_dir
+
+
 def _build_run_scenario(root: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """``constituent-reconcile run`` on three connectors, then ``ai-propose-corrections``.
 
@@ -330,7 +418,65 @@ def _build_run_scenario(root: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         ]
     )
     assert code == 0
+
+    # diff-runs, against a doctored copy of this same run so the detail file has
+    # real rows rather than only a header. The copy loses one cluster, which the
+    # diff reports by id; the manifest and summary are untouched, so the
+    # comparison itself is the ordinary one.
+    earlier = root / "earlier"
+    shutil.copytree(out_dir, earlier)
+    resolved = earlier / "resolved.csv"
+    kept = resolved.read_text(encoding="utf-8").splitlines()
+    resolved.write_text("\n".join(kept[:-1]) + "\n", encoding="utf-8")
+    assert main(["diff-runs", "--before", str(earlier), "--after", str(out_dir)]) == 0
+    detail = out_dir / "run_diff_detail.csv"
+    assert len(detail.read_text(encoding="utf-8").splitlines()) > 1, (
+        "the diff detail file must carry rows here, or its destruction proves nothing"
+    )
+
+    # explain --write, on a cluster the sentinel record is in, so the auditor's
+    # trace on disk really does carry a planted field value before the pass.
+    # Both renderings are written; only the full one is destroyed, and the
+    # redacted one is checked below for never having held a sentinel at all.
+    sentinel_cluster = _sentinel_cluster_id(out_dir)
+    for output_format in ("markdown", "json"):
+        for extra in ((), ("--redact",)):
+            code = main(
+                [
+                    "explain",
+                    "--out",
+                    str(out_dir),
+                    "--cluster",
+                    sentinel_cluster,
+                    "--write",
+                    "--format",
+                    output_format,
+                    *extra,
+                ]
+            )
+            assert code == 0
+    for name in ("explain_trace.md", "explain_trace.json"):
+        body = (out_dir / name).read_text(encoding="utf-8").lower()
+        assert any(sentinel.lower() in body for sentinel in SENTINELS), (
+            f"{name} must carry a planted value here, or its destruction proves nothing"
+        )
+    for name in ("explain_trace_redacted.md", "explain_trace_redacted.json"):
+        body = (out_dir / name).read_text(encoding="utf-8").lower()
+        assert not any(sentinel.lower() in body for sentinel in SENTINELS), (
+            f"{name} is NOT destroyed, so it must never have held a field value"
+        )
     return out_dir
+
+
+def _sentinel_cluster_id(out_dir: Path) -> str:
+    """The cluster whose golden record carries a planted sentinel value."""
+
+    with (out_dir / "resolved.csv").open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            line = ",".join(value or "" for value in row.values()).lower()
+            if any(sentinel.lower() in line for sentinel in SENTINELS):
+                return (row.get("cluster_id") or "").strip()
+    raise AssertionError("no cluster in resolved.csv carries a planted sentinel")
 
 
 # -- the cutover surface -------------------------------------------------------
@@ -558,6 +704,9 @@ def _build_repair_scenario(root: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         )
         == 0
     )
+    assert main(["plan-withdraw", "--config", str(recipe), "--manifest", str(manifest)]) == 0, (
+        "plan-withdraw did not write a plan for the sweep to destroy"
+    )
     return out_dir
 
 
@@ -580,6 +729,7 @@ def _built_out_dirs(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[s
             "run": _build_run_scenario(root, monkeypatch),
             "cutover": _build_cutover_scenario(root),
             "repair": _build_repair_scenario(root, monkeypatch),
+            "pull": _build_pull_scenario(root, monkeypatch),
         }
 
 

@@ -49,6 +49,21 @@ verification, which is a later hardening step. Shipping the chain now and the TS
 as a seam is the honest split, and it matches how the cloud extraction seam was
 deferred in v0.1.
 
+### A read direction, added 2026-09-11 (#144)
+
+The interface above is write-only: a connector takes resolved records to a
+destination. `SourceConnector` is its read-only mirror, registered in its own
+registry, because reading a system and writing to it are different
+capabilities and a name registered for one must not answer for the other. It
+yields canonical rows, so no vendor field reaches a record, and it carries the
+same `is_local` attribute the policy gate reads, so a pull is refused under a
+local-target pack by the same rule that refuses a write.
+
+This is additive to the connector interface rather than a change to it:
+`Connector`, `write_all`, `WriteResult` and `is_local` are untouched, so
+`CONNECTOR_INTERFACE_VERSION` does not move (ADR 0006 counts an added
+interface as additive and a changed one as breaking).
+
 ## Consequences
 
 - Consent is enforced in the pipeline before a connector is constructed, so a

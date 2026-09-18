@@ -47,6 +47,11 @@ FIELD_PATTERNS: dict[str, list[re.Pattern[str]]] = {
     ],
 }
 
+#: File suffixes read as photographed or scanned page images (``extract/image.py``).
+#: Kept here, beside the other extraction constants, so the pipeline can route a
+#: file without importing the OCR modules to do it.
+IMAGE_SUFFIXES: frozenset[str] = frozenset({".jpg", ".jpeg", ".png", ".tif", ".tiff"})
+
 # Page confidence heuristics. A page with fewer than _MIN_WORDS words is
 # probably near-empty (a cover sheet, a blank page, or a header-only scan).
 # A page where the average word length exceeds _GARBLED_AVG_WORD_LEN characters
@@ -109,6 +114,21 @@ class ExtractionResult:
 
     def low_confidence_pages(self, threshold: float) -> list[PageResult]:
         return [p for p in self.pages if p.confidence < threshold]
+
+
+def failed_closed(source_file: str, reason: str) -> ExtractionResult:
+    """A zero-confidence, fieldless placeholder whose note says why the read failed.
+
+    An extractor that cannot read a document returns this rather than raising,
+    so one bad file cannot end a run. The placeholder page is not a page anyone
+    read: the pipeline accounts the document as unreadable, with ``reason``, and
+    never as a page (``pipeline._unreadable``).
+    """
+    return ExtractionResult(
+        source_file=source_file,
+        pages=[PageResult(page_num=1, confidence=0.0)],
+        note=reason,
+    )
 
 
 @runtime_checkable

@@ -101,12 +101,17 @@ class ExtractedRows:
     than the file bytes, so storing it would freeze a transient failure
     under the file's content digest. A clean parse that keeps zero rows
     stays cacheable: it would compute the same emptiness again.
+
+    ``unreadable`` carries the reason when the document could not be read at
+    all (its extraction failed closed). Such a result holds no rows and no
+    pages, and is never cacheable.
     """
 
     rows: list[Row]
     pages_extracted: int
     pages_dropped: int
     cacheable: bool = True
+    unreadable: str | None = None
 
 
 class StageCache(Protocol):
@@ -245,6 +250,8 @@ def _extractor_version(reader: str) -> str | None:
 
     if reader == "text":
         return "stdlib"
+    if reader == "image":
+        return None
     return _distribution_version("pdfplumber")
 
 
@@ -354,6 +361,11 @@ def extraction_cacheable(recipe: Recipe, *, reader: str) -> bool:
 
     if reader == "text":
         return True
+    if reader == "image":
+        # Every image is OCR'd, and OCR output depends on the installed
+        # Tesseract and its language data, neither of which the package pins:
+        # there is no version to key on.
+        return False
     if recipe.extract.backend != "pdfplumber":
         return False
     return _extractor_version(reader) is not None

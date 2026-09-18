@@ -12,7 +12,7 @@ four opt-in `ai-*` commands under
 [AI-assisted review](#ai-assisted-review-opt-in-not-offline): those call a
 hosted model on purpose and say so plainly, not as a buried caveat.
 
-> **Status: Beta (0.8.0, untagged), early but working.** The pipeline runs and is tested:
+> **Status: Beta (0.9.0, tagged `v0.9.0`), early but working.** The pipeline runs and is tested:
 > CSV or PDF in, deduplicated records out, with source-span pointers in the
 > review queue, CASS-style address normalization, a committed eval
 > ([eval/report.md](eval/report.md)), a local WCAG 2.2 AA web review UI, CiviCRM
@@ -45,7 +45,7 @@ below.
 
 The command was named `reconcile` before 0.8.0. That name still runs, wired
 to the same entry point, and prints one line to stderr pointing here; it is
-removed in 0.9.0. It changed because PyPI already carries unrelated
+removed in 0.10.0. It changed because PyPI already carries unrelated
 `reconcile` and `reconciler` distributions, and two packages that each install
 a `bin/reconcile` do not error; whichever was installed last owns the name.
 
@@ -86,10 +86,12 @@ with a review queue a volunteer can run, is what this project builds.
 
 The pipeline runs as a sequence of logged, deterministic-by-default steps:
 
-1. **Ingest** a folder of CSVs and PDFs, digitally created or scanned.
-   Image-only scanned pages run through a local Tesseract OCR backend
-   (`[extract] backend = "pdfplumber+ocr"`, the optional `ocr` extra) so a
-   paper intake form yields fields instead of an empty page. Plain-text and
+1. **Ingest** a folder of CSVs, PDFs (digitally created or scanned), and phone
+   photos or scans of paper forms (`.jpg`, `.jpeg`, `.png`, `.tif`, `.tiff`).
+   Image-only scanned pages and page images run through a local Tesseract OCR
+   backend (`[extract] backend = "pdfplumber+ocr"`, the optional `ocr` extra
+   and a system `tesseract`) so a paper intake form yields fields instead of
+   an empty page. Plain-text and
    `.eml` intake bodies use the offline text extractor with line/column spans.
 2. **Extract** field and value pairs with a source-span pointer and a
    confidence score. Extraction runs offline by default; an optional Bedrock
@@ -187,6 +189,14 @@ For PDF extraction, install the optional extract extra:
 pip install -e ".[extract]"
 ```
 
+To read scanned pages and photographed forms, add the OCR extra and the
+Tesseract binary with its English and orientation data:
+
+```sh
+pip install -e ".[extract,ocr]"
+brew install tesseract          # or: apt-get install tesseract-ocr
+```
+
 (Not yet published to PyPI — `pip install` above is a local editable install, not
 a registry install. See [docs/ROADMAP.md](docs/ROADMAP.md) for the Trusted
 Publishing plan.)
@@ -199,10 +209,8 @@ run:
 uvx --from git+https://github.com/ChelseaKR/constituent-reconciler@main constituent-reconcile --help
 ```
 
-No `v*` tag has been cut yet, so there is no tagged release to pin to and no
-GitHub Release artifacts to download; `release.yml` is tag-triggered and still
-unexercised (the Release & Versioning row below says the same). Substitute a
-commit SHA for `main` if you need a fixed input.
+`v0.9.0` is the first tag cut, so it is the ref to pin to. Substitute it, or a
+commit SHA, for `main` if you need a fixed input.
 
 The bundled demos below run from an installed wheel as well as from a clone.
 `examples/` is committed at the repository root, and the same tree ships
@@ -213,8 +221,8 @@ fresh virtual environment, and runs the Quickstart from outside the repository.
 
 Every wheel that exists is one someone built — from a clone, from the sdist, or
 from the Git ref above — and every one of them carries the packaged examples.
-There is no published 0.8.0 wheel and no `v0.8.0` tag to install instead; as
-the paragraph above says, no `v*` tag has been cut at all.
+There is no published 0.9.0 wheel on PyPI -- this project has no PyPI publish
+stage -- but `v0.9.0` is tagged, so that ref is installable.
 
 Before pointing the tool at your own data, check a recipe's shape without
 resolving anything:
@@ -296,7 +304,7 @@ carries record ids, verdicts, reviewer names, and timestamps only). A correction
 is the explicit exception described above and is isolated in `corrections.json`. Under the
 `dv` policy pack it refuses any non-loopback bind, fail-closed, so the review
 surface cannot become an egress path for client information. The pages are built for WCAG 2.2 AA: a real
-comparison table, status shown by text and not colour alone, and decision buttons
+comparison table, status shown by text and not color alone, and decision buttons
 that work with the keyboard and with no JavaScript (`A` approve, `C` correct,
 `R` reject, `J`
 and `K` to move between pairs). Pass `--no-browser` to skip opening a window, or
@@ -434,6 +442,49 @@ and an unanswerable-question suite, all against synthetic fixtures, with
 provider/model/prompt-version/commit/date on every result — are in
 [eval/ai/report.md](eval/ai/report.md), regenerated with `make eval-ai`.
 
+### Pulling the existing side from a CRM
+
+`existing` is normally a CSV export the operator produces by hand, and a stale
+export is the most common way a returning-client batch merges against contacts
+the CRM has since changed or deleted. A recipe can pull it instead:
+
+```toml
+[input]
+existing = "connector:civicrm"   # instead of a path
+incoming = "intake/"
+
+[source]
+endpoint = "https://crm.example.org/civicrm/ajax/api4"
+auth_env = "CIVICRM_API_KEY"     # the variable holding the key, never the key
+```
+
+`[source]` is separate from `[output]` on purpose: the system a run reads from
+is often not the one it writes to, and inheriting a write target's endpoint
+would point a read at the wrong server. The pull writes everything it read to
+`out/existing_snapshot.csv`, in this recipe's own column names, and the run
+reads that file. Pointing `existing` at the snapshot replays the same run
+against the same bytes, and the run manifest records the snapshot's digest,
+the connector and the API version so a replay can say what it replayed.
+
+Three refusals are worth knowing before you rely on it:
+
+* **Consent is never inferred.** Every pulled record carries an unmapped
+  consent token, which the consent lifecycle treats as withheld. Mapping a
+  vendor's privacy flags onto a consent scope is a judgment with legal weight
+  that differs per organization, so no default ships; under a
+  consent-requiring pack, merged records stay withheld until a mapping exists.
+* **A pack that requires local targets refuses the pull**, before a request is
+  built. Reading constituent records out of a hosted CRM is an egress as
+  surely as writing them, and the `dv` pack forbids both.
+* **A pull that fails part way through writes no snapshot at all.** A short
+  one would read as a complete CRM with people missing, and each missing
+  person becomes a duplicate on the next write. `--dry-run` makes no network
+  call, so it refuses a recipe that pulls rather than running against no
+  existing side.
+
+`out/existing_snapshot.csv` holds real constituent records and is destroyed
+with them by `constituent-reconcile destroy`.
+
 ### Reading from PDFs
 
 With the `extract` extra installed, point the recipe's `incoming` at a folder
@@ -449,19 +500,44 @@ backend              = "pdfplumber"
 confidence_threshold = 0.5
 ```
 
-The pipeline routes `.csv` files through the structured reader and `.pdf` files
-through the extractor. Each extracted field carries a source-span pointer (PDF
+The pipeline routes `.csv` and `.xlsx`/`.xlsm` files through the structured
+reader and `.pdf` files through the extractor. Each extracted field carries a source-span pointer (PDF
 filename, page number, bounding box) that appears in the review queue CSV as
 `{field}_left_span` and `{field}_right_span` columns, so a reviewer can navigate
 back to where the value was read.
 
 PDFs parse in a resource-limited child process by default: a malformed or
 hostile intake file that hangs, balloons memory, or crashes the parser is
-contained and its document routed to human review instead of taking the run
-down. This is containment, not a full syscall sandbox (the child keeps the
+contained and listed, with the reason, as an unreadable document in the ingest
+report (the run summary and `run_report.json`) instead of taking the run down.
+It contributes no records, and it is not counted as a blank page. This is containment, not a full syscall sandbox (the child keeps the
 same privileges; see `docs/THREAT-MODEL.md`). Set `sandbox = false` under
 `[extract]` to parse in-process, accepting that exposure; the caps live in
 `src/constituent_reconciler/extract/sandbox.py`.
+
+### Reading photographed and scanned forms
+
+With `backend = "pdfplumber+ocr"`, a folder source also reads page images:
+`.jpg`, `.jpeg`, `.png`, `.tif` and `.tiff`. Each image is one page, and each
+frame of a multi-page TIFF (a faxed intake, say) is one more. They go through
+the same Tesseract path, field patterns and confidence rule as an image-only
+PDF page, inside the same sandbox, and each field's span names the image, the
+page, and a box in the image's pixels as a photo viewer shows it. A page
+photographed sideways or upside down is turned upright: by the photo's EXIF
+orientation tag first, then by Tesseract's orientation detection, whose turn
+is kept only when the page reads better for it. Under any other backend an
+image is skipped with that reason. As with a PDF, each page that carries a
+name becomes its own record; a paper form photographed page by page is not
+merged into one.
+
+An image the tool cannot read is listed in the ingest report as unreadable,
+with its reason, and the run continues: bytes no decoder recognizes, data that
+ends early, more than 50 pages in one file, a page over 50,000,000 pixels
+(refused from its header before anything is decoded, the defense against a
+decompression bomb), or pixels deeper than eight bits. HEIC, the iPhone
+default, is not read; export such photos as JPEG. The fixtures and tests are
+printed forms, so nothing here measures handwriting and no claim is made
+about it.
 
 Pages with fewer than five words, or where the average word length looks garbled
 (over 15 characters), score below 0.5 and are flagged as low-confidence. They
@@ -695,14 +771,14 @@ locally (this table plus the linked doc) pending a filed issue. Last reviewed:
 | Code Quality | Applies | Enforced — `ruff` (incl. `S`, `C90`), `ruff format`, `mypy --strict`, `pytest --strict-markers`, `uv.lock` committed, `uv sync --locked` | `pyproject.toml`, `Makefile` |
 | Security & Supply-Chain | Applies — ASVS L2 (handles DV-survivor PII) | Partial — secret scan, dependency-vuln scan, SAST (Semgrep + CodeQL + zizmor), and a release-time CycloneDX SBOM + keyless build-provenance attestation (`release.yml`) enforced; container scan (Trivy) is enforced in CI; VEX is still a gap | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Security |
 | CI/CD | Applies | Partial — SHA-pinned actions, least-privilege tokens, `make verify` parity, `secrets`+`security` jobs, CODEOWNERS, and a solo-maintainer review waiver (ADR 0008) all in place; a live `protect-main` branch ruleset has been active since 2026-07-09 (force-push and deletion blocked, nine required check contexts, and the repository owner's standing bypass and no other, deliberately), though it does not yet carry the committed profile's pull-request and linear-history rules (parity delta recorded in [docs/rulesets/README.md](docs/rulesets/README.md)) | `.github/workflows/ci.yml`, [docs/adr/0008-solo-maintainer-review-waiver.md](docs/adr/0008-solo-maintainer-review-waiver.md), [docs/rulesets/](docs/rulesets/) |
-| Release & Versioning | Applies (release-producing: 0.1.0-0.8.0) | Partial — `.github/workflows/release.yml` is tag-triggered (`v*`), re-verifies at the tagged commit, checks tag/`pyproject.toml` version consistency, builds sdist+wheel, generates a CycloneDX SBOM, attests build provenance (keyless OIDC), and publishes a GitHub Release with the matching CHANGELOG section; gap — no `v*` tag has been cut yet, so the workflow is unexercised, and there is no PyPI publish stage (not yet published to PyPI). `tests/test_release_versions.py` holds the declared version to that: `CITATION.cff` may carry no `date-released` while no tag exists (it carried 2026-09-02, a day nothing was released), the Status line must name the declared version, and the citation file, the installed metadata and the changelog heading must agree with `pyproject.toml`. It skips rather than passing where a checkout cannot see tags, and CI fetches them so it runs for real | [.github/workflows/release.yml](.github/workflows/release.yml), [CHANGELOG.md](CHANGELOG.md), [tests/test_release_versions.py](tests/test_release_versions.py) |
+| Release & Versioning | Applies (release-producing: 0.1.0-0.9.0) | Partial — `.github/workflows/release.yml` is tag-triggered (`v*`), re-verifies at the tagged commit, checks tag/`pyproject.toml` version consistency, builds sdist+wheel, generates a CycloneDX SBOM, attests build provenance (keyless OIDC), and publishes a GitHub Release with the matching CHANGELOG section; gap — there is no PyPI publish stage (not yet published to PyPI); `v0.9.0` is the first tag cut, so the workflow is exercised as of that release. `tests/test_release_versions.py` holds the declared version to that: `CITATION.cff` may carry no `date-released` while no tag exists (it carried 2026-09-02, a day nothing was released), the Status line must name the declared version, and the citation file, the installed metadata and the changelog heading must agree with `pyproject.toml`. It skips rather than passing where a checkout cannot see tags, and CI fetches them so it runs for real | [.github/workflows/release.yml](.github/workflows/release.yml), [CHANGELOG.md](CHANGELOG.md), [tests/test_release_versions.py](tests/test_release_versions.py) |
 | Accessibility | Applies (`constituent-reconcile review` web UI) | Partial — structural WCAG 2.2 AA design and automated axe gate in place; manual screen-reader walkthrough remains | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) § Accessibility |
 | Observability | Applies — Tier C plus model-call telemetry | Canonical GenAI spans/logs record tokens, duration, finish reason, and estimated cost; PII/content absence is enforced by tests | [docs/ROADMAP.md](docs/ROADMAP.md) § Observability |
 | Internationalization | Applies — deferred to 1.0 | Declared — EN/ES parity is a real commitment, not yet built (no catalog infra) | [docs/I18N.md](docs/I18N.md) |
 | AI Evaluation | Applies to opt-in extraction seams and the AI assistant package | Model/data cards, fail-closed kappa, mocked contract/fallback tests, and PII-free token/cost telemetry landed for the extraction seam; the assistant package adds a live, committed adversarial-refusal/OCR-precision/citation-grounding/consent-leakage/unanswerable-query eval suite with full provenance ([eval/ai/report.md](eval/ai/report.md)); live model quality remains deployer-specific either way | [docs/ROADMAP.md](docs/ROADMAP.md) § AI Evaluation Standard applicability, [docs/adr/0014-runtime-ai-at-the-edges.md](docs/adr/0014-runtime-ai-at-the-edges.md) |
 | Documentation | Applies | Enforced — this table, canonical ADR log and template, CITATION.cff, CHANGELOG, model/data cards, and the pinned telemetry shim are present | [docs/adr/](docs/adr/) |
 | Responsible-Tech Framework | Applies (core to this repo's identity) | Partial — DV/VAWA/FVPSA invariants, threat model, ethics failure modes, and dated bias evidence are committed; the human accessibility/adoption gates remain | [docs/RESPONSIBLE-TECH-AUDITS.md](docs/RESPONSIBLE-TECH-AUDITS.md) |
-| Incident Response | Applies | Adopted; no incident has been recorded for this repo to date, so `docs/incidents/` does not exist yet. The vulnerability-reporting channel and acknowledgement SLA are in SECURITY.md; an incident would follow the portfolio severity ladder and `incident` label convention with a committed postmortem | [SECURITY.md](SECURITY.md) |
+| Incident Response | Applies | Adopted; no incident has been recorded for this repo to date, so `docs/incidents/` does not exist yet. The vulnerability-reporting channel and acknowledgment SLA are in SECURITY.md; an incident would follow the portfolio severity ladder and `incident` label convention with a committed postmortem | [SECURITY.md](SECURITY.md) |
 | Performance | Applies — operator-local CLI plus a locally served review UI; no hosted service, so there is no availability or latency SLO to publish | Measured, not gated — dated per-stage baselines over a large synthetic corpus are committed under `eval/` (`make perf-baseline`, and `make perf-baseline-pdf` for the mixed CSV+PDF intake path). Both are local commands rather than CI jobs, so no performance budget is merge-blocking | `Makefile`, [eval/](eval/) |
 | AI Development Measurement | Applies | Outcome-side only — the metrics ledger and the solo-scale DORA review are the committed, dated artifact; activity counters (sessions, tokens, lines changed, percent AI-generated) are deliberately not tracked or gated here, and the DORA review first falls due with the first tagged release | [docs/ROADMAP.md](docs/ROADMAP.md) metrics ledger and § DORA, at solo scale |
 | Data Governance | Applies (constituent PII, including DV-survivor records: highest sensitivity) | Partial: the data-flow map, per-pack retention and destruction model, and `constituent-reconcile destroy` destruction certificates are committed; constituent data stays operator-local and is never stored in this repo (fixtures are synthetic); recipes are schema-validated fail-closed at load. Gap: no per-source data-card directory beyond the extraction seam's model and data cards, and backup remains the operator's responsibility (documented, not tested here) | [docs/DATA-FLOW-AND-RETENTION.md](docs/DATA-FLOW-AND-RETENTION.md), [docs/DATA-CARD.md](docs/DATA-CARD.md) |

@@ -21,8 +21,15 @@ ships; the operator and counsel still set it.
 
 Source data enters through the readers in `pipeline.py`: CSVs via
 `read_records`, intake PDFs via `read_pdf_records` and the offline extractor in
-`extract/pdf.py`. Inputs are read in place and never copied; the tool holds no
-staging copy of the source files. When a recipe opts into the stage cache
+`extract/pdf.py`, and photographed or scanned page images via
+`read_image_records` and `extract/image.py`. Inputs are read in place and the
+tool holds no staging copy of the source files, with one transient exception:
+OCR, of a scanned PDF page or of any page image, hands the Tesseract binary a
+temporary copy of the page image. That copy is written into a scratch
+directory the extraction sandbox makes for the one document and removes when
+its child exits or is killed (see the inventory below). Until 2026-09-11 this
+paragraph said inputs are "never copied", which was untrue of every OCR'd
+page. When a recipe opts into the stage cache
 (`[cache]` in the recipe, `stage_cache.py`), extraction and normalization
 results are stored as content-addressed local files. These are derived field
 values rather than copies of the sources, and they are PII artifacts covered
@@ -38,6 +45,13 @@ stage cache lives under `<out>/stage_cache` unless the recipe's `[cache] dir`
 names a different local directory as its retention boundary. A URL-shaped
 `dir` is refused at recipe load, and under the `dv` pack the default keeps
 every retained artifact inside the output root.
+
+A recipe may also pull the existing side rather than read it from a file
+(`[input] existing = "connector:civicrm"`, `pipeline.pull_existing`). That is a
+network read against a hosted CRM, refused before any request under a pack
+that requires local targets, and what it reads is written to
+`out/existing_snapshot.csv` and destroyed with the other record-bearing
+artifacts. A pull that fails part way through leaves no snapshot.
 
 Two classes of paths can move data off the machine, and both are policy-gated:
 
@@ -125,17 +139,23 @@ appear in them, and they are checked by being written and then deleted.
 
 | Artifact | Written by | Where it lives | Holds individual records? | Notes |
 | --- | --- | --- | --- | --- |
-| Source CSVs and intake PDFs | the operator; read by `pipeline._ingest_source` | wherever the operator keeps them | Yes | Read in place. Destruction of inputs is the operator's procedure, not the tool's. |
+| Source CSVs, intake PDFs and page images | the operator; read by `pipeline._ingest_source` | wherever the operator keeps them | Yes | Read in place. Destruction of inputs is the operator's procedure, not the tool's. |
+| Transient OCR page images | pytesseract (`save`), inside the extraction child | a scratch directory per document, `constituent-reconciler-extract-*` under the system temporary directory | Yes: a copy of the page | Removed by the parent when the child exits or is killed (`extract/sandbox.py`); left behind only if the parent itself is killed. Under `[extract] sandbox = false` pytesseract writes to the system temporary directory and removes each copy itself, which a killed process skips. Outside `--out`, so not in `destruction.PII_ARTIFACTS`. |
 | `review_queue.csv` | `pipeline._write_review_queue` | the `--out` directory | Yes: field values of both records in every uncertain pair, plus source spans when extracted | Written on every `constituent-reconcile run`, including `--dry-run`. |
 | `household_suggestions.csv` | `pipeline._write_household_suggestions` | the `--out` directory | Yes: the standardized street address and surname shared by one candidate household, plus its member cluster ids | Written only when a recipe sets `[household] enabled = true`; the grouping step is off by default. A suggestion, never a match decision. In the destruction inventory (`destruction.PII_ARTIFACTS`). |
 | `resolved.csv` | `connectors/csv_out.py` | the `--out` directory | Yes: golden-record field values, member ids, consent | The default write target. Skipped on `--dry-run`. |
 | `civicrm_import.csv`, `salesforce_import.csv` | `connectors/crm_csv.py` | the `--out` directory | Yes: import-shaped field values | Local files, so permitted under the `dv` pack. Skipped on `--dry-run`. |
 | Live CRM records | `connectors/civicrm.py`, `connectors/salesforce.py` | the remote CRM | Yes | Non-local; refused fail-closed under the `dv` pack (`pipeline.build_connector`). |
 | `repair_plan.json` | `repair.py` via `constituent-reconcile plan-split` | the run's `--out` directory, beside the manifest | Yes: proposed split records and restoration values for the members of one written cluster | Local only, never sent anywhere. The provenance log stores its digest, not its content. Regenerable at will from the manifest and sources, so destroying it loses nothing. |
+| `run_diff_detail.csv` | `diff_runs.py` via `constituent-reconcile diff-runs` | the `--out` directory (default: the later run's) | Ids only: cluster ids, member record ids, and a change kind. No field values | Written beside the count-only `run_diff.json`. In the destruction inventory (`destruction.PII_ARTIFACTS`) on the same reasoning as `withheld.csv`: no field values, but ids resolve to people through the organization's own systems, and every number the detail file supports is preserved in `run_diff.json`, so destroying it removes no evidence. Regenerable from the two run directories at any time. |
+| `calibration_report.md`, `calibration_report.json` | `sweep.py` via `constituent-reconcile sweep-thresholds` | the `--out` directory (default: the run directory) | No | One row per (auto, review) threshold setting with what the organization's own reviewer verdicts imply about it: labeled auto-merge counts, false merges, missed matches, review load, Wilson intervals, and eligibility under the false-merge gate. No pair id and no field value. Header counts pass through the same small-cell suppression as `aggregate_summary.json` under a pack that requires it. Not in the destruction inventory, for the same reason `decisions.json` is not. |
+| `run_diff.json` | `diff_runs.py` via `constituent-reconcile diff-runs` | the `--out` directory | No | Counts and section names: how many clusters formed or dissolved, how many pairs entered or left review, how many reviewed decisions no longer apply, the consent-withheld delta. Passes through the same small-cell suppression as `aggregate_summary.json` under a pack that requires it, at that pack's own configured threshold. Not in the destruction inventory, for the same reason `decisions.json` is not. |
+| `withdraw_plan.json` | `repair.py` via `constituent-reconcile plan-withdraw` | the run's `--out` directory, beside the manifest | Ids and a reason only: the cluster id, member record ids and destination external id of each written record whose consent has lapsed, with the withhold reason. No field values | Local only, never sent anywhere. Membership in it is itself the sensitive fact -- it is a list of named people and a statement about each one -- so it is in the destruction inventory (`destruction.PII_ARTIFACTS`) despite holding no field values. The provenance log records its digest and a count of lapsed records, never the ids. Regenerable from the manifest, the log and the sources at any `--as-of` date. |
 | `repair_receipts.json` | `repair.py` via `constituent-reconcile apply-repair` | the run's `--out` directory, beside the manifest | Yes: the before/after raw values of every operation an apply actually performed | Written only on a real (`--execute`) apply, never on a dry run. Unlike the plan file it is not freely regenerable -- it is the record of what was actually written to a live CiviCRM instance -- so it should follow the destination's own retention window rather than being deleted as soon as the repair looks done. The provenance log stores each operation's receipt digest, not its content. |
 | `repair_approvals.json` | `repair.py` via `constituent-reconcile approve-repair` | the run's `--out` directory, beside the manifest | Ids and names only | Reviewer names, verdicts, and timestamps keyed by the plan digest they approved. The same content class as `decisions.json`'s audit section; not in the destruction inventory for the same reason. |
 | `withheld.csv` | `pipeline._write_withheld` | the `--out` directory | Ids only | Cluster id, member record ids, reason. No field values, but ids resolve to people through the organization's own systems. |
 | `decisions.json` | `review/session.py` | the `--out` directory | Ids only | Pair ids and verdicts. No field values, by design. |
+| `auto_merges.json` | `pipeline._write_auto_merges` | the `--out` directory | Ids only | The counterpart to `decisions.json` for the merges no person reviewed: every auto-band pair with the probability and band that decided it, and the thresholds in force. Written on every real run, including one that merged nothing, so an empty result and a missing record stay distinguishable. Not in the destruction inventory, for the same reason `decisions.json` is not: it holds no field values (asserted by a planted-sentinel test in `tests/test_auto_merge_evidence.py`) and destroying it would remove the only evidence of why an automatic merge happened. |
 | `stage_cache/` entry files | `stage_cache.py` via `pipeline.run` | `<out>/stage_cache`, or the recipe's explicit `[cache] dir` boundary | Yes: extracted and normalized field values, keyed by content digest | Written only when a recipe opts in. Covered by `constituent-reconcile destroy`; an explicit boundary is covered via `--cache-dir`. |
 | `provenance.jsonl` | `provenance.py` | the `--out` directory | No field values | Each entry: BLAKE2b hash of the written payload, record and member ids, consent flag, timestamp, chain hashes. Payloads are referenced by hash, never stored. |
 | `aggregate_summary.json` | `pipeline._write_aggregate_summary` over `suppression.py` | the `--out` directory | No | Total and suppressed category counts. Written only under a pack with `aggregate_export` (the `dv` pack), and not on `--dry-run`. |
@@ -151,7 +171,8 @@ appear in them, and they are checked by being written and then deleted.
 | `ai_usage.json` | `assistant/rate_limit.py`, via any `ai-*` command that calls a provider | the `--out` directory | No | A list of call timestamps backing the per-minute and daily caps. No record id, prompt, or field value. Not in the destruction inventory. |
 | `run_manifest.json` | `manifest.py` via `constituent-reconcile run` | the `--out` directory | No field values | Input file digests, column mappings, thresholds, and versions, for reproducing a run. |
 | `run_summary.json` | `pipeline._write_run_summary` | the `--out` directory | No | Per-stage counts, cache hit counts, and durations; content-free by construction. |
-| `run_report.json` | `cli._write_run_report` over `quality.py` | the `--out` directory | No | Run counts plus the per-source data-quality aggregate (completeness, normalization failure rates, consent coverage, duplicate density), already small-cell suppressed under the active policy. |
+| `run_report.json` | `cli._write_run_report` over `quality.py` | the `--out` directory | No | Run counts, the paths of files read, skipped and unreadable (each skip and each unreadable document with its reason), plus the per-source data-quality aggregate (completeness, normalization failure rates, consent coverage, duplicate density), already small-cell suppressed under the active policy. |
+| `existing_snapshot.csv` | `pipeline.pull_existing` | the `--out` directory | Yes: every record the CRM returned, in the recipe's own column names | Written only by a run whose `[input] existing` names a connector. A copy of real constituent records, so it is on `destruction.PII_ARTIFACTS`; the run manifest keeps its digest, row count and API version, never its contents. |
 | `comparable_report.json` | `pipeline._write_comparable_report` over `suppression.py` | the `--out` directory | No | The comparable-database posture's suppressed aggregate. Cell values are integers or the string `suppressed`, never a record id or a field value. |
 | `eval/report.md` | `report.py` via `constituent-reconcile eval` | the path given to `--out` | No | Match-quality rates on seeded synthetic fixtures; the fixtures contain no real personal data. |
 | Terminal output | `report.render_run_summary`, `suppression.render_summary` | the operator's terminal | No | Per-stage counts and the suppressed aggregate. |
@@ -171,6 +192,12 @@ The default pack enforces no confidentiality invariants beyond the ordinary
 fail-closed gate (`policy.py`), so retention is governed entirely by the
 organization's existing records schedule. The model:
 
+* `withdraw_plan.json` names the people whose consent has lapsed since a run
+  wrote them. It carries no field values, so it is less exposed than a repair
+  plan, but a list of constituents under the heading "consent withdrawn" is a
+  disclosure in its own right. Destroy it once the withdrawals have been made
+  in the destination; it can be regenerated for any date from the manifest,
+  the provenance log and the sources.
 * `review_queue.csv`, `resolved.csv`, the CRM import CSVs, and
   `repair_plan.json` carry the same personal data as the source CRM export
   they came from. Put them under the same schedule as that export, and delete
@@ -309,7 +336,7 @@ organization's own donor/client consent language and subprocessor
 obligations, independent of this project's consent-scope switch. That
 question is recorded as a DECISION NEEDED in ADR 0014, not answered here.
 
-The threat side of this layer is modelled in
+The threat side of this layer is modeled in
 [`THREAT-MODEL.md`](./THREAT-MODEL.md) as T9 through T12: prompt injection
 reaching a prompt from an intake document, the concentration of raw values
 and quoted source text in `ai_ocr_proposals.json`, egress to the model

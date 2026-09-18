@@ -48,6 +48,13 @@ RUN_START_ACTION = "run-start"
 # file's own digest; the plan's raw field values never enter the log.
 REPAIR_PLAN_ACTION = "repair-plan"
 
+# Action recorded when a consent-withdrawal plan is written for a whole written
+# run (``constituent-reconcile plan-withdraw``). The entry's content hash is the plan
+# file's own digest, and its record id is empty because the plan concerns every
+# record the run wrote rather than one cluster; the ids of the lapsed records
+# are in the plan file, which is a local PII artifact, never in the log.
+WITHDRAW_PLAN_ACTION = "withdraw-plan"
+
 # Action recorded when one repair operation is applied to a live destination
 # (``constituent-reconcile apply-repair`` -> ``connectors.civicrm.CivicrmConnector.apply_repair``).
 # The entry's content hash is the applied operation's own receipt digest,
@@ -64,7 +71,16 @@ def content_hash(payload: dict[str, str]) -> str:
     return hashlib.blake2b(canonical, digest_size=32).hexdigest()
 
 
-def _entry_hash(entry: dict[str, object]) -> str:
+def entry_hash(entry: Mapping[str, object]) -> str:
+    """BLAKE2b-256 over an entry's body, excluding its own ``entry_hash``.
+
+    Public because an auditor's trace (``explain.py``) has to *recompute* the
+    hash of the entry it cites rather than repeat the one stored beside it: a
+    verifier that echoed the stored value back would agree with a tampered log
+    about everything. Chain verification below uses the same function, so the
+    two can never drift into checking different bytes.
+    """
+
     body = {key: value for key, value in entry.items() if key != "entry_hash"}
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.blake2b(canonical, digest_size=32).hexdigest()
@@ -446,6 +462,37 @@ class ProvenanceLog:
             fill_policy="",
         )
 
+    def append_withdraw_plan(self, *, plan_digest: str, lapsed: int) -> dict[str, object]:
+        """Record that a consent-withdrawal plan was written for this run.
+
+        The entry carries the plan file's digest as its content hash and
+        nothing else about the plan: no cluster id, no external id, no member
+        ids. That is deliberate and it differs from ``append_repair_plan``. A
+        split plan concerns one cluster an operator already named on the
+        command line, so naming it again in the log discloses nothing new. A
+        withdrawal plan's membership *is* the finding -- "these are the people
+        whose consent lapsed" -- and the log is the one artifact ``destroy``
+        refuses to delete. Recording the ids here would leave a permanent list
+        of lapsed constituents behind a destruction pass that is supposed to
+        remove exactly that. ``lapsed`` is a count, which the run summary
+        already publishes at this granularity.
+
+        Consent is null for the same reason it is null on ``repair-plan``: this
+        entry records planning, and planning discloses nothing.
+        """
+
+        return self._append(
+            action=WITHDRAW_PLAN_ACTION,
+            record_id="",
+            members=(),
+            consent=None,
+            digest=plan_digest,
+            external_id=None,
+            field_sources=None,
+            fill_policy="",
+            extra={"lapsed": lapsed},
+        )
+
     def append_repair_apply(
         self,
         *,
@@ -517,7 +564,7 @@ class ProvenanceLog:
         token = getattr(self.authority, "last_token", None)
         if isinstance(token, str) and token:
             entry["tsa_token"] = token
-        entry["entry_hash"] = _entry_hash(entry)
+        entry["entry_hash"] = entry_hash(entry)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, sort_keys=True) + "\n")
@@ -548,7 +595,7 @@ def verify_log(path: Path) -> tuple[bool, str]:
             entry = json.loads(line)
             if entry.get("prev_hash") != prev:
                 return False, f"broken chain at line {line_number}: prev_hash mismatch"
-            recomputed = _entry_hash(entry)
+            recomputed = entry_hash(entry)
             if recomputed != entry.get("entry_hash"):
                 return False, f"tampered entry at line {line_number}: hash mismatch"
             if entry.get("seq") != seq:

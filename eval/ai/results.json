@@ -258,13 +258,30 @@
   },
   "consent_leakage": {
     "checks_run": 15,
-    "commit": "ca18a069bf039659eef46fbda5aab6e0b102ff75",
-    "date": "2026-08-22",
+    "commit": "56adbff7ec48349b312d5b82ba31c7d0d982ec90",
+    "date": "2026-09-13",
+    "decisions_available": 42,
+    "decisions_by_pack": {
+      "default": {
+        "must_be_visible": 14,
+        "must_withhold": 0
+      },
+      "dv": {
+        "must_be_visible": 0,
+        "must_withhold": 14
+      },
+      "hipaa": {
+        "must_be_visible": 0,
+        "must_withhold": 14
+      }
+    },
+    "decisions_judged": 42,
     "eval": "consent_leakage",
     "findings": [],
     "fixture_cases": 5,
     "leaks_found": 0,
     "model": "n/a",
+    "packs_without_expectation": [],
     "pass": true,
     "policy_packs_checked": [
       "default",

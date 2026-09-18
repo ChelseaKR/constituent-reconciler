@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from constituent_reconciler.connectors.base import ConnectorError, WriteResult
+from constituent_reconciler.connectors.household_write import HouseholdWriteResult
+from constituent_reconciler.household import HouseholdWrite
 from constituent_reconciler.models import GoldenRecord
 
 # Canonical field -> Salesforce NPSP Contact field. Address maps to the mailing
@@ -76,6 +78,11 @@ class SalesforceConfig:
     api_version: str = "v60.0"
     external_id_field: str = "External_Id__c"
     object_name: str = "Contact"
+    #: NPSP models a household as an Account, so a household write targets a
+    #: different object from a contact write. Named in the config rather than
+    #: hard-coded because an org that renamed it should not have to fork this.
+    household_object: str = "Account"
+    household_record_type_field: str = "npe01__SYSTEM_AccountType__c"
 
 
 class SalesforceConnector:
@@ -115,6 +122,102 @@ class SalesforceConnector:
             if target and value:
                 payload[target] = value
         return payload
+
+    def write_households(
+        self,
+        households: Sequence[HouseholdWrite],
+        *,
+        dry_run: bool,
+    ) -> list[HouseholdWriteResult]:
+        """Upsert an NPSP Household Account and point each Contact at it.
+
+        NPSP models a household as an Account of record type Household with the
+        member Contacts' ``AccountId`` pointing to it, so this is one Account
+        upsert keyed on the household external id, then one Contact PATCH per
+        member. Idempotency comes free from the upsert (a second run updates
+        rather than inserts) and from the member PATCH being the same value it
+        already holds.
+
+        A dry run makes **no** call, matching ``write_all``'s contract: the
+        preview comes from the plan's own ids, so it needs no credential.
+
+        Membership was decided before this method: any household with a withheld
+        or unwritten member never reaches it (``household.plan_household_writes``).
+        """
+
+        results: list[HouseholdWriteResult] = []
+        for write in households:
+            if dry_run:
+                results.append(
+                    HouseholdWriteResult(
+                        household_id=write.household_id,
+                        external_id=write.external_id,
+                        action="would-write",
+                        members=tuple(member for member, _ in write.members),
+                    )
+                )
+                continue
+            results.append(self._write_household(write))
+        return results
+
+    def _household_url(self, external_id: str) -> str:
+        base = self.config.instance_url.rstrip("/")
+        quoted = urllib.parse.quote(external_id, safe="")
+        return (
+            f"{base}/services/data/{self.config.api_version}"
+            f"/sobjects/{self.config.household_object}/{self.config.external_id_field}/{quoted}"
+        )
+
+    def _contact_url(self, external_id: str) -> str:
+        base = self.config.instance_url.rstrip("/")
+        quoted = urllib.parse.quote(external_id, safe="")
+        return (
+            f"{base}/services/data/{self.config.api_version}"
+            f"/sobjects/{self.config.object_name}/{self.config.external_id_field}/{quoted}"
+        )
+
+    def _write_household(self, write: HouseholdWrite) -> HouseholdWriteResult:
+        body = json.dumps(
+            {"Name": write.household_id, self.config.household_record_type_field: "Household"}
+        ).encode("utf-8")
+        status, raw = self.transport.send(
+            "PATCH", self._household_url(write.external_id), headers=self._headers(), body=body
+        )
+        if status >= 400:
+            detail = raw.decode(errors="replace")[:200]
+            raise ConnectorError(
+                f"Salesforce household upsert failed ({status}) for {write.external_id}: {detail}"
+            )
+        account_id = write.external_id
+        action = "updated"
+        if status != 204 and raw.strip():
+            parsed = json.loads(raw)
+            account_id = str(parsed.get("id") or write.external_id)
+            action = "created" if parsed.get("created") else "updated"
+        for _, member_external_id in write.members:
+            self._attach_member(member_external_id, account_id, write.external_id)
+        return HouseholdWriteResult(
+            household_id=write.household_id,
+            external_id=account_id,
+            action=action,
+            members=tuple(member for member, _ in write.members),
+        )
+
+    def _attach_member(self, member_external_id: str, account_id: str, label: str) -> None:
+        body = json.dumps({"AccountId": account_id}).encode("utf-8")
+        status, raw = self.transport.send(
+            "PATCH",
+            self._contact_url(member_external_id),
+            headers=self._headers(),
+            body=body,
+        )
+        if status >= 400:
+            detail = raw.decode(errors="replace")[:200]
+            raise ConnectorError(
+                f"Salesforce could not attach {member_external_id} to household {label} "
+                f"({status}): {detail}. The household Account exists and this member is "
+                "not on it; re-run to finish the attachment."
+            )
 
     def _upsert(self, record: GoldenRecord, payload: dict[str, str]) -> WriteResult:
         body = json.dumps(payload).encode("utf-8")

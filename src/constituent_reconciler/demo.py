@@ -5,11 +5,11 @@ README points into. It ships in the sdist and in the Docker image, and until
 2026-09-02 it did not ship in the wheel, so an operator who installed from a
 built wheel (``uvx --from git+https://github.com/ChelseaKR/constituent-reconciler@main``,
 or a wheel built from a clone) had ``constituent-reconcile --help`` and then a
-bare ``FileNotFoundError`` from the Quickstart's first real command. No ``v*``
-tag has ever been cut and nothing has been published, so there is no released
-wheel and no ``@v0.8.0`` ref to install: a wheel someone built was always the
-only way to reach this, which is what made it worth fixing rather than
-deferring to a release.
+bare ``FileNotFoundError`` from the Quickstart's first real command. When that
+was fixed the repository carried no tag at all, so a wheel someone built was
+the only way to reach this and there was no release to defer the fix to.
+``v0.9.0`` has since been cut and is installable as a git ref; there is still
+no PyPI record, so a built wheel remains the only wheel there is.
 The same tree is now package data under ``constituent_reconciler/examples``,
 and ``constituent-reconcile demo`` writes it to disk so the documented paths work from an
 installed wheel exactly as they do from a clone. ``tests/test_demo.py`` pins

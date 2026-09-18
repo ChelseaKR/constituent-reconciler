@@ -13,7 +13,10 @@
 #
 # The image installs the PDF extraction extra (pdfplumber). The libpostal address
 # backend is not included because it needs a system C library; the default
-# deterministic address backend works without it.
+# deterministic address backend works without it. Neither is OCR: it needs the
+# system Tesseract binary, so under backend = "pdfplumber+ocr" a scanned page
+# or a photographed form is listed as unreadable, with the install hint as the
+# reason.
 
 # Pinned by digest, not just tag, so a build is reproducible and Renovate has
 # something concrete to bump (renovate.json's digest-pinning helper covers

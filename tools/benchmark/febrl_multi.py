@@ -32,7 +32,7 @@ and the column mapping are identical across all four datasets.
 
 Licensing and provenance match ``febrl4.py`` exactly: the Febrl project by
 Peter Christen (Australian National University), redistributed inside the
-``recordlinkage`` package by Jonathan de Bruin under a 3-clause BSD licence.
+``recordlinkage`` package by Jonathan de Bruin under a 3-clause BSD license.
 Declined for the same reason: a real-person corpus (the North Carolina voter
 registry) was considered and is not used, because a public voter file is a
 locating vector for exactly the people the DV policy pack protects.

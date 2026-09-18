@@ -10,12 +10,14 @@ carried by ``Record.spans``.
 """
 
 from constituent_reconciler.extract.base import (
+    IMAGE_SUFFIXES,
     CloudSeam,
     ExtractedField,
     ExtractionResult,
     Extractor,
     PageResult,
 )
+from constituent_reconciler.extract.image import ImageOcrExtractor, extract_image
 from constituent_reconciler.extract.pdf import PdfplumberExtractor
 from constituent_reconciler.extract.sandbox import SandboxedExtractor
 from constituent_reconciler.extract.seam import BedrockSeam, LocalSeam, NoOpSeam, make_seam
@@ -27,6 +29,8 @@ __all__ = [
     "ExtractedField",
     "ExtractionResult",
     "Extractor",
+    "IMAGE_SUFFIXES",
+    "ImageOcrExtractor",
     "LocalSeam",
     "NoOpSeam",
     "PageResult",
@@ -34,6 +38,7 @@ __all__ = [
     "SandboxedExtractor",
     "TextExtractor",
     "extract_eml",
+    "extract_image",
     "extract_text_file",
     "make_seam",
 ]
