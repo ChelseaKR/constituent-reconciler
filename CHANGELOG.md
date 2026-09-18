@@ -58,7 +58,7 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   **Consent is never inferred from the CRM.** Every pulled record carries an
   unmapped token that the consent lifecycle withholds on. Deciding that a
   particular vendor privacy flag means consent for a particular scope is a
-  judgement with legal weight that differs per organization, so no default
+  judgment with legal weight that differs per organization, so no default
   ships; under a consent-requiring pack, merged records stay withheld until a
   mapping exists. `existing_snapshot.csv` is on the destruction inventory.
 
@@ -117,7 +117,7 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 
   **It matched raw substrings, so a wrapped sentence was invisible.** Every one
   of the six is wrapped across lines, and one of them is wrapped inside a
-  reStructuredText docstring behind double backticks where the vocabulary spelt
+  reStructuredText docstring behind double backticks where the vocabulary spelled
   the same phrase with Markdown single ones. `_normalized` now strips line
   markers and backticks and collapses whitespace, and two assertions in
   `test_the_claim_vocabulary_is_real_and_not_self_matching` fail if either
@@ -409,7 +409,7 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 - **`constituent-reconcile diff-runs`: what changed between two runs of one recipe.**
   An operator re-runs the same recipe every month and defends the new numbers
   against the old ones. `compare` answers a different question (two *sources*
-  inside one run), so that defence was two output directories and a pair of
+  inside one run), so that defense was two output directories and a pair of
   eyes. `diff-runs --before out-2026-08 --after out-2026-09` reads both runs'
   committed artifacts and reports which input files changed, which clusters
   formed, dissolved or changed membership, which pairs entered or left the
@@ -550,7 +550,7 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   used for an empty label set, and `constituent-reconcile eval` exits 1. Two
   gate comparisons read `args.gate` and `args.precision_target` off an argparse
   namespace, so they are typed `Any` and `mypy --strict` could not have flagged
-  them; both are now explicit. Two tests asserted the old behaviour as intended
+  them; both are now explicit. Two tests asserted the old behavior as intended
   (`recall == 1.0` over zero labeled fields, and `false_merge_rate == 0.0` as
   "the premise of this test: the headline gate is green") and now assert the
   absence. Every committed eval report regenerates byte-identical, because none
@@ -598,7 +598,7 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
     contents and asserts the two recipes are byte-identical.
   - **It maps only on an exact alias from a published, closed table**, compared
     case-insensitively with runs of whitespace collapsed and in no other way.
-    `Client Given` is not `first name`. Everything unrecognised becomes a named
+    `Client Given` is not `first name`. Everything unrecognized becomes a named
     `CHOOSE` with the operator's real column names beside it, and every column the
     recipe does not use is listed at the foot of the file so nothing is dropped
     silently. Two columns claiming one field maps neither and names both: a tie is
@@ -676,12 +676,12 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
 ## [0.8.0] - 2026-09-02
 
 ### Added
-- **The matcher recognises a transposed name.** A duplicate filed with the
+- **The matcher recognizes a transposed name.** A duplicate filed with the
   given name and the family name in the opposite boxes was not merely
-  unsupported by the model, it was penalised twice: both name comparisons saw
+  unsupported by the model, it was penalized twice: both name comparisons saw
   values that disagreed and each fired its "different" level, so one mistake
   made once cost a factor of about 9,000 and vetoed every other field. Two
-  name comparison levels now read all four name values and recognise a crossed
+  name comparison levels now read all four name values and recognize a crossed
   pair, tolerant of a typo on either side; the given-name comparison carries
   the evidence and the surname comparison abstains, so the fact is counted
   once. A `name_pair_key` blocking rule (the two normalized names sorted and
@@ -1042,7 +1042,7 @@ for [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from 1.0.
   never generated it or the matcher scored it below the floor. Read as a
   blocking count it produced a wrong diagnosis: of 344 such pairs, 287 had
   been blocked and scored all along and only 57 were genuinely unblocked. Both
-  rows are relabelled, the report says what the number combines, and
+  rows are relabeled, the report says what the number combines, and
   `EvalReport.blocking_misses` carries a comment so the field name stops
   implying a cause.
 - **`normalize_dob` silently discarded every date in ISO 8601 basic format.**
@@ -1718,7 +1718,7 @@ the items the README named as remaining before the 1.0 tag.
     request logging is suppressed. A test asserts no reviewed field value reaches
     the file.
   - **Accessibility (WCAG 2.2 AA)**: a real comparison table with scoped headers,
-    status carried by text and a symbol rather than colour alone, decision
+    status carried by text and a symbol rather than color alone, decision
     controls that work with no JavaScript, keyboard shortcuts as enhancement.
 - **Import-ready CRM export connectors** (`connectors/crm_csv.py`):
   `salesforce_csv` and `civicrm_csv` write a CSV mapped to the target CRM's import

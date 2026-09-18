@@ -127,7 +127,7 @@ export:
   different contents produce the same recipe.
 * **It maps a field only on an exact alias from the table below**, compared
   case-insensitively with runs of spaces collapsed, and in no other way.
-  `Client Given` is not `first name`. Anything unrecognised becomes a `CHOOSE`
+  `Client Given` is not `first name`. Anything unrecognized becomes a `CHOOSE`
   line with your real column names printed beside it, and every column the
   recipe does not use is listed at the bottom of the file so nothing is dropped
   without you seeing it. If two of your columns both match one field, it maps
@@ -142,7 +142,7 @@ somewhere else with `--out` and merge by hand.
 
 #### The alias table
 
-| Recipe field | Column headers recognised |
+| Recipe field | Column headers recognized |
 |---|---|
 | `first_name` | `first name`, `firstname`, `fname`, `first`, `given name`, `givenname` |
 | `last_name` | `last name`, `lastname`, `lname`, `last`, `surname`, `family name` |

@@ -172,7 +172,7 @@ the 1.0 milestone named.
   CRM-side upsert. The offline-first default path; the live API push stays opt-in.
   Both are local-file targets, so the DV pack permits them.
 * Still open before the 1.0 accessibility gate: a screen-reader walkthrough.
-  The structural AA work (table semantics, non-colour status,
+  The structural AA work (table semantics, non-color status,
   keyboard-complete controls, no-JS fallback) is in place, and an automated
   axe-core audit of the review queue's rendered HTML now runs as a CI job
   (`accessibility` in `.github/workflows/ci.yml`; `make axe` locally; see

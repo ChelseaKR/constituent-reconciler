@@ -122,7 +122,7 @@ def _pair_evidence(record_id: str, values: dict[str, str]) -> PairEvidence:
 
 
 @dataclass(frozen=True)
-class _PackJudgement:
+class _PackJudgment:
     """What one (case, pack) pair contributed, once judged against the fixture."""
 
     must_withhold: int
@@ -130,7 +130,7 @@ class _PackJudgement:
     findings: tuple[dict[str, Any], ...]
 
 
-def _judge(index: int, case: ConsentLeakageCase, pack: str, record: Record) -> _PackJudgement:
+def _judge(index: int, case: ConsentLeakageCase, pack: str, record: Record) -> _PackJudgment:
     """Judge one case under one pack against that case's declared expectation.
 
     Nothing here reads ``filtered.withheld_fields()`` to decide *what* to
@@ -210,7 +210,7 @@ def _judge(index: int, case: ConsentLeakageCase, pack: str, record: Record) -> _
             if _SENTINEL_VALUES[field_name] in payload_text:
                 note("leak", field_name, leaked_into=where)
 
-    return _PackJudgement(
+    return _PackJudgment(
         must_withhold=len(must_withhold & fields),
         must_be_visible=len(must_be_visible),
         findings=tuple(findings),
@@ -247,12 +247,12 @@ def run() -> dict[str, Any]:
                 packs_without_expectation.append(f"{case.name}/{pack}")
                 continue
 
-            judgement = _judge(index, case, pack, record)
+            judgment = _judge(index, case, pack, record)
             checks_run += 1
             decisions_judged += len(case.fields)
-            by_pack[pack]["must_withhold"] += judgement.must_withhold
-            by_pack[pack]["must_be_visible"] += judgement.must_be_visible
-            findings.extend(judgement.findings)
+            by_pack[pack]["must_withhold"] += judgment.must_withhold
+            by_pack[pack]["must_be_visible"] += judgment.must_be_visible
+            findings.extend(judgment.findings)
 
     provenance = Provenance.stamp(
         provider="none (deterministic, no model call)", model="n/a", status="deterministic"
@@ -264,7 +264,7 @@ def run() -> dict[str, Any]:
         "fixture_cases": len(CONSENT_LEAKAGE_CASES),
         "checks_run": checks_run,
         # The honest denominator, and the one it is measured against. Both are
-        # fixed by the fixtures: neither moves when the filter's behaviour
+        # fixed by the fixtures: neither moves when the filter's behavior
         # changes, which is the whole point of publishing them.
         "decisions_available": decisions_available,
         "decisions_judged": decisions_judged,

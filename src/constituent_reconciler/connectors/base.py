@@ -44,7 +44,7 @@ class WriteResult:
 #: fields onto this project's consent lifecycle. It is deliberately not a
 #: recognized status: ``Consent.reason`` withholds on an unrecognized token, so
 #: an unmapped consent can never read as granted. Deciding that a particular
-#: CiviCRM privacy flag means consent for a particular scope is a judgement
+#: CiviCRM privacy flag means consent for a particular scope is a judgment
 #: with legal weight that differs per organization, so no default ships.
 UNMAPPED_CONSENT = "unmapped"
 

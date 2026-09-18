@@ -2,7 +2,7 @@
 
 The reason this reader exists is that the manual step it removes -- export each
 sheet to CSV before every run -- is where a column gets dropped or renamed. So
-the suite's centre of gravity is not "can it read a cell". It is that a workbook
+the suite's center of gravity is not "can it read a cell". It is that a workbook
 of the demo data resolves to exactly the record ids and review queue its CSV
 does, and that every way a workbook can be *quietly* wrong is refused by name
 instead of read as a blank.

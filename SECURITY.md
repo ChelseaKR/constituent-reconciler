@@ -9,7 +9,7 @@ available to you, report privately by email to
 public issue. Include what you found, how to reproduce it, and the impact you
 see.
 
-**Acknowledgement SLA:** within 3 business days. If a report is confirmed as a
+**Acknowledgment SLA:** within 3 business days. If a report is confirmed as a
 real vulnerability, expect a fix or mitigation plan communicated within 14
 calendar days given the solo-maintainer scale of this project; critical,
 actively-exploitable findings are prioritized ahead of that window.

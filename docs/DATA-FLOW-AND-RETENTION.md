@@ -336,7 +336,7 @@ organization's own donor/client consent language and subprocessor
 obligations, independent of this project's consent-scope switch. That
 question is recorded as a DECISION NEEDED in ADR 0014, not answered here.
 
-The threat side of this layer is modelled in
+The threat side of this layer is modeled in
 [`THREAT-MODEL.md`](./THREAT-MODEL.md) as T9 through T12: prompt injection
 reaching a prompt from an intake document, the concentration of raw values
 and quoted source text in `ai_ocr_proposals.json`, egress to the model

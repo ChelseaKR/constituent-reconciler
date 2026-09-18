@@ -44,7 +44,7 @@ document and never as a page with no name:
   decoded, so a decompression bomb is refused without being expanded. Pillow's
   own refusal starts at twice its ``MAX_IMAGE_PIXELS``, far above this budget,
   and is reported the same way;
-* pixels deeper than eight bits. Pillow converts a 16-bit greyscale page to
+* pixels deeper than eight bits. Pillow converts a 16-bit grayscale page to
   8-bit by clipping, which turns every value above 255 white; a scan read that
   way comes back as a blank page, so it is refused by name instead.
 
@@ -98,7 +98,7 @@ MAX_FRAMES = 50
 _QUARTER_TURNS = (90, 180, 270)
 
 #: Pixel modes read as they are: none is deeper than eight bits per channel, so
-#: converting to 8-bit greyscale loses no range.
+#: converting to 8-bit grayscale loses no range.
 _EIGHT_BIT_MODES = frozenset(
     {"1", "L", "LA", "La", "P", "PA", "RGB", "RGBA", "RGBa", "RGBX", "CMYK", "YCbCr", "LAB", "HSV"}
 )
@@ -169,7 +169,7 @@ def _turn_back(word: dict[str, Any], turn: int, width: int, height: int) -> dict
 
 
 def _read_page(page: Image, source_file: str, page_num: int) -> PageResult:
-    """Read one upright-by-EXIF greyscale page, turning it when that reads better."""
+    """Read one upright-by-EXIF grayscale page, turning it when that reads better."""
     turn = _run_osd(page)
     reading = _read(page)
     if turn:

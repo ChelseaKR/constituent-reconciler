@@ -581,7 +581,7 @@ def test_handle_get_renders_overview_and_pair(tmp_path: Path) -> None:
     pair = handle_get(session, "/pair/0", _context())
     assert pair.status == HTTPStatus.OK
     assert "<table" in pair.body
-    # Accessibility: status is conveyed with a text label, not colour alone.
+    # Accessibility: status is conveyed with a text label, not color alone.
     assert "Agreement" in pair.body
     assert "Approve merge" in pair.body
     # R11: a plain-language rationale sits beside the pair, not source spans alone.

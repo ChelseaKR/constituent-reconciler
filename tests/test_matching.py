@@ -158,12 +158,12 @@ def test_transposed_given_and_family_name_reaches_auto() -> None:
     assert _scores(records)[frozenset(("E30", "N30"))] >= 0.97
 
 
-def test_transposed_name_is_recognised_through_a_typo() -> None:
+def test_transposed_name_is_recognized_through_a_typo() -> None:
     """The level is Jaro-Winkler on each side, not equality.
 
     A transposition and an ordinary typo happen together often enough that an
     equality-only level would miss a large share of them, so the crossed pair
-    is recognised on the same similarity that counts as close when the names
+    is recognized on the same similarity that counts as close when the names
     are not crossed.
     """
 

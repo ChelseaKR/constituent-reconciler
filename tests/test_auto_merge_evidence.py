@@ -162,8 +162,8 @@ def test_it_is_classified_as_audit_evidence_that_destruction_keeps() -> None:
     """The classification is the point, so it is asserted rather than assumed.
 
     `tests/test_destruction_inventory.py` proves the name is on exactly one of
-    the two lists. Which one it is on is a judgement, and this is where that
-    judgement is written down: the file is the counterpart to `decisions.json`,
+    the two lists. Which one it is on is a judgment, and this is where that
+    judgment is written down: the file is the counterpart to `decisions.json`,
     and destroying it would remove the only evidence of why an automatic merge
     happened without removing anybody's personal data.
     """
