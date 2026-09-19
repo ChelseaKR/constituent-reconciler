@@ -50,15 +50,15 @@ Seed: `20260906`. Every control is deterministic under it, so this section is by
 | `shuffled-labels` | a ground-truth file that is not actually being read | mean coverage precision over 20 seeded permutations falls to at most 10x the base rate (0.0052); real precision is 0.9990 | mean 0.0006, worst permutation 0.0012, base rate 0.0005 | **PASS** |
 | `null-matcher (below review)` | banding that ignores the score | every candidate rescored at 0.4000, under the review threshold 0.8000: auto recall and coverage recall must both be 0 | auto recall 0.0000 over 0 auto pairs, coverage recall 0.0000 | **PASS** |
 | `null-matcher (at auto threshold)` | a gated false-merge rate that cannot rise | every candidate rescored at the auto threshold 0.9700: all of them auto-merge, and the gated false-merge rate must rise above the real run's 0.0000 | 15752 auto pairs, false-merge rate 0.5978, auto precision 0.4022, all-pairs base rate 0.0005 | **PASS** |
-| `identity` | a scorer that never fires | every exact twin pair is auto-merged: recall 1.0000 | recall 1.0000 (250/250 twin pairs auto-merged) | **PASS** |
+| `identity` | a scorer that never fires | every exact twin pair is auto-merged: recall 1.0000 | recall 0.9960 (249/250 twin pairs auto-merged) | **FAIL** |
 
 What the controls did not cover, stated so a partial control is not read as a whole one:
 
 - `null-matcher (below review)`: re-scores the candidate pairs the real run produced; blocking is held fixed and is not what this control tests.
 - `null-matcher (at auto threshold)`: re-scores the candidate pairs the real run produced; blocking is held fixed and is not what this control tests.
-- `identity`: 250 of 5000 records, sampled under seed 20260906 and capped at 250.
+- `identity`: 250 of the 4994 records with a name (5000 in all), sampled under seed 20260906 and capped at 250; 6 records with no value in `first_name` or `last_name` were excluded before sampling, because a twin of a record that carries no name is not the easiest possible case.
 
-Controls gate: **PASS**.
+Controls gate: **FAIL**.
 
 ## Flow-through evidence
 

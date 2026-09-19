@@ -127,9 +127,11 @@ eval-benchmark:
 # reasoning as eval-benchmark above.
 DATASET := 1
 # --controls is passed here and above so a regeneration cannot silently drop
-# the Controls section from a committed report. NOTE: dataset 2 currently exits
-# 1 because its `identity` control genuinely fails (docs/BENCHMARK.md says what
-# was measured and why). That nonzero exit is a true signal; making the command
+# the Controls section from a committed report. The identity control leaves out
+# records with no name and counts them. NOTE: datasets 2-4 still exit 1 on the
+# committed seed, because a named record carrying only one name part and an
+# address has an exact twin that scores under the auto threshold
+# (docs/BENCHMARK.md). That nonzero exit is a true signal; making the command
 # green by not asking for the controls is the defect this repository fights.
 eval-benchmark-multi:
 	.venv/bin/python -m tools.benchmark.febrl_multi \

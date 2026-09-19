@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import random
 from collections.abc import Iterable, Sequence
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,7 @@ from constituent_reconciler import controls as controls_module
 from constituent_reconciler import decisions, matching, pipeline
 from constituent_reconciler.config import Recipe, load_recipe
 from constituent_reconciler.controls import (
+    DEFAULT_SEED,
     ConstantScoreBackend,
     ControlOutcome,
     ControlsReport,
@@ -314,6 +316,193 @@ def test_the_identity_control_does_not_claim_a_pass_with_nothing_to_test(
     )
     assert not outcome.passed
     assert "not run" in outcome.observed
+
+
+# --- the identity control's name exclusion (#166) -----------------------------
+#
+# FEBRL carries records with both name fields empty. Given an exact twin, one of
+# them scores 0.9604 against a 0.97 auto threshold, because the two fields both
+# records leave empty carry the model's heaviest weights. The owner's call was to
+# narrow the control rather than retune the matcher: a record with no name is left
+# out of the sample and counted. These tests pin that narrowing to exactly that,
+# so it cannot become a way for a named twin to stop counting.
+
+_NAME_FIELDS = ("first_name", "last_name")
+
+
+def _person(unique_id: str, first: str, last: str) -> Record:
+    values = {"first_name": first, "last_name": last, "dob": "1970-01-01", "address": "1 MAIN ST"}
+    return Record(unique_id=unique_id, source="s", raw=dict(values), normalized=dict(values))
+
+
+class _TwinScoreBackend:
+    """Scores each record against its own exact twin, and nothing else.
+
+    Every twin pair scores 1.0 except those whose original is in ``low``, which
+    score ``low_score``. That is the shape measured on FEBRL: an exact twin that
+    lands just under the auto threshold.
+    """
+
+    def __init__(self, low: set[str], low_score: float) -> None:
+        self.low = low
+        self.low_score = low_score
+
+    def score_pairs(
+        self,
+        records: Iterable[Record],
+        fields: tuple[str, ...],
+        *,
+        prior: float,
+        floor: float,
+    ) -> list[tuple[str, str, float]]:
+        ids = {record.unique_id for record in records}
+        rows: list[tuple[str, str, float]] = []
+        for record_id in sorted(ids):
+            twin = f"control-twin:{record_id}"
+            if twin in ids:
+                score = self.low_score if record_id in self.low else 1.0
+                left, right = sorted((record_id, twin))
+                rows.append((left, right, score))
+        rows.sort(key=lambda row: (-row[2], row[0], row[1]))
+        return rows
+
+
+def _population(*, nameless_id: str = "", named_low_id: str = "") -> dict[str, Record]:
+    records = {f"r{i}": _person(f"r{i}", f"Given{i}", f"Family{i}") for i in range(8)}
+    if nameless_id:
+        records[nameless_id] = _person(nameless_id, "", "")
+    if named_low_id:
+        records[named_low_id] = _person(named_low_id, "", "Moody")
+    return records
+
+
+def test_a_record_with_no_name_is_left_out_of_the_identity_sample_and_counted(
+    recipe: Recipe,
+) -> None:
+    records = _population(nameless_id="nameless")
+    backend = _TwinScoreBackend(low={"nameless"}, low_score=0.9604)
+
+    outcome = identity_control(
+        records,
+        recipe.fields,
+        prior=recipe.prior,
+        auto_threshold=0.97,
+        review_threshold=0.8,
+        backend=backend,
+        name_fields=_NAME_FIELDS,
+    )
+
+    assert outcome.passed, outcome.observed
+    assert "8/8 twin pairs auto-merged" in outcome.observed
+    assert "8 of the 8 records with a name (9 in all)" in outcome.scope
+    assert "1 record with no value in `first_name` or `last_name` was excluded" in outcome.scope
+
+
+def test_the_same_nameless_twin_still_fails_a_caller_that_did_not_narrow_the_control(
+    recipe: Recipe,
+) -> None:
+    """The exclusion is opt-in. Every other caller's control is unchanged."""
+
+    records = _population(nameless_id="nameless")
+    backend = _TwinScoreBackend(low={"nameless"}, low_score=0.9604)
+
+    outcome = identity_control(
+        records,
+        recipe.fields,
+        prior=recipe.prior,
+        auto_threshold=0.97,
+        review_threshold=0.8,
+        backend=backend,
+    )
+
+    assert not outcome.passed
+    assert "8/9 twin pairs auto-merged" in outcome.observed
+    assert outcome.scope == f"9 of 9 records, sampled under seed {DEFAULT_SEED} and capped at 250"
+
+
+def test_a_named_exact_twin_below_the_threshold_still_fails_the_narrowed_control(
+    recipe: Recipe,
+) -> None:
+    """The negative control on the narrowing itself.
+
+    A record carrying only a surname is named, so it stays in the sample, and an
+    exact twin of it scoring under the auto threshold fails the control exactly
+    as it would have before the exclusion existed. Both kinds of record are
+    present, so this also shows the exclusion is decided by the name fields and
+    not by the score.
+    """
+
+    records = _population(nameless_id="nameless", named_low_id="surname-only")
+    backend = _TwinScoreBackend(low={"nameless", "surname-only"}, low_score=0.9595)
+    twin = replace(records["surname-only"], unique_id="control-twin:surname-only")
+    assert backend.score_pairs(
+        [records["surname-only"], twin], recipe.fields, prior=recipe.prior, floor=0.001
+    ) == [("control-twin:surname-only", "surname-only", 0.9595)], "the sabotage did not land"
+
+    outcome = identity_control(
+        records,
+        recipe.fields,
+        prior=recipe.prior,
+        auto_threshold=0.97,
+        review_threshold=0.8,
+        backend=backend,
+        name_fields=_NAME_FIELDS,
+    )
+
+    assert not outcome.passed, "a named exact twin under the auto threshold passed the control"
+    assert "8/9 twin pairs auto-merged" in outcome.observed
+    assert "1 record with no value in `first_name` or `last_name` was excluded" in outcome.scope
+
+
+def test_whitespace_is_not_a_name_and_a_raw_only_record_is_read_from_raw() -> None:
+    blank = Record(
+        unique_id="a", source="s", raw={"first_name": "  "}, normalized={"last_name": " "}
+    )
+    raw_only = Record(unique_id="b", source="s", raw={"last_name": "Moody"})
+
+    assert not controls_module._has_a_name(blank, _NAME_FIELDS)
+    assert controls_module._has_a_name(raw_only, _NAME_FIELDS)
+
+
+def test_a_narrowed_control_with_nobody_named_left_does_not_pass(recipe: Recipe) -> None:
+    records = {"a": _person("a", "", ""), "b": _person("b", "", "")}
+
+    outcome = identity_control(
+        records,
+        recipe.fields,
+        prior=recipe.prior,
+        auto_threshold=0.97,
+        review_threshold=0.8,
+        backend=_TwinScoreBackend(low=set(), low_score=1.0),
+        name_fields=_NAME_FIELDS,
+    )
+
+    assert not outcome.passed
+    assert "not run" in outcome.observed
+    assert "0 of the 0 records with a name (2 in all)" in outcome.scope
+    assert "2 records with no value in `first_name` or `last_name` were excluded" in outcome.scope
+
+
+def test_run_controls_hands_the_name_fields_to_the_identity_control_only(
+    real_run: RunResult, recipe: Recipe, truth_clusters: list[list[str]]
+) -> None:
+    narrowed = run_controls(
+        real_run.records,
+        real_run.pairs,
+        truth_clusters,
+        recipe.fields,
+        prior=recipe.prior,
+        auto_threshold=recipe.auto_threshold,
+        review_threshold=recipe.review_threshold,
+        name_fields=_NAME_FIELDS,
+    )
+    plain = _controls(real_run, recipe, truth_clusters)
+
+    by_name = {outcome.name: outcome for outcome in narrowed.outcomes}
+    assert "records with a name" in by_name["identity"].scope
+    assert [o for o in narrowed.outcomes if o.name != "identity"] == [
+        o for o in plain.outcomes if o.name != "identity"
+    ]
 
 
 def test_the_null_control_uses_the_pipeline_s_own_banding(

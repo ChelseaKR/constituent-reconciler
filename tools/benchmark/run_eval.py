@@ -38,6 +38,12 @@ from tools.benchmark.febrl4 import SOURCES, UPSTREAM_COMMIT, _digest, fetch, pre
 #: entirely, so they are not reported as empty; they were never offered.
 BENCHMARK_FIELDS = ("first_name", "last_name", "dob", "address")
 
+#: The fields that make up a person's name in this corpus. The identity
+#: control leaves out a record with none of them populated and counts it
+#: (see ``controls.identity_control``): FEBRL carries such records, and a
+#: twin of one is not the easiest possible match.
+NAME_FIELDS = ("first_name", "last_name")
+
 
 def _population_rows(records: dict[str, Record]) -> list[tuple[str, int, int]]:
     """Per field: how many records carried a raw value, and how many normalized.
@@ -160,6 +166,7 @@ def run(
             auto_threshold=recipe.auto_threshold,
             review_threshold=recipe.review_threshold,
             seed=seed,
+            name_fields=NAME_FIELDS,
         )
 
     markdown = render_eval_markdown(

@@ -16,6 +16,8 @@ from pathlib import Path
 import pytest
 from tools.benchmark import febrl4, run_eval
 
+from constituent_reconciler.controls import ControlsReport, run_controls
+
 # FEBRL's header, split only so the source line stays within the line limit.
 HEADER = (
     "rec_id, given_name, surname, street_number, address_1, address_2, "
@@ -234,3 +236,24 @@ def test_run_eval_aborts_on_a_stale_ground_truth_file(
     monkeypatch.setattr(run_eval, "prepare", prepare_then_corrupt)
     with pytest.raises(SystemExit, match="ground-truth mismatch"):
         run_eval.run(out_dir, gate=1.0, offline=True, raw_dir=raw_dir)
+
+
+def test_run_eval_narrows_the_identity_control_to_records_with_a_name(
+    raw_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The FEBRL4 runner passes the name fields exactly as the dataset 1-3 runner does."""
+
+    _repin(monkeypatch, raw_dir)
+    seen: dict[str, object] = {}
+
+    def _spy(*args: object, **kwargs: object) -> ControlsReport:
+        seen.update(kwargs)
+        return run_controls(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(run_eval, "run_controls", _spy)
+    markdown, _report, _gate, _passed = run_eval.run(
+        tmp_path / "out", gate=1.0, offline=True, raw_dir=raw_dir, controls=True
+    )
+
+    assert seen.get("name_fields") == ("first_name", "last_name")
+    assert "records with a name" in markdown

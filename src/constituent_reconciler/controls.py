@@ -40,7 +40,12 @@ Three sabotages, and what each rules out:
     matcher to find them. Exact duplicates must auto-merge; anything less means
     the matcher cannot find the easiest possible case, and every other number in
     the report is being produced by something other than matching. Rules out:
-    a scorer that never fires.
+    a scorer that never fires. A caller may name the fields that make up a
+    person's name (``name_fields``); a record with none of them populated is
+    then left out of the sample and counted in the control's scope, because a
+    twin of a record that carries no name is not the easiest possible case.
+    The matcher is deliberately not retuned to make such a twin auto-merge:
+    sending a nameless match to review is the conservative outcome.
 
 Two deliberate limits, stated rather than hidden:
 
@@ -366,6 +371,54 @@ def null_matcher_control(
     return low_outcome, high_outcome
 
 
+def _has_a_name(record: Record, name_fields: tuple[str, ...]) -> bool:
+    """Whether any of ``name_fields`` carries a value the matcher would compare.
+
+    The normalized value is what the matcher scores, so it decides; the raw value
+    is the fallback for a record that was never normalized. Whitespace is not a
+    name.
+    """
+
+    for name in name_fields:
+        value = record.normalized.get(name, record.raw.get(name, ""))
+        if value.strip():
+            return True
+    return False
+
+
+def _identity_scope(
+    sampled: int,
+    population: int,
+    *,
+    seed: int,
+    sample_cap: int,
+    name_fields: tuple[str, ...],
+    nameless: int,
+) -> str:
+    """The identity control's scope line, with any excluded records counted."""
+
+    if not name_fields:
+        return (
+            f"{sampled} of {population} records, sampled under seed {seed} and "
+            f"capped at {sample_cap}"
+        )
+    named = population - nameless
+    listed = " or ".join(f"`{name}`" for name in name_fields)
+    excluded = (
+        "no record was excluded for having no name"
+        if nameless == 0
+        else (
+            f"{nameless} record{'' if nameless == 1 else 's'} with no value in {listed} "
+            f"{'was' if nameless == 1 else 'were'} excluded before sampling, because a "
+            "twin of a record that carries no name is not the easiest possible case"
+        )
+    )
+    return (
+        f"{sampled} of the {named} records with a name ({population} in all), sampled "
+        f"under seed {seed} and capped at {sample_cap}; {excluded}"
+    )
+
+
 def identity_control(
     records: Mapping[str, Record],
     fields: tuple[str, ...],
@@ -376,13 +429,37 @@ def identity_control(
     seed: int = DEFAULT_SEED,
     sample_cap: int = IDENTITY_SAMPLE_CAP,
     backend: matching.MatcherBackend | None = None,
+    name_fields: tuple[str, ...] = (),
 ) -> ControlOutcome:
-    """Give a seeded sample of records an exact twin and require the twins to merge."""
+    """Give a seeded sample of records an exact twin and require the twins to merge.
 
-    population = sorted(records)
+    ``name_fields`` narrows what the control samples, never what it demands of
+    what it sampled. When given, a record with none of those fields populated is
+    excluded before the sample is drawn and counted in the scope line, so the
+    control's verdict does not depend on whether the seed happened to draw one.
+    Every record that is sampled must still have its twin auto-merged: a named
+    exact twin that scores below the auto threshold fails the control exactly as
+    it did before the exclusion existed.
+    """
+
+    everyone = sorted(records)
+    population = (
+        [rid for rid in everyone if _has_a_name(records[rid], name_fields)]
+        if name_fields
+        else everyone
+    )
+    nameless = len(everyone) - len(population)
     rng = random.Random(seed)  # noqa: S311 - seeded for reproducibility, not secrecy
     size = min(sample_cap, len(population))
     sampled = sorted(rng.sample(population, size)) if size else []
+    scope = _identity_scope(
+        len(sampled),
+        len(everyone),
+        seed=seed,
+        sample_cap=sample_cap,
+        name_fields=name_fields,
+        nameless=nameless,
+    )
 
     doubled: list[Record] = []
     twin_pairs: set[frozenset[str]] = set()
@@ -400,7 +477,7 @@ def identity_control(
             expectation="every record's exact twin is auto-merged",
             observed="not run: fewer than one record to duplicate",
             passed=False,
-            scope=f"0 of {len(population)} records",
+            scope=scope if name_fields else f"0 of {len(everyone)} records",
         )
 
     engine = backend if backend is not None else matching.default_backend()
@@ -417,10 +494,7 @@ def identity_control(
         expectation="every exact twin pair is auto-merged: recall 1.0000",
         observed=f"recall {recall:.4f} ({found}/{len(twin_pairs)} twin pairs auto-merged)",
         passed=recall == 1.0,
-        scope=(
-            f"{len(sampled)} of {len(population)} records, sampled under seed {seed} and "
-            f"capped at {sample_cap}"
-        ),
+        scope=scope,
     )
 
 
@@ -436,8 +510,13 @@ def run_controls(
     seed: int = DEFAULT_SEED,
     sample_cap: int = IDENTITY_SAMPLE_CAP,
     backend: matching.MatcherBackend | None = None,
+    name_fields: tuple[str, ...] = (),
 ) -> ControlsReport:
-    """Run every control against one completed run and collect the outcomes."""
+    """Run every control against one completed run and collect the outcomes.
+
+    ``name_fields`` reaches only the identity control; see
+    :func:`identity_control`.
+    """
 
     clusters = [list(cluster) for cluster in truth_clusters]
     outcomes = [
@@ -460,6 +539,7 @@ def run_controls(
             seed=seed,
             sample_cap=sample_cap,
             backend=backend,
+            name_fields=name_fields,
         ),
     ]
     return ControlsReport(seed=seed, outcomes=tuple(outcomes))

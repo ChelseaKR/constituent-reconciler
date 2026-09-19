@@ -453,24 +453,31 @@ Stated so a partial control is not read as a whole one:
   gate and the controls verdict **separately**: folding a failed control into
   the gate's verdict would print "false-merge rate 0.00%, gate FAIL" and name
   the wrong thing.
-* **The `identity` control fails on FEBRL dataset2, and the failure is real.**
-  One of the 250 sampled records, `existing:rec-3688-org`, has both name fields
-  empty and carries only a date of birth and a street address. Given a
-  byte-identical twin, the pair scores **0.9604** — below the 0.97 auto
-  threshold — so it lands in review and the control's "every exact twin
-  auto-merges" expectation does not hold. Two records agreeing on every field
-  they populate, including an exact DOB and a full street address, are not
-  auto-merged because the two fields they *both* leave empty carry the model's
-  heaviest weights. Whether that is correct conservatism or a tuning defect is
-  an open question and is deliberately not settled here.
-* **That failure is also seed-dependent, which is a limit of the control
-  itself.** The identity control samples 250 records. Dataset2 contains exactly
-  **1** record with no name at all (of 5,000); dataset3 contains **6**;
-  dataset1 contains none. So dataset2 fails because its seeded sample happened
-  to draw its single nameless record, and dataset3 passes because its sample
-  happened to miss all six. A control whose colour depends on the draw is
-  measuring the sample as much as the matcher. The sample size and seed are
-  printed in every report's scope line so this is visible rather than implied.
+* **In the FEBRL runners the `identity` control leaves out records with no
+  name, and counts them.** A record with both `first_name` and `last_name`
+  empty is excluded before the sample is drawn, and every report's scope line
+  says how many were excluded (dataset1 0, dataset2 1, dataset3 6, dataset4 3).
+  The first one found, `existing:rec-3688-org`, carries only a date of birth
+  and a street address, and a byte-identical twin of it scores **0.9604**
+  against the 0.97 auto threshold, so it lands in review. The matcher was not
+  retuned to change that: sending a nameless match to a person is the
+  conservative outcome. The synthetic fixture eval does not narrow the control.
+* **A named exact twin below the auto threshold still fails the control,** and
+  that is pinned by a test. On the committed seed it does, on three of the
+  four corpora: dataset2 (`incoming:rec-120-dup-0`, surname and address only),
+  dataset3 (`incoming:rec-500-dup-2`, surname and address only) and dataset4
+  (`incoming:rec-1399-dup-0`, given name and address only, its date of birth
+  unparseable) each score between 0.958 and 0.960.
+* **The pattern is exact, measured by giving every record in each corpus a twin
+  rather than a sample of 250.** An exact twin fails to auto-merge if and only
+  if the record populates two of the four compared fields after normalization:
+  2 records in dataset1, 4 in dataset2, 12 in dataset3 and 25 in dataset4.
+  Every record populating three or four fields auto-merges with its twin. The
+  nameless records are a subset of that set (0, 1, 6 and 3), so excluding them
+  alone leaves 33 named two-field records whose twins go to review. Which
+  corpora the sampled control passes on therefore still depends on whether the
+  seed draws one of them. The sample size and seed are printed in every
+  report's scope line so this is visible rather than implied.
 * `shuffled-extraction-labels` holds the **predictions** fixed and swaps whole
   label sets between documents. It rules out truth that is not read at all; it
   does not rule out truth that is read and mis-normalized *within* a document,

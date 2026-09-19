@@ -22,7 +22,7 @@ import pytest
 from tools.benchmark import febrl_multi
 from tools.benchmark.febrl4 import UPSTREAM_COMMIT
 
-from constituent_reconciler.controls import ControlOutcome, ControlsReport
+from constituent_reconciler.controls import ControlOutcome, ControlsReport, run_controls
 from constituent_reconciler.decisions import band_pairs
 from constituent_reconciler.evaluate import evaluate
 from constituent_reconciler.models import Band
@@ -341,3 +341,29 @@ def test_the_runner_exits_nonzero_when_a_control_fails(
     assert febrl_multi.main(argv) == 0, "without --controls the run is unaffected"
     assert febrl_multi.main([*argv, "--controls"]) == 1
     assert "Controls gate: **FAIL**" in (tmp_path / "r.md").read_text(encoding="utf-8")
+
+
+def test_the_runner_narrows_the_identity_control_to_records_with_a_name(
+    raw_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FEBRL carries records with both name fields empty; the runner says which fields.
+
+    Without this wiring the exclusion in ``controls.identity_control`` would exist
+    and never be asked for, and the committed reports would not count what it
+    left out.
+    """
+
+    _repin(monkeypatch, raw_dir)
+    seen: dict[str, object] = {}
+
+    def _spy(*args: object, **kwargs: object) -> ControlsReport:
+        seen.update(kwargs)
+        return run_controls(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(febrl_multi, "run_controls", _spy)
+    markdown, _report, _gate, _passed = febrl_multi.run(
+        1, tmp_path / "out", gate=1.0, offline=True, raw_dir=raw_dir, controls=True
+    )
+
+    assert seen.get("name_fields") == ("first_name", "last_name")
+    assert "records with a name" in markdown

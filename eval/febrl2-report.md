@@ -56,7 +56,7 @@ What the controls did not cover, stated so a partial control is not read as a wh
 
 - `null-matcher (below review)`: re-scores the candidate pairs the real run produced; blocking is held fixed and is not what this control tests.
 - `null-matcher (at auto threshold)`: re-scores the candidate pairs the real run produced; blocking is held fixed and is not what this control tests.
-- `identity`: 250 of 5000 records, sampled under seed 20260906 and capped at 250.
+- `identity`: 250 of the 4999 records with a name (5000 in all), sampled under seed 20260906 and capped at 250; 1 record with no value in `first_name` or `last_name` was excluded before sampling, because a twin of a record that carries no name is not the easiest possible case.
 
 Controls gate: **FAIL**.
 
